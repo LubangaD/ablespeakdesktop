@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment files (contain API keys!)
+.env
+server/.env
+
+# Build outputs
+dashboard/dist/
+server/dist-electron/
+
+# Large binary files
+*.mp4
+*.msi
+
+# Generated/temporary
+*.log
+*.local
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

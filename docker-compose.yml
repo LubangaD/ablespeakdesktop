@@ -1,0 +1,20 @@
+services:
+  ablespeak:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ${VOQAL_HOME:-~/.voqal}:/voqal:ro
+      - ablespeak-data:/app/data
+    environment:
+      - VOQAL_WS_URL=ws://host.docker.internal:22171/integration/chrome
+      - VOQAL_HOME=/voqal
+      - DB_PATH=/app/data/ablespeak.db
+      - GATEWAY_PORT=3001
+      - NODE_ENV=production
+    restart: unless-stopped
+
+volumes:
+  ablespeak-data:

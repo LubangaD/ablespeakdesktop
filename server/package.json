@@ -1,0 +1,60 @@
+{
+  "name": "ablespeak-gateway",
+  "version": "1.0.0",
+  "description": "AbleSpeak — Accessible voice command center for hands-free computing",
+  "main": "electron-main.cjs",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "desktop": "electron electron-main.cjs",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.ablespeak.desktop",
+    "productName": "AbleSpeak",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "src/**/*",
+      "electron-main.cjs",
+      "data/**/*",
+      ".env",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dashboard/dist",
+        "to": "dashboard/dist"
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "../dashboard/public/ablespeak-icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {
+    "chokidar": "^4.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^8.0.0",
+    "sql.js": "^1.11.0",
+    "uuid": "^11.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1"
+  }
+}
