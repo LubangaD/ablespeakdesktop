@@ -10,11 +10,18 @@ server/.env
 dashboard/dist/
 server/dist-electron/
 
-# Large binary files
+# Large binary / media files
 *.mp4
 *.msi
 
-# Generated/temporary
+# Banner / marketing documents
+ablespeak_banner_v4.html
+ablespeak_banner_v4.jpg
+ablespeak_banner_v4.pdf
+banner.jpg
+banner_to_pdf.js
+
+# Generated / temporary
 *.log
 *.local
 *.db
