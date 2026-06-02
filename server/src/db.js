@@ -1,5 +1,5 @@
 import initSqlJs from 'sql.js';
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { dirname } from 'path';
 
 /**
@@ -34,16 +34,25 @@ export function getDb() {
   return db;
 }
 
+/**
+ * Atomic save: write to .tmp then rename to prevent corruption on crash (Fix #6).
+ */
 function saveToFile() {
   if (!db || !dbPath) return;
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  writeFileSync(dbPath, buffer);
+  try {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    const tmpPath = dbPath + '.tmp';
+    writeFileSync(tmpPath, buffer);
+    renameSync(tmpPath, dbPath);
+  } catch (err) {
+    console.error('[DB] Save error:', err.message);
+  }
 }
 
 function scheduleSave() {
   if (saveTimer) clearInterval(saveTimer);
-  saveTimer = setInterval(saveToFile, 5000); // auto-save every 5s
+  saveTimer = setInterval(saveToFile, 2000); // auto-save every 2s (reduced from 5s)
 }
 
 function migrate() {

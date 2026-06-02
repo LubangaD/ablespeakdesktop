@@ -2,321 +2,193 @@ import { useQuery } from '@tanstack/react-query';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { api } from '../lib/api';
 import { useState, useEffect } from 'react';
-import { Mic, Brain, MessageSquare, Volume2, Globe, AlertTriangle, XCircle, Activity, Zap, DollarSign, Monitor, Cpu } from 'lucide-react';
+import { Mic, Brain, MessageSquare, Volume2, Globe, AlertTriangle, XCircle, Activity, Zap, Monitor, Cpu, Keyboard, CheckCircle2, WifiOff, Wifi, ChevronRight } from 'lucide-react';
 
 export default function Dashboard() {
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: api.getHealth });
   const { data: stats } = useQuery({ queryKey: ['commandStats'], queryFn: api.getCommandStats });
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus });
-  const { data: library } = useQuery({ queryKey: ['library'], queryFn: api.getLibrary, staleTime: 30000 });
-  const { data: systemInfo } = useQuery({ queryKey: ['system'], queryFn: api.getSystem, refetchInterval: 5000 });
+  const { data: aiStatus } = useQuery({ queryKey: ['aiStatus'], queryFn: api.getAiStatus, staleTime: 10000 });
+  const { data: systemInfo } = useQuery({ queryKey: ['system'], queryFn: api.getSystem, refetchInterval: 15000 });
   const { connected: wsConnected, lastMessage } = useWebSocket();
   const [activity, setActivity] = useState([]);
 
   useEffect(() => {
     if (!lastMessage) return;
-    if (['command_dispatch', 'command_complete', 'prompt_switch', 'log_event'].includes(lastMessage.type)) {
-      setActivity(prev => [{ ...lastMessage, id: Date.now() }, ...prev].slice(0, 50));
+    if (['command_dispatch', 'command_complete', 'prompt_switch', 'log_event', 'chat_assistant_message', 'voice_transcription'].includes(lastMessage.type)) {
+      setActivity(prev => [{ ...lastMessage, id: Date.now() }, ...prev].slice(0, 30));
     }
   }, [lastMessage]);
 
-  const alerts = health?.alertDetails || [];
-  const voqalOk = status?.voqalConnected;
+  // Filter out provider alerts — only show actionable ones
+  const rawAlerts = health?.alertDetails || [];
+  const alerts = rawAlerts.filter(a =>
+    !a.component?.startsWith('provider_') && a.component !== 'llm'
+  );
+
   const extOk = (status?.extensionClients || 0) > 0;
-
-  // Build integrations list from status
-  const integrations = [
-    { name: 'Chrome', available: extOk },
-    { name: 'Chromium Embedded', available: voqalOk },
-    { name: 'Gmail API', available: false },
-    { name: 'Visual Studio Code', available: false },
-  ];
-
-  // Build prompts list from library categories
-  const promptNames = (library?.categories || [])
-    .filter(c => c.prompts && c.prompts.length > 0)
-    .map(c => ({
-      name: c.name,
-      active: status?.activePrompt === c.name,
-      ready: true
-    }));
-
-  // Build tools list from library
-  const allTools = [];
-  (library?.categories || []).forEach(cat => {
-    cat.tools.forEach(tool => {
-      allTools.push({
-        name: tool.name,
-        category: cat.name,
-        available: isToolAvailable(cat.name, voqalOk, extOk)
-      });
-    });
-  });
+  const commandsToday = stats?.today || 0;
+  const avgLatency = stats?.avgLatency || 0;
 
   return (
-    <div>
-      {/* Top Stats Bar — Mirrors Voqal's latency/cost header */}
-      <section aria-label="Pipeline metrics" style={{ marginBottom: 24 }}>
-        <div className="grid grid-3">
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px' }}>
-            <Mic size={20} style={{ color: voqalOk ? 'var(--success)' : 'var(--error)' }} aria-hidden="true" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>Microphone</div>
-              <div style={{ fontSize: 13, color: voqalOk ? 'var(--success)' : 'var(--text-muted)' }}>
-                {voqalOk ? 'Active' : 'Disabled'}
-              </div>
-            </div>
+    <div className="ds-home">
+      {/* ── Hero Greeting ── */}
+      <section className="ds-hero">
+        <div className="ds-hero-text">
+          <h2 className="ds-greeting">AbleSpeak</h2>
+          <p className="ds-greeting-sub">
+            Voice-powered computer navigation. Press <kbd className="ds-kbd">Ctrl + Shift + A</kbd> from anywhere to start.
+          </p>
+        </div>
+        <div className="ds-hero-stats">
+          <div className="ds-stat-pill">
+            <span className="ds-stat-value">{commandsToday}</span>
+            <span className="ds-stat-label">commands today</span>
           </div>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px' }}>
-            <Activity size={20} style={{ color: 'var(--accent)' }} aria-hidden="true" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>Latency</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                STT: {stats?.avgLatency || 'n/a'} · TTS: n/a · LLM: n/a
-              </div>
-            </div>
-          </div>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px' }}>
-            <DollarSign size={20} style={{ color: 'var(--warning)' }} aria-hidden="true" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>Cost</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>STT: 0.00¢ · TTS: 0.00¢ · LLM: 0.00¢</div>
-            </div>
+          <div className="ds-stat-pill">
+            <span className="ds-stat-value">{avgLatency ? `${avgLatency}ms` : '—'}</span>
+            <span className="ds-stat-label">avg latency</span>
           </div>
         </div>
       </section>
 
-      {/* Integrations + Prompts — Mirrors Voqal home */}
-      <div className="grid grid-2" style={{ marginBottom: 24 }}>
-        {/* Voqal Integrations */}
-        <section aria-label="AbleSpeak Integrations" className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Globe size={18} aria-hidden="true" />
-            AbleSpeak Integrations
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {integrations.map(intg => (
-              <div
-                key={intg.name}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '14px 16px', minHeight: 'var(--touch-min)',
-                  background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${intg.available ? 'var(--success)' : 'var(--border)'}`,
-                }}
-                role="status"
-                aria-label={`${intg.name}: ${intg.available ? 'Available' : 'Unavailable'}`}
-              >
-                <div className={`pipeline-dot ${intg.available ? 'ok' : 'error'}`} aria-hidden="true" />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{intg.name}</div>
-                  <div style={{ fontSize: 12, color: intg.available ? 'var(--success)' : 'var(--error)' }}>
-                    {intg.available ? 'Available' : 'Unavailable'}
+      {/* ── Status Cards ── */}
+      <section className="ds-status-grid" aria-label="System status">
+        <StatusCard
+          icon={<Mic size={20} />}
+          label="Microphone"
+          value="Ready"
+          ok={true}
+          detail="Ctrl+Shift+A to activate"
+        />
+        <StatusCard
+          icon={<Brain size={20} />}
+          label="AI Engine"
+          value={aiStatus?.model || 'Loading...'}
+          ok={!!aiStatus?.provider}
+          detail={aiStatus?.provider ? `Provider: ${aiStatus.provider}` : 'Connecting...'}
+        />
+        <StatusCard
+          icon={extOk ? <Wifi size={20} /> : <WifiOff size={20} />}
+          label="Browser"
+          value={extOk ? 'Connected' : 'Disconnected'}
+          ok={extOk}
+          detail={extOk ? `${status?.extensionClients || 1} extension${(status?.extensionClients || 1) > 1 ? 's' : ''}` : 'Install Chrome extension'}
+        />
+        <StatusCard
+          icon={<Keyboard size={20} />}
+          label="Overlay"
+          value="Active"
+          ok={true}
+          detail="Ctrl+Shift+A"
+        />
+      </section>
+
+      {/* ── Alerts (only actionable, no provider spam) ── */}
+      {alerts.length > 0 && (
+        <section className="ds-alerts" aria-label="Alerts" aria-live="polite">
+          {alerts.map((a, i) => (
+            <div key={i} className={`ds-alert ${a.status}`}>
+              {a.status === 'error' ? <XCircle size={16} /> : <AlertTriangle size={16} />}
+              <span className="ds-alert-component">{a.component}</span>
+              <span className="ds-alert-message">{a.message}</span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* ── Two-column: Visible Apps + Recent Activity ── */}
+      <div className="ds-columns">
+        {/* Visible Applications */}
+        <section className="ds-panel" aria-label="Visible Applications">
+          <div className="ds-panel-header">
+            <Monitor size={16} aria-hidden="true" />
+            <h3>Visible Applications</h3>
+            <span className="ds-panel-count">{systemInfo?.visibleApplications?.length || 0}</span>
+          </div>
+          <div className="ds-app-list">
+            {(systemInfo?.visibleApplications || []).slice(0, 12).map(app => (
+              <div key={app.id} className={`ds-app-item ${app.foreground ? 'foreground' : ''}`}>
+                <div className="ds-app-dot" />
+                <div className="ds-app-info">
+                  <div className="ds-app-name">{app.title || app.processName}</div>
+                  <div className="ds-app-process">{app.processName}</div>
+                </div>
+                {app.foreground && <span className="ds-app-badge">Active</span>}
+              </div>
+            ))}
+            {(!systemInfo?.visibleApplications || systemInfo.visibleApplications.length === 0) && (
+              <div className="ds-empty">Scanning applications...</div>
+            )}
+          </div>
+        </section>
+
+        {/* Recent Activity */}
+        <section className="ds-panel" aria-label="Recent Activity">
+          <div className="ds-panel-header">
+            <Activity size={16} aria-hidden="true" />
+            <h3>Recent Activity</h3>
+          </div>
+          <div className="ds-activity-list">
+            {activity.length === 0 && (
+              <div className="ds-empty">
+                <Mic size={24} style={{ opacity: 0.3, marginBottom: 8 }} />
+                <div>Waiting for voice commands...</div>
+                <div style={{ fontSize: 12, marginTop: 4, opacity: 0.5 }}>Press Ctrl+Shift+A to speak</div>
+              </div>
+            )}
+            {activity.map((item) => (
+              <div key={item.id} className="ds-activity-item">
+                <div className="ds-activity-dot" data-type={item.type} />
+                <div className="ds-activity-body">
+                  <div className="ds-activity-text">{formatActivity(item)}</div>
+                  <div className="ds-activity-time">
+                    {item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                   </div>
                 </div>
               </div>
             ))}
           </div>
         </section>
-
-        {/* Voqal Prompts */}
-        <section aria-label="AbleSpeak Prompts" className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <MessageSquare size={18} aria-hidden="true" />
-            AbleSpeak Prompts
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {promptNames.length === 0 && (
-              <div style={{ color: 'var(--text-muted)', padding: 12 }}>Loading prompts...</div>
-            )}
-            {promptNames.map(p => (
-              <div
-                key={p.name}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '12px 16px', minHeight: 48,
-                  background: p.active ? 'rgba(67,97,238,0.1)' : 'var(--bg-tertiary)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${p.active ? 'var(--accent)' : 'var(--border)'}`,
-                }}
-                role="status"
-                aria-label={`${p.name} prompt: ${p.active ? 'Active' : 'Ready'}`}
-              >
-                <div className={`pipeline-dot ${p.active ? 'ok' : ''}`}
-                  style={!p.active ? { background: 'var(--text-muted)', boxShadow: 'none' } : {}}
-                  aria-hidden="true"
-                />
-                <span style={{ fontWeight: 500, textTransform: 'capitalize', flex: 1 }}>{p.name}</span>
-                <span className={`badge ${p.active ? 'badge-success' : 'badge-info'}`}>
-                  {p.active ? 'Active' : 'Ready'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
       </div>
 
-      {/* Computer Info + Visible Applications */}
-      <div className="grid grid-2" style={{ marginBottom: 24 }}>
-        {/* Computer Info */}
-        <section aria-label="Computer Info" className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Cpu size={18} aria-hidden="true" />
-            Computer Info
-          </h3>
-          {systemInfo?.computerInfo ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                ['Current Time', systemInfo.computerInfo.currentTime],
-                ['OS', systemInfo.computerInfo.osName],
-                ['Version', systemInfo.computerInfo.osVersion],
-                ['Architecture', systemInfo.computerInfo.osArch],
-                ['Hostname', systemInfo.computerInfo.hostname],
-                ['Uptime', systemInfo.computerInfo.uptime],
-              ].map(([label, value]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', fontSize: 14 }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-                  <span style={{ fontWeight: 500 }}>{value}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ color: 'var(--text-muted)', padding: 12 }}>Loading system info...</div>
-          )}
-        </section>
-
-        {/* Visible Applications */}
-        <section aria-label="Visible Applications" className="card" style={{ maxHeight: 400, overflow: 'auto' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Monitor size={18} aria-hidden="true" />
-            Visible Applications ({systemInfo?.visibleApplications?.length || 0})
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {(systemInfo?.visibleApplications || []).map(app => (
-              <div
-                key={app.id}
-                style={{
-                  padding: '10px 14px',
-                  background: app.foreground ? 'rgba(67,97,238,0.1)' : 'var(--bg-tertiary)',
-                  border: app.foreground ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2, lineHeight: 1.3 }}>
-                  {app.foreground && <span style={{ color: 'var(--accent)', marginRight: 6 }}>▶</span>}
-                  {app.title}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', gap: 16 }}>
-                  <span>ID: {app.id}</span>
-                  <span>Process: {app.processName}</span>
-                  {app.foreground && <span style={{ color: 'var(--accent)' }}>Foreground</span>}
-                </div>
-              </div>
-            ))}
-            {(!systemInfo?.visibleApplications || systemInfo.visibleApplications.length === 0) && (
-              <div style={{ color: 'var(--text-muted)', padding: 12 }}>Scanning applications...</div>
-            )}
-          </div>
-        </section>
-      </div>
-
-      {/* Health Alerts */}
-      {alerts.length > 0 && (
-        <section aria-label="Health alerts" aria-live="polite" style={{ marginBottom: 24 }}>
-          <h3 style={{ fontSize: '1rem', color: 'var(--warning)', marginBottom: 12, fontWeight: 600 }}>
-            <AlertTriangle size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            HEALTH ALERTS ({alerts.length})
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {alerts.map((a, i) => (
-              <div key={i} className={`health-alert ${a.status}`}>
-                {a.status === 'error' ? <XCircle size={20} /> : <AlertTriangle size={20} />}
-                <div>
-                  <div style={{ fontWeight: 600 }}>{a.component}</div>
-                  <div style={{ color: 'var(--text-secondary)' }}>{a.message}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* ── System Info (compact) ── */}
+      {systemInfo?.computerInfo && (
+        <section className="ds-sysinfo" aria-label="System Information">
+          <Cpu size={14} style={{ opacity: 0.4 }} />
+          <span>{systemInfo.computerInfo.osName}</span>
+          <span className="ds-sysinfo-sep">·</span>
+          <span>{systemInfo.computerInfo.hostname}</span>
+          <span className="ds-sysinfo-sep">·</span>
+          <span>{systemInfo.computerInfo.osArch}</span>
+          <span className="ds-sysinfo-sep">·</span>
+          <span>Uptime: {systemInfo.computerInfo.uptime}</span>
         </section>
       )}
-
-      {/* Voqal Tools Grid — Mirrors Voqal home screen */}
-      <section aria-label="AbleSpeak Tools" style={{ marginBottom: 24 }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Zap size={18} aria-hidden="true" />
-          AbleSpeak Tools
-        </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 16 }}>
-          The functionality AbleSpeak can use to perform tasks.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
-          {allTools.map(tool => (
-            <div
-              key={`${tool.category}-${tool.name}`}
-              style={{
-                padding: '14px 16px',
-                background: 'var(--bg-secondary)',
-                border: `1px solid ${tool.available ? 'var(--border)' : 'rgba(239,71,111,0.2)'}`,
-                borderRadius: 'var(--radius-sm)',
-                minHeight: 60,
-              }}
-              role="status"
-              aria-label={`${tool.name}: ${tool.available ? 'Available' : 'Unavailable'}`}
-            >
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-                {tool.name.replace(/_/g, ' ')}
-              </div>
-              <div style={{ fontSize: 12, color: tool.available ? 'var(--success)' : 'var(--error)' }}>
-                {tool.available ? 'Available' : 'Unavailable'}
-              </div>
-            </div>
-          ))}
-          {allTools.length === 0 && (
-            <div style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>
-              Loading tools from AbleSpeak library...
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Recent Activity */}
-      <section aria-label="Recent activity" className="card">
-        <h3 style={{ marginBottom: 16, fontSize: '1rem', fontWeight: 600 }}>RECENT ACTIVITY</h3>
-        <div className="activity-feed" aria-live="polite">
-          {activity.length === 0 && <div style={{ color: 'var(--text-muted)', padding: 16 }}>Waiting for voice commands...</div>}
-          {activity.map((item) => (
-            <div key={item.id} className="activity-item">
-              <span className="activity-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
-              <span className={`badge badge-${item.type === 'command_complete' ? 'success' : 'info'}`}>
-                {item.commandType || item.type}
-              </span>
-              <span className="activity-text">{formatActivity(item)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
 
-function isToolAvailable(category, voqalOk, extOk) {
-  // Mirror Voqal's selector-based availability
-  const alwaysAvailable = ['voqal', 'computer'];
-  const needsChrome = ['chrome', 'gmail', 'youtube', 'amazon'];
-  const needsVscode = ['vscode'];
-  const needsNotepad = ['notepad'];
-
-  if (alwaysAvailable.includes(category)) return voqalOk;
-  if (needsChrome.includes(category)) return extOk;
-  if (needsVscode.includes(category)) return false; // VS Code integration not connected
-  if (needsNotepad.includes(category)) return false;
-  return false;
+// ── Status Card Component ──
+function StatusCard({ icon, label, value, ok, detail }) {
+  return (
+    <div className={`ds-status-card ${ok ? 'ok' : 'offline'}`}>
+      <div className="ds-status-icon">{icon}</div>
+      <div className="ds-status-body">
+        <div className="ds-status-label">{label}</div>
+        <div className="ds-status-value">{value}</div>
+        <div className="ds-status-detail">{detail}</div>
+      </div>
+      <div className={`ds-status-indicator ${ok ? 'ok' : 'offline'}`} />
+    </div>
+  );
 }
 
 function formatActivity(item) {
-  if (item.type === 'command_complete') return `✅ ${item.latency_ms}ms`;
-  if (item.type === 'prompt_switch') return `→ ${item.prompt}`;
-  if (item.type === 'log_event' && item.event) return item.event.message?.slice(0, 60);
-  return '';
+  if (item.type === 'voice_transcription') return `🎤 "${item.text}"`;
+  if (item.type === 'chat_assistant_message') return `🤖 ${(item.text || '').slice(0, 80)}${(item.text || '').length > 80 ? '...' : ''}`;
+  if (item.type === 'command_complete') return `✅ Command completed (${item.latency_ms}ms)`;
+  if (item.type === 'prompt_switch') return `📝 Prompt → ${item.prompt}`;
+  if (item.type === 'log_event' && item.event) return `📋 ${item.event.message?.slice(0, 60)}`;
+  return item.type;
 }

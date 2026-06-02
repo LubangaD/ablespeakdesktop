@@ -7,6 +7,8 @@ import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
+import { getFullSystemContext } from './system-info.js';
+import { VoiceHandler } from './voice-handler.js';
 
 import { initDatabase } from './db.js';
 import { AIEngine } from './ai-engine.js';
@@ -41,7 +43,7 @@ console.log('[DB] SQLite initialized');
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Large enough for long voice recordings
 app.use(rateLimit({ windowMs: 60000, max: 300 }));
 
 // ── HTTP Server (shared with WebSocket) ──
@@ -63,22 +65,22 @@ console.log('[WsHub] Initialized (standalone mode)');
 const _origLog = console.log.bind(console);
 const _origWarn = console.warn.bind(console);
 const _origError = console.error.bind(console);
+let _broadcasting = false; // Re-entrancy guard (perf fix #4)
 
 function broadcastLog(level, args) {
+  if (_broadcasting) return; // Prevent infinite loop: broadcast → log → broadcast
   const message = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
   // Skip CLIXML noise from PowerShell
   if (message.includes('CLIXML') || message.includes('Preparing modules')) return;
+  _broadcasting = true;
   try {
     wsProxy._broadcastDashboard({
       type: 'log_event',
-      event: {
-        level,
-        message,
-        timestamp: new Date().toLocaleTimeString(),
-      },
+      event: { level, message, timestamp: new Date().toLocaleTimeString() },
       timestamp: new Date().toISOString()
     });
   } catch {}
+  _broadcasting = false;
 }
 
 console.log = (...args) => { _origLog(...args); broadcastLog('INFO', args); };
@@ -130,16 +132,42 @@ app.post('/api/ai/switch', (req, res) => {
 // GET /api/system — computer info + visible applications
 app.get('/api/system', async (req, res) => {
   try {
-    const { getFullSystemContext } = await import('./system-info.js');
-    res.json(getFullSystemContext());
+    res.json(getFullSystemContext()); // Uses static import (perf fix #5)
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/ai/chat — REST fallback for chat
+// POST /api/ai/chat — REST fallback for chat (also used by overlay)
 app.post('/api/ai/chat', async (req, res) => {
-  const { getFullSystemContext } = await import('./system-info.js');
+  const userText = req.body.text;
+
+  // ── Fast-path: match common commands instantly ──
+  const { matchFastCommand, isBrowserTool } = await import('./fast-commands.js');
+  const fastMatch = matchFastCommand(userText);
+
+  if (fastMatch) {
+    const startTime = Date.now();
+    console.log(`[Chat] ⚡ Fast: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
+    const toolResult = await toolRegistry.executeTool(fastMatch.tool, fastMatch.args, wsProxy);
+    const latency = Date.now() - startTime;
+
+    // Auto-focus browser
+    if (isBrowserTool(fastMatch.tool)) {
+      wsProxy._autoFocusBrowser();
+    }
+
+    return res.json({
+      text: fastMatch.silent ? '' : (toolResult?.message || ''),
+      toolCalls: [{ tool: fastMatch.tool, result: toolResult }],
+      latency,
+      provider: 'fast',
+      model: 'pattern-match',
+      silent: fastMatch.silent,
+    });
+  }
+
+  // ── Full AI path ──
   const systemContext = getFullSystemContext();
   const context = {
     tabs: wsProxy.browserContext?.tabs || [],
@@ -150,7 +178,14 @@ app.post('/api/ai/chat', async (req, res) => {
     computerInfo: systemContext.computerInfo,
     visibleApplications: systemContext.visibleApplications,
   };
-  const result = await aiEngine.processChat(req.body.text, context);
+  const result = await aiEngine.processChat(userText, context);
+
+  // Auto-focus browser if AI used browser tools
+  if (result.toolCalls && Array.isArray(result.toolCalls)) {
+    const usedBrowser = result.toolCalls.some(tc => isBrowserTool(tc.tool || tc.name));
+    if (usedBrowser) wsProxy._autoFocusBrowser();
+  }
+
   res.json(result);
 });
 
@@ -158,6 +193,22 @@ app.post('/api/ai/chat', async (req, res) => {
 app.post('/api/ai/clear', (req, res) => {
   aiEngine.clearHistory();
   res.json({ status: 'ok', message: 'Conversation history cleared' });
+});
+
+// POST /api/voice/transcribe — Transcribe audio (used by floating overlay)
+const _voiceHandler = new VoiceHandler(); // Singleton (perf fix #1)
+app.post('/api/voice/transcribe', async (req, res) => {
+  try {
+    const { audio, mimeType } = req.body;
+    if (!audio) {
+      return res.status(400).json({ text: '', error: 'No audio data provided' });
+    }
+    const result = await _voiceHandler.transcribe(audio, mimeType || 'audio/webm');
+    res.json(result);
+  } catch (err) {
+    console.error('[VoiceAPI] Transcription error:', err.message);
+    res.status(500).json({ text: '', error: err.message });
+  }
 });
 
 // ── Serve Dashboard SPA ──

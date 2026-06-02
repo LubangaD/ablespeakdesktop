@@ -36,4 +36,5 @@ export const api = {
     body: JSON.stringify({ target, data })
   }),
   getSystem: () => fetchApi('/system'),
+  getAiStatus: () => fetchApi('/ai/status'),
 };

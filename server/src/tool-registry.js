@@ -578,6 +578,11 @@ const TOOLS = [
     },
     selector: {},
     execute: async (args) => {
+      // SAFETY: Never close browsers — use close_tab instead
+      const browserNames = ['chrome', 'brave', 'edge', 'firefox', 'safari', 'opera'];
+      if (browserNames.some(b => args.app_name.toLowerCase().includes(b))) {
+        return { status: 'error', message: `Cannot close browser "${args.app_name}" — use close_tab to close individual tabs.` };
+      }
       const { closeApplication } = await import('./system-tools.js');
       return closeApplication(args.app_name);
     },

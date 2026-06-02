@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { insertCommand, upsertHealthCheck } from './db.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
+import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
 
 /**
  * AbleSpeak WebSocket Hub
@@ -23,6 +24,7 @@ export class WsProxy {
     this.activePrompt = 'ablespeak';
     this.lastContextUpdate = null;
     this.browserContext = { tabs: [], activeTab: null };
+    this._voiceProcessing = false; // Mutex: prevents concurrent voice command processing
 
     // Extension-facing WS server
     this.extensionWss = new WebSocketServer({ noServer: true });
@@ -48,6 +50,24 @@ export class WsProxy {
         socket.destroy();
       }
     });
+
+    // Heartbeat: detect and prune dead WebSocket connections (Fix #4)
+    this._heartbeatInterval = setInterval(() => {
+      const prune = (clients, label) => {
+        for (const ws of clients) {
+          if (ws._isAlive === false) {
+            console.log(`[WsHub] Pruning dead ${label} client`);
+            ws.terminate();
+            clients.delete(ws);
+            continue;
+          }
+          ws._isAlive = false;
+          try { ws.ping(); } catch { clients.delete(ws); }
+        }
+      };
+      prune(this.extensionClients, 'extension');
+      prune(this.dashboardClients, 'dashboard');
+    }, 30000);
   }
 
   // ── Extension Client Handling ──
@@ -55,6 +75,8 @@ export class WsProxy {
   _handleExtensionConnect(ws) {
     console.log('[WsHub] Extension client connected');
     this.extensionClients.add(ws);
+    ws._isAlive = true;
+    ws.on('pong', () => { ws._isAlive = true; });
     upsertHealthCheck({ component: 'chrome_ext', status: 'ok', message: 'Chrome extension connected' });
     this._broadcastDashboard({ type: 'extension_status', connected: true, count: this.extensionClients.size });
 
@@ -116,6 +138,8 @@ export class WsProxy {
   _handleDashboardConnect(ws) {
     console.log('[WsHub] Dashboard client connected');
     this.dashboardClients.add(ws);
+    ws._isAlive = true;
+    ws.on('pong', () => { ws._isAlive = true; });
 
     // Send current status on connect
     ws.send(JSON.stringify({
@@ -179,8 +203,20 @@ export class WsProxy {
           });
         }
 
-        // ── Voice Audio → Transcribe → AI Pipeline ──
+        // ── Voice Audio → Transcribe → Fast Route OR AI Pipeline ──
         if (msg.type === 'voice_audio' && msg.audio) {
+          // Mutex: prevent concurrent voice commands (Fix #5)
+          if (this._voiceProcessing) {
+            ws.send(JSON.stringify({
+              type: 'voice_busy',
+              message: 'Still processing previous command',
+              timestamp: new Date().toISOString()
+            }));
+            return;
+          }
+          this._voiceProcessing = true;
+
+          try {
           const startTime = Date.now();
           console.log(`[Voice] Received audio (${Math.round(msg.audio.length / 1024)}KB)`);
 
@@ -204,10 +240,61 @@ export class WsProxy {
             timestamp: new Date().toISOString()
           });
 
-          // Feed into AI pipeline (reuse chat_command logic)
           const commandId = uuidv4();
           console.log(`[Voice] Command: "${text}"`);
 
+          // ────────────────────────────────────────────
+          // FAST PATH: Match common commands instantly
+          // ────────────────────────────────────────────
+          const fastMatch = matchFastCommand(text);
+
+          if (fastMatch) {
+            console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
+            const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
+            const latency = Date.now() - startTime;
+
+            // Auto-focus browser for browser commands
+            if (isBrowserTool(fastMatch.tool)) {
+              this._autoFocusBrowser();
+            }
+
+            // Persist to DB
+            try {
+              insertCommand({
+                id: commandId,
+                type: 'voice_fast',
+                direction: 'user_to_ai',
+                payload: JSON.stringify({ text, fastTool: fastMatch.tool }),
+                result: JSON.stringify(toolResult),
+                latency_ms: latency,
+              });
+            } catch (err) {
+              console.error('[WsHub] DB insert error:', err.message);
+            }
+
+            // Send response — silent tools get empty text (no TTS)
+            const responseText = fastMatch.silent ? '' : (toolResult?.message || `Done: ${fastMatch.tool}`);
+            this._broadcastDashboard({
+              type: 'chat_assistant_message',
+              id: commandId,
+              text: responseText,
+              error: false,
+              toolCalls: [{ tool: fastMatch.tool, result: toolResult }],
+              provider: 'fast',
+              model: 'pattern-match',
+              latency,
+              source: 'voice',
+              silent: fastMatch.silent,
+              timestamp: new Date().toISOString()
+            });
+
+            console.log(`[Voice] ⚡ Fast executed in ${latency}ms (silent: ${fastMatch.silent})`);
+            return;
+          }
+
+          // ────────────────────────────────────────────
+          // FULL AI PATH: Complex commands go to LLM
+          // ────────────────────────────────────────────
           const systemContext = getFullSystemContext();
           const context = {
             tabs: this.browserContext.tabs || [],
@@ -220,6 +307,20 @@ export class WsProxy {
           };
 
           const result = await this.aiEngine.processChat(text, context);
+
+          // Auto-focus browser if AI used browser tools
+          if (result.toolCalls && Array.isArray(result.toolCalls)) {
+            const usedBrowserTool = result.toolCalls.some(tc => isBrowserTool(tc.tool || tc.name));
+            if (usedBrowserTool) {
+              this._autoFocusBrowser();
+            }
+          }
+
+          // Determine if the response should be silent
+          let silent = false;
+          if (result.toolCalls && Array.isArray(result.toolCalls) && !result.text?.trim()) {
+            silent = result.toolCalls.every(tc => isSilentTool(tc.tool || tc.name));
+          }
 
           try {
             insertCommand({
@@ -244,8 +345,12 @@ export class WsProxy {
             model: result.model,
             latency: result.latency,
             source: 'voice',
+            silent,
             timestamp: new Date().toISOString()
           });
+          } finally {
+            this._voiceProcessing = false;
+          }
         }
 
         // ── Switch LLM Provider ──
@@ -284,6 +389,38 @@ export class WsProxy {
     ws.on('error', (err) => {
       console.error('[WsHub] Dashboard client error:', err.message);
     });
+  }
+
+  // ── Auto-focus browser window after browser commands ──
+  async _autoFocusBrowser() {
+    try {
+      const { focusApplication } = await import('./system-tools.js');
+      
+      // Try to detect which browser the extension is connected to
+      const activeTab = this.browserContext?.activeTab;
+      let browserName = null;
+
+      // Check if we know the browser from extension user agent or tab info
+      if (activeTab?.browserName) {
+        browserName = activeTab.browserName;
+      }
+
+      // Try detected browser first, then common browsers
+      const browsers = browserName 
+        ? [browserName, 'Brave', 'Chrome', 'Edge']
+        : ['Brave', 'Chrome', 'Edge'];
+
+      for (const browser of browsers) {
+        try {
+          await focusApplication(browser);
+          return; // Success — stop trying
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // Silently fail — don't block the voice pipeline
+    }
   }
 
   // ── Tool Execution → Extension ──
@@ -383,5 +520,17 @@ export class WsProxy {
       }
     });
     return sent;
+  }
+
+  // ── Cleanup (perf fix #8) ──
+  destroy() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
+    }
+    this.extensionClients.forEach(ws => ws.terminate());
+    this.dashboardClients.forEach(ws => ws.terminate());
+    this.extensionClients.clear();
+    this.dashboardClients.clear();
   }
 }

@@ -3,12 +3,22 @@
  * 
  * Enumerates visible desktop applications, OS info, and foreground window.
  * Gives the AI "eyes" on the whole desktop.
+ * 
+ * Performance: Uses async exec with 2s result caching to avoid
+ * blocking the event loop with synchronous PowerShell calls.
  */
 
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import os from 'os';
 
-// ── OS Info ──
+const execAsync = promisify(exec);
+
+// ── Result Cache (perf fix #2) ──
+let _appCache = { data: [], ts: 0 };
+const CACHE_TTL = 2000; // 2 seconds — apps don't change faster than this
+
+// ── OS Info (cheap, no caching needed) ──
 export function getComputerInfo() {
   return {
     currentTime: new Date().toLocaleString(),
@@ -22,21 +32,33 @@ export function getComputerInfo() {
 
 // ── Visible Applications (Windows) ──
 export function getVisibleApplications() {
+  // Return cached result if fresh
+  if (Date.now() - _appCache.ts < CACHE_TTL) {
+    return _appCache.data;
+  }
+
   try {
     if (process.platform === 'win32') {
-      return getWindowsApplications();
+      // Kick off async refresh but return stale cache for now
+      _refreshWindowsApps();
+      return _appCache.data;
     }
     return [];
   } catch (err) {
     console.error('[SystemInfo] Error enumerating applications:', err.message);
-    return [];
+    return _appCache.data; // Return stale cache on error
   }
 }
 
-function getWindowsApplications() {
-  // Single PowerShell call: get all visible-window processes AND the foreground PID
-  // Using -EncodedCommand to avoid all quoting issues
-  const ps = `
+// Async refresh — doesn't block event loop
+let _refreshInFlight = false;
+
+async function _refreshWindowsApps() {
+  if (_refreshInFlight) return; // Deduplicate concurrent refreshes
+  _refreshInFlight = true;
+
+  try {
+    const ps = `
 $fgHwnd = $null
 $fgPid = 0
 try {
@@ -57,37 +79,52 @@ $apps = Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Objec
 @{ ForegroundPid=$fgPid; Apps=$apps } | ConvertTo-Json -Compress -Depth 3
 `.trim();
 
-  const encoded = Buffer.from(ps, 'utf16le').toString('base64');
+    const encoded = Buffer.from(ps, 'utf16le').toString('base64');
 
-  const raw = execSync(`powershell -NoProfile -EncodedCommand ${encoded}`, {
-    encoding: 'utf8',
-    timeout: 8000,
-    windowsHide: true,
-  }).trim();
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+      { timeout: 8000, windowsHide: true }
+    );
 
-  if (!raw) return [];
+    const raw = stdout.trim();
+    if (!raw) return;
 
-  // Find the JSON object in the output (skip any CLIXML progress messages)
-  const jsonStart = raw.indexOf('{');
-  if (jsonStart === -1) return [];
-  const jsonStr = raw.slice(jsonStart);
+    const jsonStart = raw.indexOf('{');
+    if (jsonStart === -1) return;
+    const jsonStr = raw.slice(jsonStart);
 
-  let data;
-  try {
-    data = JSON.parse(jsonStr);
-  } catch {
-    return [];
+    let data;
+    try {
+      data = JSON.parse(jsonStr);
+    } catch {
+      return;
+    }
+
+    let apps = data.Apps || [];
+    if (!Array.isArray(apps)) apps = [apps];
+
+    _appCache = {
+      data: apps.map(p => ({
+        id: p.Id,
+        processName: p.ProcessName + '.exe',
+        title: p.Title,
+        foreground: !!p.Fg,
+      })),
+      ts: Date.now(),
+    };
+  } catch (err) {
+    // Don't log on timeout — expected during heavy load
+    if (!err.message?.includes('timed out')) {
+      console.error('[SystemInfo] Async refresh error:', err.message);
+    }
+  } finally {
+    _refreshInFlight = false;
   }
+}
 
-  let apps = data.Apps || [];
-  if (!Array.isArray(apps)) apps = [apps];
-
-  return apps.map(p => ({
-    id: p.Id,
-    processName: p.ProcessName + '.exe',
-    title: p.Title,
-    foreground: !!p.Fg,
-  }));
+// ── Eager first load ──
+if (process.platform === 'win32') {
+  _refreshWindowsApps();
 }
 
 // ── Full System Context (for AI) ──

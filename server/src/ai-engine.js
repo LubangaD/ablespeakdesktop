@@ -61,6 +61,47 @@ export class AIEngine {
     this.temperature = parseFloat(process.env.LLM_TEMPERATURE || '0.7');
     this.conversationHistory = [];
     this.maxHistory = 20;
+    this.llmTimeoutMs = 15000;
+  }
+
+  // ── Network Helpers ──
+
+  /**
+   * Fetch with AbortController timeout — prevents LLM hangs from freezing the voice pipeline.
+   */
+  async _fetchWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs || this.llmTimeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Fetch with timeout + single retry with backoff.
+   */
+  async _fetchWithRetry(url, options, { timeoutMs, retries = 1 } = {}) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await this._fetchWithTimeout(url, options, timeoutMs);
+      } catch (err) {
+        if (attempt === retries) throw err;
+        const backoff = 1000 * (attempt + 1);
+        console.warn(`[AIEngine] Attempt ${attempt + 1} failed (${err.name}), retrying in ${backoff}ms...`);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+  }
+
+  /**
+   * Truncate content to prevent unbounded history growth (Fix #2).
+   */
+  _truncateContent(content, maxChars = 2000) {
+    if (typeof content !== 'string') return '';
+    if (content.length <= maxChars) return content;
+    return content.slice(0, maxChars) + '\n...[truncated]';
   }
 
   // ── Provider Management ──
@@ -147,7 +188,7 @@ export class AIEngine {
       const allToolResults = [];
       let currentResult = result;
       let rounds = 0;
-      const MAX_ROUNDS = 3;
+      const MAX_ROUNDS = 2;
 
       while (currentResult.toolCalls && currentResult.toolCalls.length > 0 && rounds < MAX_ROUNDS) {
         rounds++;
@@ -167,7 +208,11 @@ export class AIEngine {
         });
         this.conversationHistory.push({
           role: 'user',
-          content: `Tool results: ${JSON.stringify(roundResults.map(r => ({ tool: r.tool, result: r.result })))}\n\nContinue with the user's original request if more actions are needed, or respond with the final result.`
+          content: this._truncateContent(
+            `Tool results: ${JSON.stringify(roundResults.map(r => ({ tool: r.tool, status: r.result?.status || 'done', message: r.result?.message || '' })))}
+
+IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP action (like "play [song]" which requires search then click). Do NOT add extra actions the user did not ask for. If the command is complete, respond with a SHORT confirmation or empty text.`
+          )
         });
 
         // Ask AI for next step
@@ -255,9 +300,14 @@ export class AIEngine {
       '## Rules',
       '- Execute commands immediately when the intent is clear — do NOT ask for confirmation',
       '- Always respond concisely — your responses will be spoken aloud via TTS',
+      '- For simple action commands (scroll, go back, click, volume), respond with EMPTY TEXT or at most one word. Do NOT narrate what you did.',
+      '- CRITICAL: Only execute the EXACT action the user asked for. Do NOT chain extra actions they did not request.',
+      '- Example: if user says "scroll down", ONLY scroll. Do NOT also search or navigate.',
       '- When opening URLs, use full URLs (e.g., https://www.google.com)',
       '- For desktop media (Spotify, VLC), use `system_media_control`. For browser media (YouTube), use `media_control`.',
       '- When the user says "pause Spotify" or "next song", use `system_media_control` — NOT the browser media_control.',
+      '- CRITICAL SAFETY: NEVER use `close_application` for browsers (Chrome, Brave, Edge, Firefox). To close a browser TAB, use `close_tab`. `close_application` will KILL THE ENTIRE BROWSER and lose all tabs.',
+      '- When user says "close this tab" or "close the tab", use `close_tab` — NEVER `close_application`.',
       '',
       '## CRITICAL: How to Click and Interact with Pages',
       '- **To click ANYTHING in browser**: use the `click_element` tool with the xpath from the Visible Interactive Elements list below',
@@ -282,6 +332,17 @@ export class AIEngine {
       '- User: "click the first video" → Use `click_element` with the xpath from the visible elements list',
       '- User: "go to google" → Use `open_url` with url:"https://www.google.com"',
       '- User: "scroll down" → Use `scroll` with direction:"down"',
+      '- User: "summarize this page" → Use `get_page_content` to read the page, then provide a concise summary in your response',
+      '- User: "read it out" / "read this page" → Use `get_page_content` to read the page, then provide the key content in your response',
+      '- User: "what is this page about" → Use `get_page_content` to read the page, then explain what the page is about',
+      '',
+      '## CRITICAL: Page Content Commands',
+      '- When the user asks you to "summarize", "read", "tell me about", or "what is on" a page, you MUST:',
+      '  1. Call `get_page_content` to get the page text',
+      '  2. Actually provide the summary or content IN YOUR RESPONSE TEXT',
+      '  3. NEVER just say "I have summarized/read the content" — the user wants to HEAR the summary',
+      '  4. Keep summaries concise (2-4 sentences) since responses are spoken via TTS',
+      '  5. For "read it out", provide the key information from the page in a spoken-friendly format',
       '',
       '## Google Workspace Shortcuts',
       '- To create a new Google Doc: use `open_url` with url:"https://docs.google.com/document/create"',
@@ -403,8 +464,27 @@ export class AIEngine {
   }
 
   _summarizeToolResults(toolResults) {
-    return toolResults.map(r => {
+    // Import the silent tool checker
+    const SILENT = new Set([
+      'scroll', 'scroll_to_top', 'scroll_to_bottom',
+      'go_back', 'go_forward', 'focus_next', 'focus_prev',
+      'reload_tab', 'close_tab', 'click_element',
+      'press_key_combination', 'media_control',
+      'system_media_control', 'system_volume',
+      'send_system_keys', 'open_url', 'create_tab',
+      'search_web', 'search_youtube', 'type_text',
+      'make_tab_active', 'scroll_element',
+      'right_click', 'zoom_tab', 'pin_tab', 'mute_tab',
+      'execute_javascript', 'get_page_state',
+    ]);
+
+    const parts = toolResults.map(r => {
       const res = r.result;
+
+      // Silent action tools: return nothing (no TTS)
+      if (SILENT.has(r.tool) && res?.status !== 'error') {
+        return '';
+      }
 
       // answer_question returns the actual spoken text — use it directly
       if (r.tool === 'answer_question' && res?.text) {
@@ -422,38 +502,22 @@ export class AIEngine {
         return `⚠ ${res.message}`;
       }
 
-      // Success with a descriptive message
-      if (res?.status === 'success') {
-        if (res.message) return `✓ ${res.message}`;
-        if (res.text) return res.text;
-        return `✓ ${r.tool.replace(/_/g, ' ')} done`;
-      }
-
       // Generic error
       if (res?.error) {
         return `⚠ ${res.error}`;
       }
 
-      // Extension responses often come back as raw objects — make them readable
-      if (res && typeof res === 'object') {
-        // If the result has a documentId, it's a chrome scripting response — success
-        if (res.documentId !== undefined) {
-          const value = res.result !== null && res.result !== undefined ? `: ${res.result}` : '';
-          return `✓ ${r.tool.replace(/_/g, ' ')} executed${value}`;
-        }
-        // Compact display for small objects
-        const str = JSON.stringify(res);
-        if (str.length < 100) return `✓ ${r.tool.replace(/_/g, ' ')}: ${str}`;
-        return `✓ ${r.tool.replace(/_/g, ' ')} completed`;
+      // Success with a descriptive message (non-silent tools)
+      if (res?.status === 'success') {
+        if (res.text) return res.text;
+        if (res.message) return res.message;
+        return '';
       }
 
-      // Primitive results
-      if (res !== null && res !== undefined) {
-        return `✓ ${r.tool.replace(/_/g, ' ')}: ${res}`;
-      }
+      return '';
+    }).filter(Boolean);
 
-      return `✓ ${r.tool.replace(/_/g, ' ')} done`;
-    }).join('\n');
+    return parts.join('\n');
   }
 
   // ── OpenAI-Compatible Provider ──
@@ -509,7 +573,7 @@ export class AIEngine {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    const res = await fetch(url, {
+    const res = await this._fetchWithRetry(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -569,7 +633,7 @@ export class AIEngine {
 
     const url = `${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent?key=${apiKey}`;
 
-    const res = await fetch(url, {
+    const res = await this._fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -623,7 +687,7 @@ export class AIEngine {
       }));
     }
 
-    const res = await fetch(`${PROVIDERS.anthropic.baseUrl}/messages`, {
+    const res = await this._fetchWithRetry(`${PROVIDERS.anthropic.baseUrl}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

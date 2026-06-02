@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak Overlay</title>
+<style>
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+
+  /* ── Container ── */
+  .overlay-root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    width: 100%;
+    height: 100%;
+    padding: 8px;
+  }
+
+  /* ── Floating Pill ── */
+  .pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: rgba(18, 18, 24, 0.92);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 10px 18px 12px;
+    min-width: 200px;
+    max-width: 420px;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: bottom center;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .pill.hiding {
+    animation: slideDown 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 0; transform: translateY(12px) scale(0.96); }
+  }
+
+  /* ── Shortcut Hint ── */
+  .shortcut-hint {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, #a78bfa 0%, #6ee7b7 50%, #93c5fd 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    opacity: 0.9;
+  }
+
+  .shortcut-hint kbd {
+    font-family: inherit;
+    font-weight: 700;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* ── Transcript / Status Area ── */
+  .transcript-area {
+    width: 100%;
+    min-height: 0;
+    max-height: 80px;
+    overflow: hidden;
+    text-align: center;
+    transition: all 0.2s ease;
+  }
+
+  .transcript-area:empty {
+    display: none;
+  }
+
+  .transcript-text {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.4;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .transcript-text.response {
+    color: rgba(167, 139, 250, 0.95);
+  }
+
+  .transcript-text.error {
+    color: rgba(248, 113, 113, 0.9);
+    font-size: 12px;
+  }
+
+  .transcript-text.listening-label {
+    color: rgba(110, 231, 183, 0.9);
+    font-size: 12px;
+    animation: textPulse 1.5s ease-in-out infinite;
+  }
+
+  .transcript-text.interim {
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+  }
+
+  @keyframes textPulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Button Row ── */
+  .btn-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    position: relative;
+    outline: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    transform: scale(1.08);
+  }
+
+  .btn:active {
+    transform: scale(0.95);
+  }
+
+  .btn svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ── Mic Button (special) ── */
+  .btn-mic {
+    width: 44px;
+    height: 44px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .btn-mic.listening {
+    background: rgba(110, 231, 183, 0.2);
+    color: #6ee7b7;
+    box-shadow: 0 0 0 0 rgba(110, 231, 183, 0.4);
+    animation: micPulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes micPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(110, 231, 183, 0.35); }
+    70%  { box-shadow: 0 0 0 12px rgba(110, 231, 183, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(110, 231, 183, 0); }
+  }
+
+  .btn-mic.processing {
+    background: rgba(167, 139, 250, 0.2);
+    color: #a78bfa;
+    animation: none;
+  }
+
+  .btn-mic svg {
+    width: 20px;
+    height: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="overlay-root">
+  <div class="pill" id="pill">
+    <!-- Shortcut hint -->
+    <div class="shortcut-hint">
+      Dictate <kbd>Ctrl + Shift + A</kbd>
+    </div>
+
+    <!-- Transcript / status text -->
+    <div class="transcript-area" id="transcriptArea">
+      <div class="transcript-text" id="transcriptText"></div>
+    </div>
+
+    <!-- Button row -->
+    <div class="btn-row">
+      <button class="btn btn-mic" id="btnMic" title="Click to speak">
+        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button class="btn" id="btnText" title="Type a command (coming soon)" style="opacity:0.4;cursor:default;">
+        <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+      <button class="btn" id="btnDashboard" title="Open Dashboard">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ── DOM refs ──
+  const pill = document.getElementById('pill');
+  const btnMic = document.getElementById('btnMic');
+  const btnDashboard = document.getElementById('btnDashboard');
+  const transcriptArea = document.getElementById('transcriptArea');
+  const transcriptText = document.getElementById('transcriptText');
+
+  // ── State ──
+  let state = 'idle'; // idle | listening | processing
+  let hasGreeted = false;
+  let continuousMode = true; // Auto-restart recording after each command
+  let consecutiveErrors = 0; // Stop continuous mode after repeated failures
+  const MAX_CONSECUTIVE_ERRORS = 3;
+
+  // ── Recording state ──
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let stream = null;
+  let audioCtx = null;
+  let silenceStart = null;
+  const SILENCE_THRESHOLD = 15;
+  const SILENCE_DURATION = 1500; // 1.5s silence = speech finished
+  const MIN_RECORD_MS = 1000;    // Minimum 1s recording before silence check
+  const COOLDOWN_MS = 2000;      // Minimum 2s between recordings (rate limit protection)
+  let recordStart = 0;
+  let lastRecordEnd = 0;         // When the last recording stopped
+
+  // ── TTS ──
+  function speak(text) {
+    if (!window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.1;
+    u.pitch = 1.0;
+    u.volume = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v =>
+      v.name.includes('Microsoft Zira') || v.name.includes('Google') || v.lang.startsWith('en')
+    );
+    if (preferred) u.voice = preferred;
+    window.speechSynthesis.speak(u);
+    return u;
+  }
+
+  // ── UI helpers ──
+  function setTranscript(text, className) {
+    transcriptText.textContent = text;
+    transcriptText.className = 'transcript-text' + (className ? ' ' + className : '');
+    transcriptArea.style.display = text ? 'block' : 'none';
+  }
+
+  function setListeningUI() {
+    state = 'listening';
+    btnMic.className = 'btn btn-mic listening';
+    btnMic.title = 'Listening... click to stop';
+    setTranscript('Listening...', 'listening-label');
+  }
+
+  function setProcessingUI() {
+    state = 'processing';
+    btnMic.className = 'btn btn-mic processing';
+    btnMic.title = 'Processing...';
+  }
+
+  function setIdleUI() {
+    state = 'idle';
+    btnMic.className = 'btn btn-mic';
+    btnMic.title = 'Click to speak';
+  }
+
+  // ════════════════════════════════════════════════
+  // ── WebSocket Connection (same pipeline as dashboard) ──
+  // ════════════════════════════════════════════════
+
+  let ws = null;
+  let wsConnected = false;
+
+  function connectWS() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+    ws = new WebSocket('ws://localhost:3001/ws/dashboard');
+
+    ws.onopen = () => {
+      wsConnected = true;
+      console.log('[Overlay] WebSocket connected — using fast dashboard pipeline');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        handleWSMessage(data);
+      } catch {}
+    };
+
+    ws.onclose = () => {
+      wsConnected = false;
+      // Auto-reconnect
+      setTimeout(connectWS, 2000);
+    };
+
+    ws.onerror = () => {
+      wsConnected = false;
+    };
+  }
+
+  function handleWSMessage(data) {
+    // Voice transcription received — show what was heard
+    if (data.type === 'voice_transcription') {
+      setTranscript(data.text || '', 'listening-label');
+      return;
+    }
+
+    // No speech detected
+    if (data.type === 'voice_no_speech') {
+      if (continuousMode && active) {
+        setIdleUI();
+        setTimeout(() => { if (active) startListening(); }, 500);
+      } else {
+        setIdleUI();
+      }
+      return;
+    }
+
+    // Voice error
+    if (data.type === 'voice_error') {
+      consecutiveErrors++;
+      setTranscript(data.error || 'Voice error', 'error');
+      if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
+      } else {
+        setIdleUI();
+      }
+      return;
+    }
+
+    // Voice busy
+    if (data.type === 'voice_busy') {
+      setTranscript('Processing...', '');
+      return;
+    }
+
+    // Command complete (voice or chat) — this is the actual AI response
+    if (data.type === 'command_complete') {
+      handleResponse(data);
+      return;
+    }
+
+    // Chat assistant message (alternative response type)
+    if (data.type === 'chat_assistant_message') {
+      handleResponse(data);
+      return;
+    }
+  }
+
+  function handleResponse(data) {
+    if (data.error) {
+      consecutiveErrors++;
+      setTranscript(data.text || data.error || 'Error', 'error');
+      if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
+      } else {
+        setIdleUI();
+      }
+      return;
+    }
+
+    consecutiveErrors = 0;
+
+    // Determine if silent (action commands like scroll)
+    const isSilent = data.silent === true ||
+      (data.toolCalls && Array.isArray(data.toolCalls) && !data.text?.trim());
+
+    if (isSilent) {
+      setTranscript('✓', 'response');
+      if (continuousMode && active) {
+        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+      } else {
+        setTimeout(() => { setIdleUI(); setTranscript('', ''); }, 400);
+      }
+      return;
+    }
+
+    // Normal response with text
+    const responseText = (typeof data.result === 'string' ? data.result : data.result?.text) || data.text || '';
+    if (responseText && responseText !== 'Done') {
+      setTranscript(responseText, 'response');
+      const utterance = speak(responseText);
+      if (utterance && continuousMode && active) {
+        utterance.onend = () => {
+          setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+        };
+        setTimeout(() => {
+          if (state !== 'listening' && active) {
+            setIdleUI();
+            if (continuousMode) startListening();
+          }
+        }, 6000);
+      } else if (continuousMode && active) {
+        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 2000);
+      } else {
+        setIdleUI();
+      }
+    } else {
+      if (continuousMode && active) {
+        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+      } else {
+        setIdleUI();
+      }
+    }
+  }
+
+  // Connect immediately
+  connectWS();
+
+  // ════════════════════════════════════════════════
+  // ── Voice Recording (same approach as dashboard mic) ──
+  // ════════════════════════════════════════════════
+
+  async function startListening() {
+    if (!active) return;
+    if (state === 'listening' || state === 'processing') return;
+
+    // Enforce cooldown
+    const cooldownRemaining = COOLDOWN_MS - (Date.now() - lastRecordEnd);
+    if (cooldownRemaining > 0) {
+      setTimeout(() => { if (active) startListening(); }, cooldownRemaining);
+      return;
+    }
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+      });
+
+      audioChunks = [];
+      let hasSpeechDetected = false;
+
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus' : 'audio/webm',
+      });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+        lastRecordEnd = Date.now();
+
+        if (hasSpeechDetected && blob.size > 5000) {
+          setProcessingUI();
+          setTranscript('Processing...', '');
+
+          // Send audio over WebSocket — SAME as dashboard (fast!)
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const base64 = reader.result.split(',')[1];
+              console.log(`[Overlay] Sending ${Math.round(blob.size/1024)}KB audio over WebSocket`);
+              ws.send(JSON.stringify({
+                type: 'voice_audio',
+                audio: base64,
+                mimeType: blob.type || 'audio/webm',
+              }));
+            };
+            reader.readAsDataURL(blob);
+          } else {
+            // Fallback to IPC if WS not connected
+            console.warn('[Overlay] WebSocket not connected, using IPC fallback');
+            const reader = new FileReader();
+            reader.onload = () => {
+              window.electronAPI.sendAudio(reader.result.split(',')[1], blob.type);
+            };
+            reader.readAsDataURL(blob);
+          }
+        } else {
+          if (continuousMode && active) {
+            setIdleUI();
+            setTimeout(() => { if (active) startListening(); }, 300);
+          } else {
+            setIdleUI();
+          }
+        }
+      };
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      mediaRecorder.start(200);
+      recordStart = Date.now();
+      setListeningUI();
+
+      silenceStart = null;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const SPEECH_THRESHOLD = 25;
+      const MAX_RECORD_MS = 15000;
+
+      function checkSilence() {
+        if (state !== 'listening' || !mediaRecorder || mediaRecorder.state !== 'recording') return;
+        const elapsed = Date.now() - recordStart;
+        if (elapsed > MAX_RECORD_MS) { mediaRecorder.stop(); return; }
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        if (avg >= SPEECH_THRESHOLD) { hasSpeechDetected = true; silenceStart = null; }
+        if (elapsed < MIN_RECORD_MS) { requestAnimationFrame(checkSilence); return; }
+        if (avg < SILENCE_THRESHOLD) {
+          if (!silenceStart) silenceStart = Date.now();
+          const silenceNeeded = hasSpeechDetected ? SILENCE_DURATION : 3000;
+          if (Date.now() - silenceStart > silenceNeeded) { mediaRecorder.stop(); return; }
+        } else { silenceStart = null; }
+        requestAnimationFrame(checkSilence);
+      }
+      requestAnimationFrame(checkSilence);
+    } catch (err) {
+      console.error('[Overlay] Mic error:', err);
+      setIdleUI();
+      setTranscript('Mic error: ' + err.message, 'error');
+    }
+  }
+
+  function stopRecording() {
+    active = false;
+    continuousMode = false;
+    consecutiveErrors = 0;
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    setIdleUI();
+    setTranscript('Ready — click mic to start', '');
+  }
+
+  // ════════════════════════════════════════════
+  // ── Toggle Logic — Clean On/Off Switch ──
+  // ════════════════════════════════════════════
+
+  let active = false; // Master switch
+
+  function toggleListening() {
+    if (active) {
+      stopRecording();
+    } else {
+      active = true;
+      continuousMode = true;
+      consecutiveErrors = 0;
+      startListening();
+    }
+  }
+
+  // ── Button handlers ──
+  btnMic.addEventListener('click', toggleListening);
+
+  btnDashboard.addEventListener('click', () => {
+    window.electronAPI.showDashboard();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      stopRecording();
+      window.electronAPI.hideOverlay();
+    }
+  });
+
+  // ── IPC: Global shortcut triggered ──
+  window.electronAPI.onToggleListen(() => {
+    toggleListening();
+  });
+
+  // ── IPC: AI Response (fallback when WS not connected) ──
+  window.electronAPI.onResponse((data) => {
+    handleResponse({
+      text: data.text,
+      error: data.error,
+      silent: data.silent,
+      toolCalls: data.toolCalls,
+    });
+  });
+
+  // ── IPC: Error ──
+  window.electronAPI.onError((data) => {
+    setTranscript(data.message || 'An error occurred', 'error');
+    if (continuousMode && active) {
+      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 2000);
+    } else {
+      setIdleUI();
+    }
+  });
+
+  // ── Ensure voices are loaded for TTS ──
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
+
+})();
+</script>
+</body>
+</html>

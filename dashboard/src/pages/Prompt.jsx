@@ -3,13 +3,13 @@ import { api } from '../lib/api';
 import { useState } from 'react';
 import { CheckSquare, Square, ChevronDown } from 'lucide-react';
 
-const PROMPT_MODES = ['voqal', 'chrome', 'gmail', 'youtube', 'vscode'];
+const PROMPT_MODES = ['general', 'chrome', 'gmail', 'youtube', 'vscode'];
 
 export default function Prompt() {
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: api.getConfig, refetchInterval: 10000 });
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 3000 });
   const [autoUpdate, setAutoUpdate] = useState(true);
-  const [activeMode, setActiveMode] = useState('voqal');
+  const [activeMode, setActiveMode] = useState('general');
   const [showDropdown, setShowDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState('prompt');
 
@@ -18,7 +18,7 @@ export default function Prompt() {
     const mode = activeMode;
     const computerCtx = status?.computerContext || {};
 
-    if (mode === 'voqal') {
+    if (mode === 'general') {
       return `# AbleSpeak System Prompt
 
 You are a voice-native AI assistant. You listen to user speech,
@@ -207,7 +207,7 @@ You are a voice programming assistant for Visual Studio Code.
 
 function getToolsList(mode) {
   const tools = {
-    voqal: '- answer_question: Speak a response to the user\n- ignore: Ignore a transcription',
+    general: '- answer_question: Speak a response to the user\n- ignore: Ignore a transcription',
     chrome: '- create_tab: Open a new tab in the browser\n- make_tab_active: Switch to a tab by ID\n- answer_question: Respond to user\n- ignore: Ignore noise',
     gmail: '- read_email: Open and read an email\n- draft_email_reply: Draft a reply\n- select_emails: Select emails\n- mark_selected_emails: Mark/star emails\n- back_to_inbox: Return to inbox\n- add_label: Add label (API)\n- make_draft: Create draft (API)',
     youtube: '- search: Search for a video\n- seek_video: Jump to timestamp\n- next_video: Play next\n- previous_video: Play previous',
@@ -218,7 +218,7 @@ function getToolsList(mode) {
 
 function getContextList(mode) {
   const ctx = {
-    voqal: '- assistant.availableTools\n- assistant.directiveMode\n- computer.activeApplication\n- computer.currentTime\n- computer.visibleApplications',
+    general: '- assistant.availableTools\n- assistant.directiveMode\n- computer.activeApplication\n- computer.currentTime\n- computer.visibleApplications',
     chrome: '- integration.chrome.tabs\n- integration.chrome.activeTab\n- computer.activeApplication',
     gmail: '- library.gmail.list_emails\n- library.gmail.displayed_email\n- library.gmail.is_inside_email\n- library.gmail.user_info',
     youtube: '- library.youtube.current_time\n- library.youtube.video_duration',

@@ -14,6 +14,25 @@ import { tmpdir } from 'os';
 const execAsync = promisify(exec);
 
 /**
+ * Sanitize a string for safe embedding in PowerShell commands.
+ * Prevents command injection via voice input.
+ * Allows only alphanumeric, spaces, hyphens, underscores, and dots.
+ */
+function sanitizeForPS(input) {
+  if (typeof input !== 'string') return '';
+  return input.replace(/[^a-zA-Z0-9\s\-_\.]/g, '').trim().slice(0, 200);
+}
+
+/**
+ * Sanitize a numeric value for PowerShell embedding.
+ */
+function sanitizeNumber(value, defaultVal = 5, min = 0, max = 100) {
+  const num = parseInt(value, 10);
+  if (isNaN(num)) return defaultVal;
+  return Math.max(min, Math.min(max, num));
+}
+
+/**
  * Run a PowerShell script reliably using a temp .ps1 file.
  * This avoids escaping issues with inline commands.
  */
@@ -72,6 +91,9 @@ public class MediaKey {
 // ── System Volume Control ──
 
 export async function systemVolume(action, value) {
+  const safeSteps = sanitizeNumber(value, 5, 1, 50);
+  const safeSetLevel = sanitizeNumber(value, 50, 0, 100);
+
   const scripts = {
     mute: `
 $wshell = New-Object -ComObject wscript.shell
@@ -83,11 +105,11 @@ $wshell.SendKeys([char]173)
 `,
     up: `
 $wshell = New-Object -ComObject wscript.shell
-1..${value || 5} | ForEach-Object { $wshell.SendKeys([char]175) }
+1..${safeSteps} | ForEach-Object { $wshell.SendKeys([char]175) }
 `,
     down: `
 $wshell = New-Object -ComObject wscript.shell
-1..${value || 5} | ForEach-Object { $wshell.SendKeys([char]174) }
+1..${safeSteps} | ForEach-Object { $wshell.SendKeys([char]174) }
 `,
     set: `
 Add-Type -TypeDefinition @"
@@ -100,7 +122,7 @@ public class Vol {
 "@
 1..50 | ForEach-Object { [Vol]::Press(0xAE) }
 Start-Sleep -Milliseconds 100
-1..${Math.round((value || 50) / 2)} | ForEach-Object { [Vol]::Press(0xAF) }
+1..${Math.round(safeSetLevel / 2)} | ForEach-Object { [Vol]::Press(0xAF) }
 `,
   };
 
@@ -116,16 +138,19 @@ Start-Sleep -Milliseconds 100
 // ── Focus / Switch Application ──
 
 export async function focusApplication(appName) {
+  const safe = sanitizeForPS(appName);
+  if (!safe) return { status: 'error', message: 'Invalid application name' };
+
   const script = `
 $found = $false
-Get-Process | Where-Object { $_.MainWindowTitle -like "*${appName}*" } | Select-Object -First 1 | ForEach-Object {
+Get-Process | Where-Object { $_.MainWindowTitle -like "*${safe}*" } | Select-Object -First 1 | ForEach-Object {
     $wshell = New-Object -ComObject wscript.shell
     $wshell.AppActivate($_.Id)
     $found = $true
     Write-Output "Focused: $($_.MainWindowTitle)"
 }
 if (-not $found) {
-    Get-Process -Name "*${appName}*" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 | ForEach-Object {
+    Get-Process -Name "*${safe}*" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 | ForEach-Object {
         $wshell = New-Object -ComObject wscript.shell
         $wshell.AppActivate($_.Id)
         Write-Output "Focused: $($_.ProcessName)"
@@ -173,34 +198,44 @@ export async function openApplication(appName) {
   };
 
   const lower = appName.toLowerCase().trim();
-  const command = appMap[lower] || `start ${appName}`;
+  const command = appMap[lower];
 
-  try {
-    await execAsync(command, { shell: 'cmd.exe', timeout: 5000 });
-    return { status: 'success', message: `Opened ${appName}` };
-  } catch {
+  // Only allow whitelisted apps or sanitized names — never raw user input in shell
+  if (!command) {
+    const safe = sanitizeForPS(appName);
+    if (!safe) return { status: 'error', message: 'Invalid application name' };
     try {
-      await psScript(`Start-Process "${appName}"`, 5000);
+      await psScript(`Start-Process "${safe}"`, 5000);
       return { status: 'success', message: `Opened ${appName}` };
     } catch (err) {
       return { status: 'error', message: `Could not open "${appName}": ${err.message}` };
     }
+  }
+
+  try {
+    await execAsync(command, { shell: 'cmd.exe', timeout: 5000 });
+    return { status: 'success', message: `Opened ${appName}` };
+  } catch (err) {
+    return { status: 'error', message: `Could not open "${appName}": ${err.message}` };
   }
 }
 
 // ── Close Application ──
 
 export async function closeApplication(appName) {
+  const safe = sanitizeForPS(appName);
+  if (!safe) return { status: 'error', message: 'Invalid application name' };
+
   const script = `
 $closed = $false
-Get-Process -Name "*${appName}*" -ErrorAction SilentlyContinue | ForEach-Object {
+Get-Process -Name "*${safe}*" -ErrorAction SilentlyContinue | ForEach-Object {
     $_.CloseMainWindow() | Out-Null
     $closed = $true
     Write-Output "Closed: $($_.ProcessName) (PID $($_.Id))"
 }
 if (-not $closed) {
     # Also try matching by window title
-    Get-Process | Where-Object { $_.MainWindowTitle -like "*${appName}*" } | ForEach-Object {
+    Get-Process | Where-Object { $_.MainWindowTitle -like "*${safe}*" } | ForEach-Object {
         $_.CloseMainWindow() | Out-Null
         $closed = $true
         Write-Output "Closed: $($_.ProcessName) - $($_.MainWindowTitle)"

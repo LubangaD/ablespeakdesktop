@@ -23,6 +23,7 @@ export default function Chat() {
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
   const hasGreetedRef = useRef(false);
+  const audioCtxRef = useRef(null); // Reuse single AudioContext (Fix #7)
 
   // ── TTS: Speak text aloud ──
   const speak = useCallback((text) => {
@@ -90,13 +91,19 @@ export default function Chat() {
 
   // ── Silence detection using AnalyserNode ──
   const startSilenceDetection = useCallback((stream) => {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Reuse a single AudioContext to prevent Chrome's ~6 context limit (Fix #7)
+    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const audioCtx = audioCtxRef.current;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
     const source = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.3;
     source.connect(analyser);
-    analyserRef.current = { audioCtx, analyser };
+    analyserRef.current = { audioCtx, source, analyser };
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     let silenceStart = null;
@@ -180,8 +187,9 @@ export default function Chat() {
           streamRef.current.getTracks().forEach(t => t.stop());
           streamRef.current = null;
         }
-        if (analyserRef.current?.audioCtx) {
-          analyserRef.current.audioCtx.close();
+        // Disconnect source node but keep AudioContext alive for reuse (Fix #7)
+        if (analyserRef.current?.source) {
+          try { analyserRef.current.source.disconnect(); } catch {}
           analyserRef.current = null;
         }
         if (animFrameRef.current) {
@@ -304,6 +312,22 @@ export default function Chat() {
         source: lastMessage.source,
         time: new Date()
       }]);
+
+      // TTS: Speak assistant responses aloud for accessibility (Fix #8)
+      if (lastMessage.text && !lastMessage.error) {
+        speak(lastMessage.text);
+      }
+    }
+
+    // Handle voice pipeline busy (concurrent command guard)
+    if (lastMessage.type === 'voice_busy') {
+      setVoiceState('idle');
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'system',
+        text: 'Still processing your previous command. Please wait a moment.',
+        time: new Date()
+      }]);
     }
 
     if (lastMessage.type === 'prompt_switch') {
@@ -329,8 +353,9 @@ export default function Chat() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
-      if (analyserRef.current?.audioCtx) {
-        analyserRef.current.audioCtx.close();
+      // Close AudioContext only on unmount
+      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+        audioCtxRef.current.close();
       }
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
