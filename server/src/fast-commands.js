@@ -170,6 +170,15 @@ export function matchFastCommand(text) {
     return { tool: 'send_system_keys', args: { keys: 'Alt+F4' }, silent: true };
   }
 
+  // ── Student Picker ──
+  if (/^(switch|change)\s+(student|user)$/.test(t)) {
+    return { tool: 'switch_student', args: {}, silent: false };
+  }
+  const iAmMatch = t.match(/^(?:i'?m|this is)\s+(.+)$/);
+  if (iAmMatch) {
+    return { tool: 'set_student_by_name', args: { name: iAmMatch[1].trim() }, silent: false };
+  }
+
   // ── Click (by label) — "click X" ──
   const clickMatch = t.match(/^click\s+(?:on\s+)?(?:the\s+)?(.+)$/);
   if (clickMatch) {

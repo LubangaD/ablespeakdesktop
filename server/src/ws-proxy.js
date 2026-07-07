@@ -1,6 +1,7 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { insertCommand, insertSession, endSession, upsertHealthCheck } from './db.js';
+import { insertCommand, insertSession, endSession, getStudents, upsertHealthCheck } from './db.js';
+import { matchStudentName } from './identity.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
@@ -289,12 +290,53 @@ export class WsProxy {
           }
 
           // ────────────────────────────────────────────
+          // PICKER GATE: Student identity selection
+          // ────────────────────────────────────────────
+          {
+            const pickerResult = await this._handlePickerGate(text, commandId, startTime);
+            if (pickerResult === 'handled') return;
+          }
+
+          // ────────────────────────────────────────────
           // FAST PATH: Match common commands instantly
           // ────────────────────────────────────────────
           const fastMatch = matchFastCommand(text);
 
           if (fastMatch) {
             console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
+
+            // Intercept student management fast commands
+            if (fastMatch.tool === 'switch_student') {
+              if (this._activeSession) {
+                try { endSession(this._activeSession.sessionId); } catch {}
+                this._activeSession = null;
+              }
+              this._pickerState = null;
+              const students = getStudents();
+              const responseText = students.length === 0 ? "No students in roster." : "Who's using AbleSpeak?";
+              if (students.length > 0) {
+                this._pickerState = { retryCount: 0, awaitingConfirmation: false, pendingStudent: null };
+                this._broadcastDashboard({ type: 'picker_prompt', question: "Who's using AbleSpeak?", names: students.map(s => s.display_name), timestamp: new Date().toISOString() });
+              }
+              this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+              return;
+            }
+
+            if (fastMatch.tool === 'set_student_by_name') {
+              const students = getStudents();
+              const { student, confidence } = matchStudentName(fastMatch.args.name, students);
+              if (student && confidence >= 0.5) {
+                this._pickerState = null;
+                this.startStudentSession(student.id);
+                const responseText = `Hi ${student.display_name}!`;
+                this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
+                this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+              } else {
+                this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Sorry, I didn't catch that name. Who's using AbleSpeak?", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+              }
+              return;
+            }
+
             const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
             const latency = Date.now() - startTime;
 
@@ -561,6 +603,104 @@ export class WsProxy {
 
   getLastContext() {
     return this.lastContextUpdate;
+  }
+
+  // ── Voice Student Picker ──
+
+  /**
+   * Handle student picker gate for incoming voice text.
+   * Returns 'handled' if the text was consumed by the picker, null otherwise.
+   */
+  async _handlePickerGate(text, commandId, startTime) {
+    // If student already selected, pass through
+    if (this._activeSession) return null;
+
+    const students = getStudents();
+
+    // Empty roster — skip picker entirely
+    if (students.length === 0) return null;
+
+    // Single student — auto-select on first interaction
+    if (students.length === 1 && !this._pickerState) {
+      this.startStudentSession(students[0].id);
+      const responseText = `Hi ${students[0].display_name}!`;
+      this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
+      this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+      return 'handled';
+    }
+
+    // Not in picker mode yet — enter it, ask the question
+    if (!this._pickerState) {
+      this._pickerState = { retryCount: 0, awaitingConfirmation: false, pendingStudent: null };
+      this._broadcastDashboard({ type: 'picker_prompt', question: "Who's using AbleSpeak?", names: students.map(s => s.display_name), timestamp: new Date().toISOString() });
+      this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Who's using AbleSpeak?", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+      return 'handled';
+    }
+
+    // In picker mode — handle the response
+    const latency = Date.now() - startTime;
+
+    // If awaiting yes/no confirmation for a candidate
+    if (this._pickerState.awaitingConfirmation) {
+      const reply = parseConfirmationReply(text);
+      if (reply === 'yes') {
+        const student = this._pickerState.pendingStudent;
+        this._pickerState = null;
+        this.startStudentSession(student.id);
+        const responseText = `Hi ${student.display_name}!`;
+        this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
+        this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+        return 'handled';
+      } else {
+        // no or unclear — re-ask or give up
+        this._pickerState.retryCount++;
+        this._pickerState.awaitingConfirmation = false;
+        this._pickerState.pendingStudent = null;
+        if (this._pickerState.retryCount >= 2) {
+          this._pickerState = null;
+          this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
+          this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Okay — continuing without a profile.", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+          return 'handled';
+        }
+        this._broadcastDashboard({ type: 'picker_prompt', question: "Who's using AbleSpeak?", names: students.map(s => s.display_name), timestamp: new Date().toISOString() });
+        this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Who's using AbleSpeak?", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+        return 'handled';
+      }
+    }
+
+    // Try to match a student name
+    const { student, confidence } = matchStudentName(text, students);
+
+    if (student && confidence >= 0.8) {
+      // High confidence — select immediately
+      this._pickerState = null;
+      this.startStudentSession(student.id);
+      const responseText = `Hi ${student.display_name}!`;
+      this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
+      this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+      return 'handled';
+    }
+
+    if (student && confidence >= 0.5) {
+      // Medium confidence — ask for confirmation
+      this._pickerState.awaitingConfirmation = true;
+      this._pickerState.pendingStudent = student;
+      const prompt = `Did you mean ${student.display_name} — yes or no?`;
+      this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: prompt, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+      return 'handled';
+    }
+
+    // No match — re-ask or give up
+    this._pickerState.retryCount++;
+    if (this._pickerState.retryCount >= 2) {
+      this._pickerState = null;
+      this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
+      this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Okay — continuing without a profile.", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+      return 'handled';
+    }
+    this._broadcastDashboard({ type: 'picker_prompt', question: "Who's using AbleSpeak?", names: students.map(s => s.display_name), timestamp: new Date().toISOString() });
+    this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Who's using AbleSpeak?", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+    return 'handled';
   }
 
   // ── Student Session Management ──

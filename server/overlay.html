@@ -203,6 +203,44 @@
     width: 20px;
     height: 20px;
   }
+
+  /* ── Student Picker ── */
+  .picker-area {
+    display: none;
+    width: 100%;
+    padding: 6px 0 2px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 4px;
+  }
+
+  .picker-area.visible {
+    display: block;
+  }
+
+  .picker-question {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(110, 231, 183, 0.9);
+    text-align: center;
+    margin-bottom: 6px;
+  }
+
+  .picker-names {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .picker-name {
+    font-size: 24px; /* WCAG AA+: ≥24px */
+    font-weight: 700;
+    color: #fff;
+    background: rgba(167, 139, 250, 0.18);
+    border-radius: 10px;
+    padding: 4px 14px;
+    line-height: 1.2;
+  }
 </style>
 </head>
 <body>
@@ -216,6 +254,12 @@
     <!-- Transcript / status text -->
     <div class="transcript-area" id="transcriptArea">
       <div class="transcript-text" id="transcriptText"></div>
+    </div>
+
+    <!-- Student Picker (voice-driven, aria-live for screen readers) -->
+    <div class="picker-area" id="pickerArea" role="status" aria-live="polite" aria-atomic="true">
+      <div class="picker-question" id="pickerQuestion"></div>
+      <div class="picker-names" id="pickerNames"></div>
     </div>
 
     <!-- Button row -->
@@ -243,6 +287,9 @@
   const btnDashboard = document.getElementById('btnDashboard');
   const transcriptArea = document.getElementById('transcriptArea');
   const transcriptText = document.getElementById('transcriptText');
+  const pickerArea = document.getElementById('pickerArea');
+  const pickerQuestion = document.getElementById('pickerQuestion');
+  const pickerNames = document.getElementById('pickerNames');
 
   // ── State ──
   let state = 'idle'; // idle | listening | processing
@@ -342,7 +389,37 @@
     };
   }
 
+  function showPicker(question, names) {
+    pickerQuestion.textContent = question || "Who's using AbleSpeak?";
+    pickerNames.innerHTML = '';
+    (names || []).forEach(name => {
+      const span = document.createElement('span');
+      span.className = 'picker-name';
+      span.textContent = name;
+      pickerNames.appendChild(span);
+    });
+    pickerArea.classList.add('visible');
+  }
+
+  function hidePicker() {
+    pickerArea.classList.remove('visible');
+    pickerNames.innerHTML = '';
+    pickerQuestion.textContent = '';
+  }
+
   function handleWSMessage(data) {
+    // Student picker prompt — show roster names
+    if (data.type === 'picker_prompt') {
+      showPicker(data.question, data.names);
+      return;
+    }
+
+    // Picker resolved — hide picker UI
+    if (data.type === 'picker_clear') {
+      hidePicker();
+      return;
+    }
+
     // Voice transcription received — show what was heard
     if (data.type === 'voice_transcription') {
       setTranscript(data.text || '', 'listening-label');
