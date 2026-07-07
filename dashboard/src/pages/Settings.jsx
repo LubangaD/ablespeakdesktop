@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { Brain, Globe, Check, AlertCircle, Users, Upload, UserPlus, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Brain, Globe, Check, AlertCircle, Users, Upload, UserPlus, ToggleLeft, ToggleRight, Mic, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -126,6 +126,7 @@ function StudentsSection() {
   const [csvText, setCsvText] = useState('');
   const [csvResult, setCsvResult] = useState(null);
   const [csvError, setCsvError] = useState('');
+  const [speechExpandedId, setSpeechExpandedId] = useState(null); // per-student Speech expander
 
   const addStudent = async (e) => {
     e.preventDefault();
@@ -175,27 +176,46 @@ function StudentsSection() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr>
-                  {['Name', 'External Ref', 'Active'].map(h => (
+                  {['Name', 'External Ref', 'Active', 'Speech'].map(h => (
                     <th key={h} scope="col" style={{ textAlign: 'left', padding: '6px 10px', color: 'var(--text-muted)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {students.map(s => (
-                  <tr key={s.id}>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-primary)' }}>{s.display_name}</td>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{s.external_ref || '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <button
-                        onClick={() => toggleActive(s)}
-                        aria-label={s.active ? `Deactivate ${s.display_name}` : `Activate ${s.display_name}`}
-                        title={s.active ? 'Active — click to deactivate' : 'Inactive — click to activate'}
-                        style={{ minWidth: 44, minHeight: 44, background: 'none', border: 'none', cursor: 'pointer', color: s.active ? 'var(--success)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
-                      >
-                        {s.active ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={s.id}>
+                    <tr>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-primary)' }}>{s.display_name}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{s.external_ref || '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>
+                        <button
+                          onClick={() => toggleActive(s)}
+                          aria-label={s.active ? `Deactivate ${s.display_name}` : `Activate ${s.display_name}`}
+                          title={s.active ? 'Active — click to deactivate' : 'Inactive — click to activate'}
+                          style={{ minWidth: 44, minHeight: 44, background: 'none', border: 'none', cursor: 'pointer', color: s.active ? 'var(--success)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                        >
+                          {s.active ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                        </button>
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>
+                        <button
+                          onClick={() => setSpeechExpandedId(speechExpandedId === s.id ? null : s.id)}
+                          aria-expanded={speechExpandedId === s.id}
+                          aria-label={`${speechExpandedId === s.id ? 'Hide' : 'Show'} speech settings for ${s.display_name}`}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 44, minHeight: 44, padding: '0 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', color: speechExpandedId === s.id ? 'var(--accent)' : 'var(--text-muted)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}
+                        >
+                          <Mic size={16} /> Speech {speechExpandedId === s.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </button>
+                      </td>
+                    </tr>
+                    {speechExpandedId === s.id && (
+                      <tr>
+                        <td colSpan={4} style={{ padding: '4px 10px 14px' }}>
+                          <SpeechProfileEditor student={s} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -296,6 +316,165 @@ function StudentsSection() {
         )}
       </div>
     </section>
+  );
+}
+
+// ── Per-student speech tuning (thresholds + vocabulary) ──
+
+function SpeechProfileEditor({ student }) {
+  const queryClient = useQueryClient();
+  const { data: profile, isLoading, error } = useQuery({
+    queryKey: ['speechProfile', student.id],
+    queryFn: () => api.getSpeechProfile(student.id),
+    staleTime: 5000,
+  });
+
+  if (isLoading) return <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Loading speech profile…</p>;
+  if (error) return <p style={{ color: 'var(--error)', fontSize: 14 }}>Failed to load speech profile: {error.message}</p>;
+
+  return (
+    <SpeechProfileForm
+      key={`${student.id}-${profile.updated_at || 'new'}`}
+      student={student}
+      profile={profile}
+      onSaved={() => queryClient.invalidateQueries(['speechProfile', student.id])}
+    />
+  );
+}
+
+function SpeechProfileForm({ student, profile, onSaved }) {
+  const [minAudio, setMinAudio] = useState(profile.min_audio_b64);
+  const [minConf, setMinConf] = useState(profile.min_confidence);
+  const [fuzzy, setFuzzy] = useState(profile.fuzzy_threshold);
+  const [repairEnabled, setRepairEnabled] = useState(!!profile.repair_enabled);
+  const [vocab, setVocab] = useState((profile.custom_vocabulary || []).join('\n'));
+  const [saveMsg, setSaveMsg] = useState('');
+  const [saveErr, setSaveErr] = useState('');
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaveMsg(''); setSaveErr('');
+    try {
+      await api.saveSpeechProfile(student.id, {
+        min_audio_b64: Number(minAudio),
+        min_confidence: Number(minConf),
+        fuzzy_threshold: Number(fuzzy),
+        repair_enabled: repairEnabled,
+        custom_vocabulary: vocab.split('\n').map(v => v.trim()).filter(Boolean),
+      });
+      setSaveMsg('Saved — applies to the next voice command');
+      onSaved();
+      setTimeout(() => setSaveMsg(''), 4000);
+    } catch (err) {
+      setSaveErr(err.message);
+    }
+  };
+
+  const idFor = (name) => `speech-${name}-${student.id}`;
+
+  return (
+    <form
+      onSubmit={save}
+      aria-label={`Speech settings for ${student.display_name}`}
+      style={{ display: 'flex', flexDirection: 'column', gap: 14, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 14 }}
+    >
+      <SliderRow
+        id={idFor('min-audio')}
+        label="Minimum audio size"
+        hint="Lower this for quiet speakers so short/soft recordings are not discarded"
+        min={500} max={20000} step={100}
+        value={minAudio} onChange={setMinAudio}
+      />
+      <SliderRow
+        id={idFor('min-confidence')}
+        label="Minimum confidence"
+        hint="Lower this for atypical speech so the recognizer's low scores are still accepted"
+        min={0} max={1} step={0.01}
+        value={minConf} onChange={setMinConf}
+      />
+      <SliderRow
+        id={idFor('fuzzy')}
+        label="Repair match distance"
+        hint="Raise this to let more near-miss phrases trigger a “Did you mean…?” prompt"
+        min={0} max={1} step={0.01}
+        value={fuzzy} onChange={setFuzzy}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          type="button"
+          onClick={() => setRepairEnabled(!repairEnabled)}
+          role="switch"
+          aria-checked={repairEnabled}
+          aria-label={`Repair prompts ${repairEnabled ? 'enabled' : 'disabled'} — click to ${repairEnabled ? 'disable' : 'enable'}`}
+          style={{ minWidth: 44, minHeight: 44, background: 'none', border: 'none', cursor: 'pointer', color: repairEnabled ? 'var(--success)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+        >
+          {repairEnabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+        </button>
+        <span style={{ fontSize: 14, color: 'var(--text-primary)' }}>Ask “Did you mean…?” for near-miss commands</span>
+      </div>
+
+      <div>
+        <label htmlFor={idFor('vocab')} style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>
+          Custom vocabulary (one phrase per line) — transcription prefers these words
+        </label>
+        <textarea
+          id={idFor('vocab')}
+          value={vocab}
+          onChange={e => setVocab(e.target.value)}
+          rows={4}
+          placeholder={'open seesaw\nstarfall\nepic books'}
+          style={{ width: '100%', padding: '10px 12px', background: 'var(--bg-secondary, var(--bg-primary))', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }}
+        />
+      </div>
+
+      {saveErr && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--error)', fontSize: 13 }}>
+          <AlertCircle size={14} /> {saveErr}
+        </div>
+      )}
+      {saveMsg && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--success)', fontSize: 13 }}>
+          <Check size={14} /> {saveMsg}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        style={{ alignSelf: 'flex-start', padding: '10px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}
+      >
+        Save Speech Settings
+      </button>
+    </form>
+  );
+}
+
+function SliderRow({ id, label, hint, min, max, step, value, onChange }) {
+  return (
+    <div>
+      <label htmlFor={id} style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>
+        {label}: <strong style={{ color: 'var(--text-primary)' }}>{value}</strong>
+      </label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <input
+          id={id}
+          type="range"
+          min={min} max={max} step={step}
+          value={value}
+          onChange={e => onChange(Number(e.target.value))}
+          style={{ flex: 1, minHeight: 44, cursor: 'pointer' }}
+        />
+        <input
+          type="number"
+          aria-label={`${label} (exact value)`}
+          min={min} max={max} step={step}
+          value={value}
+          onChange={e => onChange(e.target.value === '' ? min : Number(e.target.value))}
+          style={{ width: 90, padding: '8px 10px', minHeight: 44, background: 'var(--bg-secondary, var(--bg-primary))', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
+        />
+      </div>
+      {hint && <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{hint}</p>}
+    </div>
   );
 }
 

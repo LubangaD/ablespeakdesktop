@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { readFileSync, existsSync } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent } from '../db.js';
+import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent, getSpeechProfile, saveSpeechProfile } from '../db.js';
 import { parseRosterCsv } from '../identity.js';
 
 export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath }) {
@@ -139,6 +139,70 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     res.json(updated);
   });
 
+  // ── Speech Profiles (per-student thresholds + vocabulary) ──
+
+  router.get('/students/:id/speech-profile', (req, res) => {
+    const { id } = req.params;
+    const students = getStudents({ activeOnly: false });
+    if (!students.find(s => s.id === id)) return res.status(404).json({ error: 'Student not found' });
+    const profile = getSpeechProfile(id);
+    res.json({ ...profile, custom_vocabulary: parseVocabularyField(profile.custom_vocabulary) });
+  });
+
+  router.put('/students/:id/speech-profile', (req, res) => {
+    const { id } = req.params;
+    const students = getStudents({ activeOnly: false });
+    if (!students.find(s => s.id === id)) return res.status(404).json({ error: 'Student not found' });
+
+    const body = req.body || {};
+    const errors = [];
+    const numInRange = (name, min, max) => {
+      const v = body[name];
+      if (v === undefined) return undefined;
+      if (typeof v !== 'number' || Number.isNaN(v) || v < min || v > max) {
+        errors.push(`${name} must be a number between ${min} and ${max}`);
+        return undefined;
+      }
+      return v;
+    };
+
+    const min_audio_b64 = numInRange('min_audio_b64', 500, 20000);
+    const min_confidence = numInRange('min_confidence', 0, 1);
+    const fuzzy_threshold = numInRange('fuzzy_threshold', 0, 1);
+    const silence_threshold = numInRange('silence_threshold', 0, 255);
+    const silence_duration_ms = numInRange('silence_duration_ms', 0, 60000);
+
+    let repair_enabled;
+    if (body.repair_enabled !== undefined) {
+      if (typeof body.repair_enabled === 'boolean' || body.repair_enabled === 0 || body.repair_enabled === 1) {
+        repair_enabled = body.repair_enabled ? 1 : 0;
+      } else {
+        errors.push('repair_enabled must be a boolean or 0/1');
+      }
+    }
+
+    let custom_vocabulary;
+    if (body.custom_vocabulary !== undefined) {
+      if (Array.isArray(body.custom_vocabulary) && body.custom_vocabulary.every(v => typeof v === 'string')) {
+        custom_vocabulary = JSON.stringify(body.custom_vocabulary.map(v => v.trim()).filter(Boolean));
+      } else {
+        errors.push('custom_vocabulary must be an array of strings');
+      }
+    }
+
+    if (errors.length > 0) return res.status(400).json({ error: errors.join('; ') });
+
+    const existing = getSpeechProfile(id);
+    saveSpeechProfile({
+      id: existing.id || uuidv4(),
+      student_id: id,
+      custom_vocabulary, min_audio_b64, min_confidence, fuzzy_threshold,
+      silence_threshold, silence_duration_ms, repair_enabled,
+    });
+    const updated = getSpeechProfile(id);
+    res.json({ ...updated, custom_vocabulary: parseVocabularyField(updated.custom_vocabulary) });
+  });
+
   router.post('/students/roster-csv', (req, res) => {
     let csv = '';
     const contentType = req.headers['content-type'] || '';
@@ -171,6 +235,16 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   });
 
   return router;
+}
+
+function parseVocabularyField(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function sanitizeConfig(obj) {

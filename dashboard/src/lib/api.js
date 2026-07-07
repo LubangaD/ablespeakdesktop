@@ -50,4 +50,10 @@ export const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ csv }),
   }),
+  // ── Speech profiles ──
+  getSpeechProfile: (studentId) => fetchApi(`/students/${studentId}/speech-profile`),
+  saveSpeechProfile: (studentId, data) => fetchApi(`/students/${studentId}/speech-profile`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
 };
