@@ -40,7 +40,9 @@ function cleanupSettings() {
 
 async function withServer(fn, { syncClient } = {}) {
   const app = express();
-  app.use(express.json({ limit: '50mb' }));
+  // No global body parser here: createSyncRouter provides express.json({ limit: '6mb' })
+  // on the ingest route, matching the production setup where the sync router is mounted
+  // before the global body parser in index.js. This makes test and prod 413 paths identical.
   app.use('/api', createSyncRouter({ syncClient }));
   const server = app.listen(0);
   await new Promise(r => server.once('listening', r));

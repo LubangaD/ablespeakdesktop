@@ -182,11 +182,11 @@ test('ingestRows: students mutable – newer row wins', async () => {
   const path = tmpFile('ingest-mutable');
   try {
     await initDatabase(path);
-    // Local row with older timestamp
-    getDb().run(`INSERT INTO students (id, display_name, created_at) VALUES ('s-mutable','OldName','2024-01-01 00:00:00')`);
+    // Local row with older updated_at (LWW now compares updated_at, not created_at)
+    getDb().run(`INSERT INTO students (id, display_name, updated_at) VALUES ('s-mutable','OldName','2024-01-01 00:00:00')`);
 
-    // Ingest newer row
-    const r1 = ingestRows('students', [{ id: 's-mutable', display_name: 'NewName', active: 1, created_at: '2025-01-01 00:00:00', sync_opt_in: 1 }], 'dev');
+    // Ingest newer row (updated_at later → wins)
+    const r1 = ingestRows('students', [{ id: 's-mutable', display_name: 'NewName', active: 1, updated_at: '2025-01-01 00:00:00', sync_opt_in: 1 }], 'dev');
     assert.equal(r1.inserted, 1);
     const stmt = getDb().prepare(`SELECT display_name FROM students WHERE id='s-mutable'`);
     stmt.step();
@@ -203,10 +203,11 @@ test('ingestRows: students mutable – older row does not overwrite', async () =
   const path = tmpFile('ingest-mutable-skip');
   try {
     await initDatabase(path);
-    getDb().run(`INSERT INTO students (id, display_name, created_at) VALUES ('s-new','CurrentName','2025-06-01 00:00:00')`);
+    // Local row with newer updated_at
+    getDb().run(`INSERT INTO students (id, display_name, updated_at) VALUES ('s-new','CurrentName','2025-06-01 00:00:00')`);
 
-    // Ingest older row
-    const r1 = ingestRows('students', [{ id: 's-new', display_name: 'StaleOldName', active: 1, created_at: '2024-01-01 00:00:00', sync_opt_in: 1 }], 'dev');
+    // Ingest older row (updated_at earlier → skipped by LWW)
+    const r1 = ingestRows('students', [{ id: 's-new', display_name: 'StaleOldName', active: 1, updated_at: '2024-01-01 00:00:00', sync_opt_in: 1 }], 'dev');
     assert.equal(r1.skipped, 1, 'older incoming row should be skipped');
     const stmt = getDb().prepare(`SELECT display_name FROM students WHERE id='s-new'`);
     stmt.step();

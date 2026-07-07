@@ -12,7 +12,7 @@
  *   `configured` flag).
  */
 
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { decryptPayload } from '../sync-crypto.js';
 import { ingestRows, getSyncCursor } from '../db.js';
 import { getAppSettings } from '../app-settings.js';
@@ -22,6 +22,12 @@ const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5MB
 
 export function createSyncRouter({ syncClient } = {}) {
   const router = Router();
+
+  // Route-level body parser: 6mb cap for sync ingest payloads.
+  // Registered on this router before index.js mounts the global body parser so a >6mb
+  // ingest returns 413 at the parser level rather than being absorbed by a larger global limit.
+  // DO NOT raise this limit — use the manual approxBytes check below for the 5MB content cap.
+  router.use('/sync/ingest', express.json({ limit: '6mb' }));
 
   // Receiver-side state (in-process): last ingest time + devices seen
   let lastIngestAt = null;

@@ -148,7 +148,7 @@ test('two-DB sync: opt-in flows with origin_device; opt-out never leaves sender;
   }
 });
 
-test('two-DB sync: mutable profile update flows on second cycle (last-write-wins)', async () => {
+test('receiver LWW: newer payload wins; stale re-ingest of older payload is a no-op', async () => {
   const senderPath = tmpFile('sender-lww');
   const receiverPath = tmpFile('receiver-lww');
 
@@ -181,6 +181,64 @@ test('two-DB sync: mutable profile update flows on second cycle (last-write-wins
     }
     rows = queryAll(`SELECT min_confidence FROM speech_profiles WHERE id='prof-L'`);
     assert.equal(rows[0].min_confidence, 0.7, 'stale row did not overwrite newer data');
+  } finally {
+    await closeDatabase();
+    cleanup(senderPath, receiverPath);
+  }
+});
+
+test('two-DB sync: cursor advances on cycle 1; UPDATE is visible on cycle 2 via persisted cursor (real cursor flow)', async () => {
+  /**
+   * This is the regression test for Finding 1 (mutable-table UPDATEs never re-sync).
+   * The old rowid cursor silently missed every post-first-sync UPDATE because rowid
+   * never changes on UPDATE. The new timestamp cursor fixes this.
+   *
+   * Sequence:
+   *   Cycle 1: getRowsSince('0') → cursor advances to max(updated_at) of the batch
+   *   Sender UPDATEs the profile (newer updated_at)
+   *   Cycle 2: getRowsSince(cursor1) → MUST include the updated row
+   *   Receiver: ingest cycle1 → has v1; ingest cycle2 → has v2
+   */
+  const senderPath = tmpFile('sender-c2cursor');
+  const receiverPath = tmpFile('receiver-c2cursor');
+
+  try {
+    // ══ SENDER DB ══
+    await initDatabase(senderPath);
+    upsertStudent({ id: 'stu-C', display_name: 'Cursor Student' });
+    saveSpeechProfile({ id: 'prof-C', student_id: 'stu-C', min_confidence: 0.4 });
+
+    // Cycle 1: fetch from cursor '0' — should include the new profile
+    const { rows: rows1, nextCursor: cursor1 } = getRowsSince('speech_profiles', '0', { optInStudentIdsOnly: true });
+    assert.equal(rows1.length, 1, 'cycle 1 returns the profile');
+    assert.ok(cursor1 > '0', 'cycle 1 cursor must advance from "0"');
+
+    const pkg1 = encryptPayload({ batches: [{ table: 'speech_profiles', rows: rows1, nextCursor: cursor1 }] }, KEY);
+
+    // UPDATE profile on sender AFTER cycle 1 — force a strictly later updated_at
+    getDb().run(`UPDATE speech_profiles SET min_confidence=0.8, updated_at=datetime('now','localtime','+1 second') WHERE id='prof-C'`);
+
+    // Cycle 2: use the persisted cursor from cycle 1 — the update MUST be returned
+    const { rows: rows2, nextCursor: cursor2 } = getRowsSince('speech_profiles', cursor1, { optInStudentIdsOnly: true });
+    assert.equal(rows2.length, 1, 'cycle 2 must include the updated row');
+    assert.equal(rows2[0].min_confidence, 0.8, 'cycle 2 row carries the updated value');
+    assert.ok(cursor2 >= cursor1, 'cycle 2 cursor must not regress');
+
+    const pkg2 = encryptPayload({ batches: [{ table: 'speech_profiles', rows: rows2, nextCursor: cursor2 }] }, KEY);
+    await closeDatabase();
+
+    // ══ RECEIVER DB ══
+    await initDatabase(receiverPath);
+
+    // Ingest cycle 1 — receiver gets the initial value
+    for (const b of decryptPayload(pkg1, KEY).batches) ingestRows(b.table, b.rows, 'dev-C');
+    let rRows = queryAll(`SELECT min_confidence FROM speech_profiles WHERE id='prof-C'`);
+    assert.equal(rRows[0].min_confidence, 0.4, 'receiver has cycle 1 value after first ingest');
+
+    // Ingest cycle 2 — receiver gets the update (LWW: newer updated_at wins)
+    for (const b of decryptPayload(pkg2, KEY).batches) ingestRows(b.table, b.rows, 'dev-C');
+    rRows = queryAll(`SELECT min_confidence FROM speech_profiles WHERE id='prof-C'`);
+    assert.equal(rRows[0].min_confidence, 0.8, 'receiver reflects the updated value after cycle 2 ingest');
   } finally {
     await closeDatabase();
     cleanup(senderPath, receiverPath);

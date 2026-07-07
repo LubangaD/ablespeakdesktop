@@ -46,9 +46,32 @@ console.log('[DB] SQLite initialized');
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
+app.use(rateLimit({ windowMs: 60000, max: 300 }));
+
+// ── T4 Sync Client + Router (mounted BEFORE global body parser) ──
+// createSyncRouter registers express.json({ limit: '6mb' }) on the ingest route.
+// For that route-level limit to take effect the sync router must be mounted first,
+// before the global express.json() below would otherwise parse every request at 50mb.
+const syncClient = new SyncClient({ settings: getAppSettings });
+
+function applySyncSettings() {
+  const s = getAppSettings();
+  const shouldRun = !!(s.sync?.enabled && s.sync?.role === 'sender');
+  if (shouldRun && !syncClient.isRunning()) {
+    syncClient.start();
+    console.log('[Sync] Sender started (interval', (s.sync.intervalMs || 30000) + 'ms)');
+  } else if (!shouldRun && syncClient.isRunning()) {
+    syncClient.stop();
+    console.log('[Sync] Sender stopped');
+  }
+}
+applySyncSettings(); // start only if already enabled in settings (default OFF)
+app.use((req, res, next) => { req._restartSync = applySyncSettings; next(); });
+app.use('/api', createSyncRouter({ syncClient }));
+
+// ── Global body parser (after sync router, which has its own 6mb limit) ──
 app.use(express.json({ limit: '50mb' })); // Large enough for long voice recordings
 app.use(express.text({ type: 'text/plain', limit: '1mb' })); // For CSV roster import
-app.use(rateLimit({ windowMs: 60000, max: 300 }));
 
 // ── HTTP Server (shared with WebSocket) ──
 const server = createServer(app);
@@ -112,29 +135,9 @@ const logTailer = new LogTailer({
 });
 logTailer.start().then(() => console.log('[LogTailer] Started'));
 
-// ── T4 Sync Client (sender) ──
-// Settings are re-read every cycle, so URL/key/interval changes apply live.
-// The loop itself starts/stops when sync.enabled or sync.role changes (applySyncSettings
-// is invoked from POST /api/setup/app-settings via req._restartSync).
-const syncClient = new SyncClient({ settings: getAppSettings });
-
-function applySyncSettings() {
-  const s = getAppSettings();
-  const shouldRun = !!(s.sync?.enabled && s.sync?.role === 'sender');
-  if (shouldRun && !syncClient.isRunning()) {
-    syncClient.start();
-    console.log('[Sync] Sender started (interval', (s.sync.intervalMs || 30000) + 'ms)');
-  } else if (!shouldRun && syncClient.isRunning()) {
-    syncClient.stop();
-    console.log('[Sync] Sender stopped');
-  }
-}
-applySyncSettings(); // start only if already enabled in settings (default OFF)
-app.use((req, res, next) => { req._restartSync = applySyncSettings; next(); });
-
 // ── API Routes ──
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
-app.use('/api', createSyncRouter({ syncClient }));
+// Note: createSyncRouter is already mounted above the global body parser (see top of file).
 
 // ── Additional AI-specific API routes ──
 

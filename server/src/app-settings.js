@@ -47,7 +47,9 @@ export function getAppSettings() {
   try {
     const raw = readFileSync(p, 'utf8');
     const parsed = JSON.parse(raw);
-    return { ...DEFAULTS, ...parsed };
+    // Deep-merge the sync sub-object so a hand-edited partial sync block self-heals:
+    // missing fields fall back to DEFAULTS.sync rather than becoming undefined.
+    return { ...DEFAULTS, ...parsed, sync: { ...DEFAULTS.sync, ...(parsed.sync || {}) } };
   } catch {
     return { ...DEFAULTS };
   }

@@ -100,6 +100,14 @@ function migrate() {
   try { db.run(`ALTER TABLE sessions ADD COLUMN origin_device TEXT`); } catch {}
   db.run(`CREATE TABLE IF NOT EXISTS sync_state (table_name TEXT PRIMARY KEY, last_cursor TEXT, updated_at TEXT)`);
 
+  // Finding 1: mutable tables need updated_at for timestamp-based cursor (rowid never
+  // changes on UPDATE so rowid cursors silently miss updates after the first sync cycle).
+  // ALTER TABLE is try/catch for idempotency; backfill covers rows predating this migration.
+  try { db.run(`ALTER TABLE students ADD COLUMN updated_at TEXT`); } catch {}
+  db.run(`UPDATE students SET updated_at = created_at WHERE updated_at IS NULL`);
+  try { db.run(`ALTER TABLE goals ADD COLUMN updated_at TEXT`); } catch {}
+  db.run(`UPDATE goals SET updated_at = created_at WHERE updated_at IS NULL`);
+
   saveToFile();
 }
 
@@ -191,7 +199,7 @@ export function getHealthAlerts() {
 // ── Students ──
 
 export function upsertStudent({ id, display_name, external_ref }) {
-  run(`INSERT INTO students (id,display_name,external_ref) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, external_ref=excluded.external_ref`,
+  run(`INSERT INTO students (id,display_name,external_ref,updated_at) VALUES (?,?,?,datetime('now','localtime')) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, external_ref=excluded.external_ref, updated_at=datetime('now','localtime')`,
     [id, display_name, external_ref || null]);
 }
 
@@ -203,6 +211,8 @@ export function updateStudent({ id, display_name, external_ref, active, sync_opt
   if (active !== undefined) { parts.push('active=?'); params.push(active ? 1 : 0); }
   if (sync_opt_in !== undefined) { parts.push('sync_opt_in=?'); params.push(sync_opt_in ? 1 : 0); }
   if (parts.length === 0) return;
+  // Always bump updated_at so this write is visible to the timestamp-based sync cursor.
+  parts.push(`updated_at=datetime('now','localtime')`);
   params.push(id);
   run(`UPDATE students SET ${parts.join(',')} WHERE id=?`, params);
 }
@@ -234,28 +244,56 @@ export function saveSpeechProfile(profile) {
 // ── T4 Sync Helpers ──
 
 /**
- * Cursor strategy: INTEGER rowid (device-local, monotonically increasing per table).
- * nextCursor = max rowid seen (as string). '0' = start from the beginning.
- * Rows with student_id NULL are excluded when optInStudentIdsOnly is true.
+ * Cursor strategy — two modes depending on table type:
+ *
+ * Evidence tables (commands, sessions, progress_points, phase_changes, decision_flags):
+ *   INTEGER rowid cursor: monotonically increasing, never changes on UPDATE (immutable rows).
+ *   nextCursor = max rowid seen (as string). '0' = from the start.
+ *
+ * Mutable tables (students, speech_profiles, goals):
+ *   Timestamp (updated_at) cursor: rowid never changes on UPDATE so rowid cursors would
+ *   silently miss every post-first-sync UPDATE forever.
+ *   - '0' < any real ISO timestamp, so cursor='0' fetches all rows.
+ *   - Uses >= not >: same-second ties are included; re-sending a tie is harmless because
+ *     receiver ingestRows is idempotent / last-write-wins.
+ *   - nextCursor = max updated_at in the batch.
  */
 export function getRowsSince(table, cursor, { optInStudentIdsOnly = false } = {}) {
-  const rowid = parseInt(cursor) || 0;
   const BATCH = 500;
   const OPT_IN = `(SELECT id FROM students WHERE sync_opt_in=1)`;
 
-  let sql, params;
+  let sql, params, isMutable;
 
   if (table === 'students') {
+    isMutable = true;
     const f = optInStudentIdsOnly ? `AND sync_opt_in=1` : '';
-    sql = `SELECT *, rowid AS _sync_cursor FROM students WHERE rowid>? ${f} ORDER BY rowid LIMIT ?`;
-    params = [rowid, BATCH];
-  } else if (['commands', 'sessions', 'speech_profiles', 'goals', 'progress_points'].includes(table)) {
+    sql = `SELECT * FROM students WHERE updated_at >= ? ${f} ORDER BY updated_at LIMIT ?`;
+    params = [cursor, BATCH];
+  } else if (table === 'speech_profiles') {
+    isMutable = true;
+    const f = optInStudentIdsOnly
+      ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
+      : '';
+    sql = `SELECT * FROM speech_profiles WHERE updated_at >= ? ${f} ORDER BY updated_at LIMIT ?`;
+    params = [cursor, BATCH];
+  } else if (table === 'goals') {
+    isMutable = true;
+    const f = optInStudentIdsOnly
+      ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
+      : '';
+    sql = `SELECT * FROM goals WHERE updated_at >= ? ${f} ORDER BY updated_at LIMIT ?`;
+    params = [cursor, BATCH];
+  } else if (['commands', 'sessions', 'progress_points'].includes(table)) {
+    isMutable = false;
+    const rowid = parseInt(cursor) || 0;
     const f = optInStudentIdsOnly
       ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
       : '';
     sql = `SELECT *, rowid AS _sync_cursor FROM ${table} WHERE rowid>? ${f} ORDER BY rowid LIMIT ?`;
     params = [rowid, BATCH];
   } else if (['phase_changes', 'decision_flags'].includes(table)) {
+    isMutable = false;
+    const rowid = parseInt(cursor) || 0;
     const f = optInStudentIdsOnly
       ? `AND t.goal_id IN (SELECT id FROM goals WHERE student_id IS NOT NULL AND student_id IN ${OPT_IN})`
       : '';
@@ -266,13 +304,22 @@ export function getRowsSince(table, cursor, { optInStudentIdsOnly = false } = {}
   }
 
   const rows = query(sql, params);
-  const nextCursor = rows.length > 0 ? String(rows[rows.length - 1]._sync_cursor) : String(rowid);
 
-  // Strip internal cursor alias before returning
-  return {
-    rows: rows.map(({ _sync_cursor, ...r }) => r),
-    nextCursor,
-  };
+  if (isMutable) {
+    // Cursor = max updated_at in batch. >= on next call re-sends the boundary row —
+    // harmless because receiver ingestRows is idempotent / last-write-wins.
+    const nextCursor = rows.length > 0 ? rows[rows.length - 1].updated_at : cursor;
+    return { rows, nextCursor };
+  } else {
+    // Strip internal cursor alias before returning.
+    const nextCursor = rows.length > 0
+      ? String(rows[rows.length - 1]._sync_cursor)
+      : String(parseInt(cursor) || 0);
+    return {
+      rows: rows.map(({ _sync_cursor, ...r }) => r),
+      nextCursor,
+    };
+  }
 }
 
 // Tables with origin_device column (stamped on ingest to identify the sending device)
@@ -281,8 +328,10 @@ const ORIGIN_DEVICE_TABLES = new Set(['commands', 'sessions']);
 const EVIDENCE_TABLES = new Set(['commands', 'sessions', 'progress_points', 'phase_changes', 'decision_flags']);
 // Mutable tables: last-write-wins by comparing timestamp columns
 const MUTABLE_TABLES = new Set(['students', 'speech_profiles', 'goals']);
-// Timestamp column used for last-write-wins per mutable table
-const MUTABLE_TS = { students: 'created_at', speech_profiles: 'updated_at', goals: 'created_at' };
+// Timestamp column used for last-write-wins per mutable table.
+// students and goals now compare updated_at — created_at never advanced for same-origin
+// rows so the old LWW comparison was a dead no-op; updated_at fixes that.
+const MUTABLE_TS = { students: 'updated_at', speech_profiles: 'updated_at', goals: 'updated_at' };
 
 /**
  * Ingest rows from another device into the local database.
