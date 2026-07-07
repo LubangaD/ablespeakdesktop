@@ -6,6 +6,8 @@
  * (15 RPM for gemini-2.0-flash).
  */
 
+import { checkAudioFloor, parseVocabulary } from './speech-tuning.js';
+
 export class VoiceHandler {
   constructor(apiKey) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY;
@@ -50,9 +52,11 @@ export class VoiceHandler {
   }
 
   /**
-   * Transcribe base64-encoded audio using Gemini
+   * Transcribe base64-encoded audio using Gemini.
+   * profile (optional): per-student speech profile — drives the audio-size
+   * floor and biases transcription toward the student's custom vocabulary.
    */
-  async transcribe(audioBase64, mimeType = 'audio/webm') {
+  async transcribe(audioBase64, mimeType = 'audio/webm', profile = null) {
     if (!this.apiKey) {
       return { text: '', error: 'GEMINI_API_KEY not configured' };
     }
@@ -60,9 +64,10 @@ export class VoiceHandler {
     // Strip codec params: 'audio/webm;codecs=opus' → 'audio/webm'
     const cleanMimeType = mimeType.split(';')[0].trim();
 
-    // Reject tiny audio (silence/noise from continuous recording)
-    if (!audioBase64 || audioBase64.length < 4000) {
-      return { text: '', error: 'no_speech' };
+    // Reject tiny audio — floor is per-student (defaults to 4000 without a profile)
+    const floor = checkAudioFloor(audioBase64 ? audioBase64.length : 0, profile);
+    if (!audioBase64 || !floor.pass) {
+      return { text: '', error: 'no_speech', reason: 'audio_floor' };
     }
 
     // Check rate limit
@@ -73,7 +78,15 @@ export class VoiceHandler {
     }
 
     const audioSizeKB = Math.round(audioBase64.length / 1024);
-    
+
+    // Vocabulary bias: steer Gemini toward the student's known words/commands
+    const vocabulary = parseVocabulary(profile?.custom_vocabulary);
+    let prompt = 'Transcribe this audio to text. Return ONLY the exact words spoken, nothing else. No quotes, no explanations, no formatting. If no speech is detected, return the word SILENCE.';
+    if (vocabulary.length > 0) {
+      prompt += ` The speaker may use these words or commands: ${vocabulary.join(', ')}. Prefer them when the audio is ambiguous.`;
+    }
+
+
     // Try up to 2 times (initial + 1 retry)
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -95,7 +108,7 @@ export class VoiceHandler {
                   }
                 },
                 {
-                  text: 'Transcribe this audio to text. Return ONLY the exact words spoken, nothing else. No quotes, no explanations, no formatting. If no speech is detected, return the word SILENCE.'
+                  text: prompt
                 }
               ]
             }],
@@ -111,7 +124,7 @@ export class VoiceHandler {
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
 
           if (text === 'SILENCE' || text === '') {
-            return { text: '', error: 'no_speech' };
+            return { text: '', error: 'no_speech', reason: 'no_speech' };
           }
 
           console.log(`[VoiceHandler] Transcribed: "${text}"`);

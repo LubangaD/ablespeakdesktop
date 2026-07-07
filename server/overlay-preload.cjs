@@ -8,9 +8,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Send pre-transcribed text directly to AI (Web Speech API path — fast)
-  sendText: (text) => {
-    ipcRenderer.send('overlay-voice-text', { text });
+  // Send pre-transcribed text directly to AI (Web Speech API path — fast).
+  // confidence: 0..1 from the recognizer, or null/undefined when unknown.
+  sendText: (text, confidence) => {
+    ipcRenderer.send('overlay-voice-text', { text, confidence: typeof confidence === 'number' ? confidence : null });
   },
 
   // Send recorded audio to main process for AI processing (Gemini fallback — slow)

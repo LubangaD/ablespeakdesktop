@@ -273,17 +273,20 @@ function toggleOverlay() {
 function setupOverlayIPC() {
 
   // ── PRIMARY: Web Speech API path — receives pre-transcribed text (fast) ──
-  ipcMain.on('overlay-voice-text', async (event, { text }) => {
+  // Payload: { text, confidence } — confidence is the recognizer's top-alternative
+  // score (0..1) or null when unknown; the server treats missing confidence as null.
+  ipcMain.on('overlay-voice-text', async (event, { text, confidence }) => {
     if (!text || !text.trim()) return;
 
     const userText = text.trim();
-    console.log(`[Overlay] ⚡ Text command: "${userText}"`);
+    const conf = typeof confidence === 'number' ? confidence : null;
+    console.log(`[Overlay] ⚡ Text command: "${userText}"${conf != null ? ` (confidence ${conf.toFixed(2)})` : ''}`);
 
     try {
       const chatRes = await fetch(`http://localhost:${PORT}/api/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: userText }),
+        body: JSON.stringify({ text: userText, confidence: conf }),
       });
 
       if (!chatRes.ok) {
