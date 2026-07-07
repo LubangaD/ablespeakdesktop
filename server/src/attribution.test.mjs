@@ -7,12 +7,14 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unlinkSync, existsSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
 import {
   initDatabase, closeDatabase, getDb,
   upsertStudent, getStudents,
   insertSession, endSession,
   insertCommand, getCommands,
 } from './db.js';
+import { WsProxy } from './ws-proxy.js';
 import { v4 as uuidv4 } from 'uuid';
 
 function tmpFile(name) {
@@ -136,5 +138,19 @@ test('attribution: endSession sets ended_at', async () => {
   } finally {
     await closeDatabase();
     cleanup(path);
+  }
+});
+
+test('startStudentSession: does not set _activeSession when insertSession throws', async () => {
+  // Close any open DB so insertSession throws with "Database not initialized"
+  closeDatabase();
+  const fakeServer = new EventEmitter();
+  const proxy = new WsProxy({ server: fakeServer, aiEngine: null });
+  try {
+    const result = proxy.startStudentSession('nonexistent-student');
+    assert.equal(result, null, 'should return null when DB insert fails');
+    assert.equal(proxy.getActiveSession(), null, '_activeSession must stay null on DB failure');
+  } finally {
+    proxy.destroy();
   }
 });

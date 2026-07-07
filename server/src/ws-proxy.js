@@ -620,13 +620,13 @@ export class WsProxy {
     // Empty roster — skip picker entirely
     if (students.length === 0) return null;
 
-    // Single student — auto-select on first interaction
+    // Single student — auto-select on first interaction, then replay the utterance
     if (students.length === 1 && !this._pickerState) {
       this.startStudentSession(students[0].id);
       const responseText = `Hi ${students[0].display_name}!`;
       this._broadcastDashboard({ type: 'picker_clear', timestamp: new Date().toISOString() });
       this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'picker', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
-      return 'handled';
+      return null; // fall through so the triggering utterance is processed normally
     }
 
     // Not in picker mode yet — enter it, ask the question
@@ -670,6 +670,13 @@ export class WsProxy {
 
     // Try to match a student name — honour "I'm {name}" pattern by extracting name first
     const preFast = matchFastCommand(text);
+    // "switch student" mid-picker: reset to fresh state without burning a retry
+    if (preFast?.tool === 'switch_student') {
+      this._pickerState = { retryCount: 0, awaitingConfirmation: false, pendingStudent: null };
+      this._broadcastDashboard({ type: 'picker_prompt', question: "Who's using AbleSpeak?", names: students.map(s => s.display_name), timestamp: new Date().toISOString() });
+      this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: "Who's using AbleSpeak?", error: false, toolCalls: null, provider: 'picker', model: 'gate', latency, source: 'voice', timestamp: new Date().toISOString() });
+      return 'handled';
+    }
     const matchText = preFast?.tool === 'set_student_by_name' ? preFast.args.name : text;
     const { student, confidence } = matchStudentName(matchText, students);
 
@@ -710,16 +717,20 @@ export class WsProxy {
   startStudentSession(studentId) {
     if (this._activeSession) {
       try { endSession(this._activeSession.sessionId); } catch {}
+      this._activeSession = null;
     }
     const sessionId = uuidv4();
     try {
       insertSession({ id: sessionId, started_at: new Date().toISOString(), student_id: studentId });
+      this._activeSession = { studentId, sessionId };
+      return this._activeSession;
     } catch (err) {
       console.error('[WsHub] startStudentSession DB error:', err.message);
+      return null;
     }
-    this._activeSession = { studentId, sessionId };
-    return this._activeSession;
   }
+
+  getActiveSession() { return this._activeSession; }
 
   // Legacy compat
   sendCommandToVoqal() { return false; }

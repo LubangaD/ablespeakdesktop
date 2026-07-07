@@ -102,7 +102,7 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   // ── Students ──
 
   router.get('/students/active', (req, res) => {
-    const active = wsProxy._activeSession || null;
+    const active = wsProxy.getActiveSession();
     if (!active) return res.json({ student: null, sessionId: null });
     const students = getStudents({ activeOnly: false });
     const student = students.find(s => s.id === active.studentId) || null;
@@ -130,6 +130,7 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   router.patch('/students/:id', (req, res) => {
     const { id } = req.params;
     const { display_name, external_ref, active } = req.body || {};
+    if (display_name !== undefined && !String(display_name).trim()) return res.status(400).json({ error: 'display_name cannot be blank' });
     const students = getStudents({ activeOnly: false });
     const existing = students.find(s => s.id === id);
     if (!existing) return res.status(404).json({ error: 'Student not found' });
