@@ -242,7 +242,7 @@
     line-height: 1.2;
   }
 
-  /* ── Truth-state line: listening / heard / working / done / failed / repair ── */
+  /* ── Truth-state line: wake-listening / listening / heard / working / done / failed / repair ── */
   .state-line {
     font-size: 13px;
     font-weight: 600;
@@ -251,12 +251,30 @@
     min-height: 0;
   }
   .state-line:empty { display: none; }
+  .state-line.wake-listening { color: #60a5fa; }
   .state-line.listening { color: #6ee7b7; }
   .state-line.heard     { color: #ffffff; }
   .state-line.working   { color: #a78bfa; }
   .state-line.done      { color: #6ee7b7; }
   .state-line.failed    { color: #f87171; }
   .state-line.repair    { color: #fbbf24; }
+
+  /* ── Wake-listening dot indicator ── */
+  .wake-dot {
+    display: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #60a5fa;
+    flex-shrink: 0;
+    animation: wakePulse 2s ease-in-out infinite;
+  }
+  .wake-dot.visible { display: inline-block; }
+
+  @keyframes wakePulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
 
   /* ── Persistent last-transcript readout: Heard: "…" ── */
   .heard-line {
@@ -316,8 +334,12 @@
       Dictate <kbd>Ctrl + Shift + A</kbd>
     </div>
 
-    <!-- Truth state: listening / heard / working / done / failed(reason) / repair -->
-    <div class="state-line" id="stateLine" role="status" aria-live="polite"></div>
+    <!-- Wake-listening indicator (distinct from armed listening) -->
+    <div style="display:flex;align-items:center;gap:5px;justify-content:center;">
+      <span class="wake-dot" id="wakeDot" aria-hidden="true"></span>
+      <!-- Truth state: wake-listening / listening / heard / working / done / failed(reason) / repair -->
+      <div class="state-line" id="stateLine" role="status" aria-live="polite"></div>
+    </div>
 
     <!-- Persistent last-transcript readout -->
     <div class="heard-line" id="heardLine" aria-live="polite"></div>
@@ -371,13 +393,53 @@
   const heardLine = document.getElementById('heardLine');
   const repairArea = document.getElementById('repairArea');
   const repairQuestion = document.getElementById('repairQuestion');
+  const wakeDot = document.getElementById('wakeDot');
 
   // ── State ──
-  let state = 'idle'; // idle | listening | processing
+  let state = 'idle'; // idle | wake-listening | listening | processing
   let hasGreeted = false;
   let continuousMode = true; // Auto-restart recording after each command
   let consecutiveErrors = 0; // Stop continuous mode after repeated failures
   const MAX_CONSECUTIVE_ERRORS = 3;
+
+  // ── Wake-word settings (refreshed via settings_update WS message) ──
+  let wakeWordEnabled = true;
+  let wakeWordPhrases = ['hey able', 'able speak'];
+
+  // ── Backoff calculator (mirrors server/src/reconnect.js — see that file) ──
+  function nextRetryDelay(attempt, baseMs, capMs) {
+    baseMs = baseMs || 500; capMs = capMs || 15000;
+    return Math.min(capMs, baseMs * Math.pow(2, attempt));
+  }
+
+  // ── Wake-word matcher (mirrors server/src/speech-tuning.js isWakeWord — see that file) ──
+  function normWake(s) {
+    return String(s || '').toLowerCase().replace(/[^\w\s]/g, '').trim().replace(/\s+/g, ' ');
+  }
+  function lev(a, b) {
+    if (a === b) return 0; if (!a.length) return b.length; if (!b.length) return a.length;
+    let p = Array.from({length: b.length+1}, (_,i) => i), c = [];
+    for (let i = 1; i <= a.length; i++) {
+      c[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        c[j] = Math.min(p[j]+1, c[j-1]+1, p[j-1]+(a[i-1]===b[j-1]?0:1));
+      }
+      [p, c] = [c, p];
+    }
+    return p[b.length];
+  }
+  function isWakeWord(transcript, phrases) {
+    const t = normWake(transcript); const tns = t.replace(/\s/g,'');
+    for (const phrase of (phrases||[])) {
+      const p = normWake(phrase); if (!p) continue;
+      const pns = p.replace(/\s/g,'');
+      if (t.includes(p) || (pns && tns.includes(pns))) return true;
+      const ml = Math.max(t.length, p.length);
+      if (ml && lev(t,p)/ml <= 0.35) return true;
+      if (pns && tns) { const ml2 = Math.max(tns.length, pns.length); if (ml2 && lev(tns,pns)/ml2 <= 0.35) return true; }
+    }
+    return false;
+  }
 
   // ── Recording state ──
   let mediaRecorder = null;
@@ -416,11 +478,12 @@
     transcriptArea.style.display = text ? 'block' : 'none';
   }
 
-  // ── Truth states: listening / heard / working / done / failed(reason) / repair ──
+  // ── Truth states: wake-listening / listening / heard / working / done / failed(reason) / repair ──
   // Every interaction ends in done, failed(<reason>) or repair — never a silent drop.
   function setTruthState(name, detail) {
     const labels = {
       idle: '',
+      'wake-listening': 'waiting for wake word',
       listening: 'listening…',
       heard: 'heard',
       working: 'working…',
@@ -430,6 +493,14 @@
     };
     stateLine.textContent = labels[name] !== undefined ? labels[name] : name;
     stateLine.className = 'state-line ' + name;
+    // Wake dot: only visible in wake-listening state
+    if (name === 'wake-listening') {
+      wakeDot.classList.add('visible');
+      stateLine.setAttribute('aria-label', 'Waiting for wake word');
+    } else {
+      wakeDot.classList.remove('visible');
+      stateLine.removeAttribute('aria-label');
+    }
   }
 
   // Persistent last-transcript readout — stays visible across states
@@ -478,6 +549,7 @@
 
   let ws = null;
   let wsConnected = false;
+  let wsAttempt = 0;
 
   function connectWS() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -486,7 +558,12 @@
 
     ws.onopen = () => {
       wsConnected = true;
+      wsAttempt = 0;
       console.log('[Overlay] WebSocket connected — using fast dashboard pipeline');
+      // After reconnect, restore correct state
+      if (state === 'idle' && wakeWordEnabled) {
+        startWakeListener();
+      }
     };
 
     ws.onmessage = (event) => {
@@ -498,8 +575,11 @@
 
     ws.onclose = () => {
       wsConnected = false;
-      // Auto-reconnect
-      setTimeout(connectWS, 2000);
+      // Capped exponential backoff — mirrors reconnect.js nextRetryDelay
+      const delay = nextRetryDelay(wsAttempt);
+      wsAttempt++;
+      console.log(`[Overlay] WS closed, reconnecting in ${delay}ms (attempt ${wsAttempt})`);
+      setTimeout(connectWS, delay);
     };
 
     ws.onerror = () => {
@@ -526,6 +606,19 @@
   }
 
   function handleWSMessage(data) {
+    // Settings update — live toggle of wake word from Setup wizard
+    if (data.type === 'settings_update') {
+      if (typeof data.wakeWordEnabled === 'boolean') wakeWordEnabled = data.wakeWordEnabled;
+      if (Array.isArray(data.wakeWordPhrases)) wakeWordPhrases = data.wakeWordPhrases;
+      if (!wakeWordEnabled) {
+        stopWakeListener();
+        if (state === 'wake-listening') { state = 'idle'; setTruthState('idle'); }
+      } else if (state === 'idle') {
+        startWakeListener();
+      }
+      return;
+    }
+
     // Student picker prompt — show roster names
     if (data.type === 'picker_prompt') {
       showPicker(data.question, data.names);
@@ -572,9 +665,9 @@
     if (data.type === 'voice_no_speech') {
       setTruthState('failed', data.reason || 'no_speech');
       if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 800);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 800);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
       return;
     }
@@ -623,9 +716,9 @@
       setTranscript(data.text || data.error || 'Error', 'error');
       setTruthState('failed', typeof data.error === 'string' ? data.error : 'command error');
       if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 1500);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
       return;
     }
@@ -640,9 +733,9 @@
     if (isSilent) {
       setTranscript('✓', 'response');
       if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 300);
       } else {
-        setTimeout(() => { setIdleUI(); setTranscript('', ''); }, 400);
+        setTimeout(() => { setIdleUI(); setTranscript('', ''); resumeWake(); }, 400);
       }
       return;
     }
@@ -654,30 +747,148 @@
       const utterance = speak(responseText);
       if (utterance && continuousMode && active) {
         utterance.onend = () => {
-          setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+          setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 300);
         };
         setTimeout(() => {
           if (state !== 'listening' && active) {
             setIdleUI();
-            if (continuousMode) startListening();
+            if (continuousMode) startListening(); else resumeWake();
           }
         }, 6000);
       } else if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 2000);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 2000);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
     } else {
       if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 300);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
+    }
+  }
+
+  // Resume wake listening after an interaction — only when not armed/active
+  function resumeWake() {
+    if (!active && wakeWordEnabled && state !== 'wake-listening') {
+      setTimeout(startWakeListener, 500);
     }
   }
 
   // Connect immediately
   connectWS();
+
+  // ════════════════════════════════════════════════
+  // ── Wake-word listener loop ──
+  // Runs continuous speech recognition in low-key background mode.
+  // On match → arm the mic (enter normal listening state).
+  // Auto-restarts on onend/onerror with 500ms delay indefinitely,
+  // unless wakeWordEnabled=false or armed/processing.
+  // ════════════════════════════════════════════════
+
+  let wakeRecognition = null;
+  let wakeListenerActive = false;
+
+  function startWakeListener() {
+    if (!wakeWordEnabled) return;
+    if (wakeListenerActive) return;
+    if (active) return; // Don't run while armed/processing — no double sessions
+    if (state === 'listening' || state === 'processing') return;
+    if (typeof window.webkitSpeechRecognition !== 'function') return;
+
+    wakeListenerActive = true;
+    state = 'wake-listening';
+    setTruthState('wake-listening');
+
+    try {
+      wakeRecognition = new webkitSpeechRecognition();
+    } catch (e) {
+      wakeListenerActive = false;
+      state = 'idle';
+      return;
+    }
+
+    wakeRecognition.lang = navigator.language || 'en-US';
+    wakeRecognition.continuous = true;  // continuous for wake listening
+    wakeRecognition.interimResults = false;
+    wakeRecognition.maxAlternatives = 1;
+
+    wakeRecognition.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const transcript = (e.results[i][0]?.transcript || '').trim();
+        if (!transcript) continue;
+        if (isWakeWord(transcript, wakeWordPhrases)) {
+          // Wake word detected — arm the mic
+          console.log('[Overlay] Wake word detected:', transcript);
+          stopWakeListener();
+          speak('Listening');
+          active = true;
+          continuousMode = true;
+          consecutiveErrors = 0;
+          setTimeout(() => { startListening(); }, 300);
+          return;
+        }
+      }
+    };
+
+    wakeRecognition.onend = () => {
+      wakeListenerActive = false;
+      wakeRecognition = null;
+      if (!active && wakeWordEnabled && state !== 'listening' && state !== 'processing') {
+        // Auto-restart on session end (sessions terminate ~60s on silence)
+        state = 'idle';
+        setTimeout(startWakeListener, 500);
+      } else if (state === 'wake-listening') {
+        state = 'idle';
+        setTruthState('idle');
+      }
+    };
+
+    wakeRecognition.onerror = (e) => {
+      if (e.error === 'aborted') return;
+      console.warn('[Overlay] Wake recognition error:', e.error);
+      wakeListenerActive = false;
+      wakeRecognition = null;
+      if (!active && wakeWordEnabled) {
+        state = 'idle';
+        setTimeout(startWakeListener, 500);
+      }
+    };
+
+    try {
+      wakeRecognition.start();
+    } catch (e) {
+      wakeListenerActive = false;
+      wakeRecognition = null;
+      state = 'idle';
+    }
+  }
+
+  function stopWakeListener() {
+    wakeListenerActive = false;
+    if (wakeRecognition) {
+      try { wakeRecognition.abort(); } catch {}
+      wakeRecognition = null;
+    }
+    if (state === 'wake-listening') {
+      state = 'idle';
+      setTruthState('idle');
+    }
+  }
+
+  // ── Microphone reconnect on device change ──
+  // If a mic is unplugged/replugged, reacquire on the next recording attempt.
+  // We don't need to pre-acquire; getUserMedia is called fresh each startBlobRecording.
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      console.log('[Overlay] Media device change detected — mic may have changed');
+      // If we were mid-recording, the stream will error; stopRecording gracefully
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    });
+  }
 
   // ════════════════════════════════════════════════
   // ── Primary ASR: Web Speech API (per-utterance confidence) ──
@@ -902,6 +1113,8 @@
     hideRepair();
     setIdleUI();
     setTranscript('Ready — click mic to start', '');
+    // Resume wake listening now that the student has disarmed
+    resumeWake();
   }
 
   // ════════════════════════════════════════════
@@ -914,6 +1127,8 @@
     if (active) {
       stopRecording();
     } else {
+      // Stop wake listener before arming — no double recognition sessions
+      stopWakeListener();
       active = true;
       continuousMode = true;
       consecutiveErrors = 0;
@@ -973,6 +1188,17 @@
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
   }
+
+  // ── Load persisted settings and start wake listener on boot ──
+  fetch('/api/setup/status').then(r => r.json()).then(s => {
+    if (typeof s.wakeWordEnabled === 'boolean') wakeWordEnabled = s.wakeWordEnabled;
+    if (Array.isArray(s.wakeWordPhrases)) wakeWordPhrases = s.wakeWordPhrases;
+  }).catch(() => {}).finally(() => {
+    // Start wake listener after settings load (or on error — use defaults)
+    if (wakeWordEnabled) {
+      setTimeout(startWakeListener, 1500);
+    }
+  });
 
 })();
 </script>
