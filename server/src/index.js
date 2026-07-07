@@ -44,6 +44,7 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Large enough for long voice recordings
+app.use(express.text({ type: 'text/plain', limit: '1mb' })); // For CSV roster import
 app.use(rateLimit({ windowMs: 60000, max: 300 }));
 
 // ── HTTP Server (shared with WebSocket) ──

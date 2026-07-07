@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { Brain, Cpu, Globe, Zap, Check, AlertCircle, RefreshCw } from 'lucide-react';
+import { Brain, Globe, Check, AlertCircle, Users, Upload, UserPlus, ToggleLeft, ToggleRight } from 'lucide-react';
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -97,6 +97,9 @@ export default function Settings() {
         </div>
       </section>
 
+      {/* Students Roster */}
+      <StudentsSection />
+
       {/* Gateway Info */}
       <section aria-label="Gateway information">
         <h3 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: 16, fontWeight: 600 }}>ABLESPEAK GATEWAY</h3>
@@ -111,6 +114,188 @@ export default function Settings() {
         </div>
       </section>
     </div>
+  );
+}
+
+function StudentsSection() {
+  const queryClient = useQueryClient();
+  const { data: students = [], isLoading } = useQuery({ queryKey: ['students'], queryFn: () => api.getStudents({ all: 1 }), staleTime: 5000 });
+  const [newName, setNewName] = useState('');
+  const [newRef, setNewRef] = useState('');
+  const [addError, setAddError] = useState('');
+  const [csvText, setCsvText] = useState('');
+  const [csvResult, setCsvResult] = useState(null);
+  const [csvError, setCsvError] = useState('');
+
+  const addStudent = async (e) => {
+    e.preventDefault();
+    setAddError('');
+    if (!newName.trim()) { setAddError('Name is required'); return; }
+    try {
+      await api.addStudent({ display_name: newName.trim(), external_ref: newRef.trim() || undefined });
+      setNewName(''); setNewRef('');
+      queryClient.invalidateQueries(['students']);
+    } catch (err) { setAddError(err.message); }
+  };
+
+  const toggleActive = async (student) => {
+    try {
+      await api.updateStudent(student.id, { active: !student.active });
+      queryClient.invalidateQueries(['students']);
+    } catch {}
+  };
+
+  const importCsv = async () => {
+    setCsvError(''); setCsvResult(null);
+    try {
+      const result = await api.importRosterCsv(csvText);
+      setCsvResult(result);
+      if (result.imported > 0) queryClient.invalidateQueries(['students']);
+    } catch (err) { setCsvError(err.message); }
+  };
+
+  return (
+    <section aria-label="Student roster" style={{ marginBottom: 32 }}>
+      <h3 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: 16, fontWeight: 600 }}>
+        STUDENTS
+      </h3>
+
+      {/* Roster table */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <Users size={20} style={{ color: 'var(--accent)' }} />
+          <h4 style={{ fontWeight: 600, fontSize: '1rem' }}>Roster</h4>
+        </div>
+        {isLoading ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Loading...</p>
+        ) : students.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No students yet. Add one below or import a CSV.</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead>
+                <tr>
+                  {['Name', 'External Ref', 'Active'].map(h => (
+                    <th key={h} scope="col" style={{ textAlign: 'left', padding: '6px 10px', color: 'var(--text-muted)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {students.map(s => (
+                  <tr key={s.id}>
+                    <td style={{ padding: '8px 10px', color: 'var(--text-primary)' }}>{s.display_name}</td>
+                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{s.external_ref || '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>
+                      <button
+                        onClick={() => toggleActive(s)}
+                        aria-label={s.active ? `Deactivate ${s.display_name}` : `Activate ${s.display_name}`}
+                        title={s.active ? 'Active — click to deactivate' : 'Inactive — click to activate'}
+                        style={{ minWidth: 44, minHeight: 44, background: 'none', border: 'none', cursor: 'pointer', color: s.active ? 'var(--success)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                      >
+                        {s.active ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Add student form */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <UserPlus size={18} style={{ color: 'var(--accent)' }} />
+          <h4 style={{ fontWeight: 600, fontSize: '1rem' }}>Add Student</h4>
+        </div>
+        <form onSubmit={addStudent} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div>
+            <label htmlFor="student-name" style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>
+              Name <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="student-name"
+              type="text"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="First Last"
+              required
+              style={{ width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
+            />
+          </div>
+          <div>
+            <label htmlFor="student-ref" style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>
+              External Ref (optional)
+            </label>
+            <input
+              id="student-ref"
+              type="text"
+              value={newRef}
+              onChange={e => setNewRef(e.target.value)}
+              placeholder="e.g. student ID"
+              style={{ width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
+            />
+          </div>
+          {addError && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--error)', fontSize: 13 }}>
+              <AlertCircle size={14} /> {addError}
+            </div>
+          )}
+          <button
+            type="submit"
+            style={{ padding: '10px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}
+          >
+            Add Student
+          </button>
+        </form>
+      </div>
+
+      {/* CSV import */}
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <Upload size={18} style={{ color: 'var(--accent)' }} />
+          <h4 style={{ fontWeight: 600, fontSize: '1rem' }}>Import CSV Roster</h4>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label htmlFor="csv-input" style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>
+            CSV (header optional: display_name,external_ref)
+          </label>
+          <textarea
+            id="csv-input"
+            value={csvText}
+            onChange={e => setCsvText(e.target.value)}
+            rows={5}
+            placeholder={"display_name,external_ref\nAlice Brown,EXT-001\nBob Smith,EXT-002"}
+            style={{ width: '100%', padding: '10px 12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }}
+          />
+        </div>
+        <button
+          onClick={importCsv}
+          disabled={!csvText.trim()}
+          style={{ padding: '10px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: 'none', background: csvText.trim() ? 'var(--accent)' : 'var(--bg-tertiary)', color: csvText.trim() ? '#fff' : 'var(--text-muted)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: csvText.trim() ? 'pointer' : 'not-allowed' }}
+        >
+          Import
+        </button>
+        {csvError && (
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', color: 'var(--error)', fontSize: 13 }}>
+            <AlertCircle size={14} /> {csvError}
+          </div>
+        )}
+        {csvResult && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--success)', fontSize: 13, marginBottom: csvResult.errors.length ? 6 : 0 }}>
+              <Check size={14} /> {csvResult.imported} student{csvResult.imported !== 1 ? 's' : ''} imported
+            </div>
+            {csvResult.errors.map((e, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--error)', fontSize: 13 }}>
+                <AlertCircle size={14} /> Line {e.line}: {e.reason}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

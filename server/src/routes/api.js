@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { readFileSync, existsSync } from 'fs';
-import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts } from '../db.js';
+import { v4 as uuidv4 } from 'uuid';
+import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent } from '../db.js';
+import { parseRosterCsv } from '../identity.js';
 
 export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath }) {
   const router = Router();
@@ -95,6 +97,66 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     } catch (err) {
       res.status(500).json({ error: 'Failed to read config' });
     }
+  });
+
+  // ── Students ──
+
+  router.get('/students/active', (req, res) => {
+    const active = wsProxy._activeSession || null;
+    if (!active) return res.json({ student: null, sessionId: null });
+    const students = getStudents({ activeOnly: false });
+    const student = students.find(s => s.id === active.studentId) || null;
+    res.json({ student, sessionId: active.sessionId });
+  });
+
+  router.get('/students', (req, res) => {
+    const activeOnly = req.query.all !== '1';
+    const students = getStudents({ activeOnly });
+    res.json(students);
+  });
+
+  router.post('/students', (req, res) => {
+    const { display_name, external_ref } = req.body || {};
+    if (!display_name || !String(display_name).trim()) {
+      return res.status(400).json({ error: 'display_name is required' });
+    }
+    const id = uuidv4();
+    upsertStudent({ id, display_name: String(display_name).trim(), external_ref: external_ref ? String(external_ref).trim() : null });
+    const students = getStudents({ activeOnly: false });
+    const created = students.find(s => s.id === id);
+    res.status(201).json(created);
+  });
+
+  router.patch('/students/:id', (req, res) => {
+    const { id } = req.params;
+    const { display_name, external_ref, active } = req.body || {};
+    const students = getStudents({ activeOnly: false });
+    const existing = students.find(s => s.id === id);
+    if (!existing) return res.status(404).json({ error: 'Student not found' });
+    updateStudent({ id, display_name, external_ref, active });
+    const updated = getStudents({ activeOnly: false }).find(s => s.id === id);
+    res.json(updated);
+  });
+
+  router.post('/students/roster-csv', (req, res) => {
+    let csv = '';
+    const contentType = req.headers['content-type'] || '';
+    if (contentType.includes('text/plain')) {
+      csv = req.body || '';
+    } else {
+      csv = req.body?.csv || '';
+    }
+    const { students, errors } = parseRosterCsv(csv);
+    let imported = 0;
+    for (const s of students) {
+      try {
+        upsertStudent({ id: uuidv4(), display_name: s.display_name, external_ref: s.external_ref });
+        imported++;
+      } catch (err) {
+        errors.push({ line: null, reason: err.message });
+      }
+    }
+    res.json({ imported, errors });
   });
 
   // ── Manual Command ──

@@ -37,4 +37,17 @@ export const api = {
   }),
   getSystem: () => fetchApi('/system'),
   getAiStatus: () => fetchApi('/ai/status'),
+  // ── Students ──
+  getStudents: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return fetchApi(`/students${q ? '?' + q : ''}`);
+  },
+  getActiveStudent: () => fetchApi('/students/active'),
+  addStudent: (data) => fetchApi('/students', { method: 'POST', body: JSON.stringify(data) }),
+  updateStudent: (id, data) => fetchApi(`/students/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  importRosterCsv: (csv) => fetchApi('/students/roster-csv', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csv }),
+  }),
 };
