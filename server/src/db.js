@@ -55,6 +55,12 @@ function scheduleSave() {
   saveTimer = setInterval(saveToFile, 2000); // auto-save every 2s (reduced from 5s)
 }
 
+export function closeDatabase() {
+  if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
+  saveToFile();
+  db = null;
+}
+
 function migrate() {
   db.run(`
     CREATE TABLE IF NOT EXISTS commands (
@@ -75,6 +81,19 @@ function migrate() {
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_log_level ON log_events(level)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_health_comp ON health_checks(component)`); } catch {}
+
+  // T0: student identity + speech profiles + progress monitoring schema
+  db.run(`CREATE TABLE IF NOT EXISTS students (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, external_ref TEXT, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now','localtime')))`);
+  db.run(`CREATE TABLE IF NOT EXISTS speech_profiles (id TEXT PRIMARY KEY, student_id TEXT NOT NULL, custom_vocabulary TEXT DEFAULT '[]', min_audio_b64 INTEGER DEFAULT 4000, min_confidence REAL DEFAULT 0.45, fuzzy_threshold REAL DEFAULT 0.34, silence_threshold REAL DEFAULT 15, silence_duration_ms INTEGER DEFAULT 2000, repair_enabled INTEGER DEFAULT 1, updated_at TEXT DEFAULT (datetime('now','localtime')))`);
+  try { db.run(`ALTER TABLE sessions ADD COLUMN student_id TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN student_id TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN outcome TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN prompt_count INTEGER`); } catch {}
+  db.run(`CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, student_id TEXT NOT NULL, measure TEXT NOT NULL, baseline_value REAL NOT NULL, baseline_date TEXT NOT NULL, target_value REAL NOT NULL, target_date TEXT NOT NULL, decision_rule TEXT NOT NULL DEFAULT '4_below_aim', status TEXT DEFAULT 'active', created_at TEXT DEFAULT (datetime('now','localtime')))`);
+  db.run(`CREATE TABLE IF NOT EXISTS progress_points (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, student_id TEXT NOT NULL, measured_at TEXT NOT NULL, value REAL NOT NULL, source TEXT NOT NULL DEFAULT 'auto', sample_size INTEGER, UNIQUE(goal_id, measured_at))`);
+  db.run(`CREATE TABLE IF NOT EXISTS phase_changes (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, changed_at TEXT NOT NULL, label TEXT NOT NULL, note TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS decision_flags (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, rule TEXT NOT NULL, fired_at TEXT NOT NULL, detail TEXT, acknowledged_at TEXT)`);
+
   saveToFile();
 }
 
@@ -99,12 +118,13 @@ function run(sql, params = []) {
 
 // ── Commands ──
 
-export function insertCommand({ id, type, direction, payload, result, latency_ms, session_id }) {
-  run(`INSERT OR IGNORE INTO commands (id,type,direction,payload,result,latency_ms,session_id) VALUES (?,?,?,?,?,?,?)`,
+export function insertCommand({ id, type, direction, payload, result, latency_ms, session_id, student_id, outcome, prompt_count }) {
+  run(`INSERT OR IGNORE INTO commands (id,type,direction,payload,result,latency_ms,session_id,student_id,outcome,prompt_count) VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [id, type, direction || 'voqal_to_ext',
      typeof payload === 'string' ? payload : JSON.stringify(payload || {}),
      typeof result === 'string' ? result : JSON.stringify(result || {}),
-     latency_ms || null, session_id || null]);
+     latency_ms || null, session_id || null,
+     student_id || null, outcome || null, prompt_count ?? null]);
 }
 
 export function getCommands({ limit = 50, offset = 0, type = null, direction = null } = {}) {
@@ -159,4 +179,35 @@ export function getLatestHealthChecks() {
 
 export function getHealthAlerts() {
   return query(`SELECT h.* FROM health_checks h INNER JOIN (SELECT component, MAX(id) as max_id FROM health_checks GROUP BY component) latest ON h.id=latest.max_id WHERE h.status IN ('warn','error') ORDER BY h.checked_at DESC`);
+}
+
+// ── Students ──
+
+export function upsertStudent({ id, display_name, external_ref }) {
+  run(`INSERT INTO students (id,display_name,external_ref) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, external_ref=excluded.external_ref`,
+    [id, display_name, external_ref || null]);
+}
+
+export function getStudents({ activeOnly = true } = {}) {
+  if (activeOnly) return query(`SELECT * FROM students WHERE active=1 ORDER BY display_name`);
+  return query(`SELECT * FROM students ORDER BY display_name`);
+}
+
+// ── Speech Profiles ──
+
+const SPEECH_PROFILE_DEFAULTS = {
+  custom_vocabulary: '[]', min_audio_b64: 4000, min_confidence: 0.45,
+  fuzzy_threshold: 0.34, silence_threshold: 15, silence_duration_ms: 2000, repair_enabled: 1,
+};
+
+export function getSpeechProfile(studentId) {
+  const row = queryOne(`SELECT * FROM speech_profiles WHERE student_id=?`, [studentId]);
+  if (row) return row;
+  return { ...SPEECH_PROFILE_DEFAULTS, student_id: studentId, id: null, updated_at: null };
+}
+
+export function saveSpeechProfile(profile) {
+  const { id, student_id, custom_vocabulary, min_audio_b64, min_confidence, fuzzy_threshold, silence_threshold, silence_duration_ms, repair_enabled } = profile;
+  run(`INSERT INTO speech_profiles (id,student_id,custom_vocabulary,min_audio_b64,min_confidence,fuzzy_threshold,silence_threshold,silence_duration_ms,repair_enabled,updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now','localtime')) ON CONFLICT(id) DO UPDATE SET student_id=excluded.student_id, custom_vocabulary=COALESCE(excluded.custom_vocabulary,custom_vocabulary), min_audio_b64=COALESCE(excluded.min_audio_b64,min_audio_b64), min_confidence=COALESCE(excluded.min_confidence,min_confidence), fuzzy_threshold=COALESCE(excluded.fuzzy_threshold,fuzzy_threshold), silence_threshold=COALESCE(excluded.silence_threshold,silence_threshold), silence_duration_ms=COALESCE(excluded.silence_duration_ms,silence_duration_ms), repair_enabled=COALESCE(excluded.repair_enabled,repair_enabled), updated_at=datetime('now','localtime')`,
+    [id || null, student_id, custom_vocabulary ?? null, min_audio_b64 ?? null, min_confidence ?? null, fuzzy_threshold ?? null, silence_threshold ?? null, silence_duration_ms ?? null, repair_enabled ?? null]);
 }
