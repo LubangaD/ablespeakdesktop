@@ -1,10 +1,21 @@
 import { Router } from 'express';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent, getSpeechProfile, saveSpeechProfile } from '../db.js';
 import { parseRosterCsv } from '../identity.js';
+import { parseEnvFile, upsertEnvVar } from '../envfile.js';
+import { getAppSettings, saveAppSettings } from '../app-settings.js';
 
-export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath }) {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const ENV_PATH = join(__dirname, '..', '..', '.env');
+
+// In-process flag: mic tested this server session (step 4 status)
+let _micTestedThisSession = false;
+
+export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath, aiEngine }) {
   const router = Router();
 
   // ── Health ──
@@ -249,6 +260,138 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
       console.error('[VoiceText] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ════════════════════════════════════════════════
+  // ── Setup Wizard REST Endpoints ──
+  // ════════════════════════════════════════════════
+
+  // GET /api/setup/status — booleans only, NEVER echoes key values
+  router.get('/setup/status', (req, res) => {
+    const status = wsProxy.getStatus();
+    const ai = aiEngine ? aiEngine.getStatus() : { configured: false };
+    const students = getStudents({ activeOnly: false });
+    const settings = getAppSettings();
+    res.json({
+      keyConfigured: !!ai.configured,
+      extensionConnected: status.extensionClients > 0,
+      studentCount: students.length,
+      micTestedThisSession: _micTestedThisSession,
+      autoStart: settings.autoStart,
+      wakeWordEnabled: settings.wakeWordEnabled,
+      wakeWordPhrases: settings.wakeWordPhrases,
+      setupComplete: settings.setupComplete,
+    });
+  });
+
+  // POST /api/setup/keys — write API key to .env (atomic) and hot-reload
+  // SECURITY: never echo the key value in any response
+  router.post('/setup/keys', async (req, res) => {
+    const { provider, apiKey } = req.body || {};
+    if (!provider || typeof provider !== 'string') {
+      return res.status(400).json({ error: 'provider is required' });
+    }
+    if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+      return res.status(400).json({ error: 'apiKey is required' });
+    }
+
+    // Determine env var name from provider
+    const PROVIDER_ENV_KEYS = {
+      openai: 'OPENAI_API_KEY',
+      gemini: 'GEMINI_API_KEY',
+      anthropic: 'ANTHROPIC_API_KEY',
+      groq: 'GROQ_API_KEY',
+      azure: 'AZURE_OPENAI_API_KEY',
+      ollama: null, // No key needed
+    };
+
+    const envKey = PROVIDER_ENV_KEYS[provider];
+    if (envKey === undefined) {
+      return res.status(400).json({ error: `Unknown provider: ${provider}` });
+    }
+
+    try {
+      // Atomic env file write: read → upsert → tmp → rename
+      if (envKey) {
+        const existing = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8') : '';
+        const updated = upsertEnvVar(existing, envKey, apiKey.trim());
+        const tmp = ENV_PATH + '.tmp';
+        writeFileSync(tmp, updated, 'utf8');
+        renameSync(tmp, ENV_PATH);
+        // Hot-reload: update process.env so the change takes effect without restart
+        process.env[envKey] = apiKey.trim();
+      }
+
+      // Switch the AI engine to the new provider
+      let switchResult = { applied: false, reason: 'no_ai_engine' };
+      if (aiEngine) {
+        try {
+          switchResult = aiEngine.setProvider(provider);
+          switchResult.applied = true;
+        } catch (err) {
+          switchResult = { applied: false, reason: err.message };
+        }
+      }
+
+      // Broadcast provider change to dashboard clients
+      wsProxy._broadcastDashboard({ type: 'provider_switched', provider, timestamp: new Date().toISOString() });
+
+      // SECURITY: response contains no key value
+      res.json({ ok: true, provider, envVar: envKey || 'none', switch: switchResult });
+    } catch (err) {
+      console.error('[Setup/keys] Error:', err.message);
+      res.status(500).json({ error: 'Failed to save key' });
+    }
+  });
+
+  // POST /api/setup/app-settings — persist auto-start + wake-word preferences
+  router.post('/setup/app-settings', async (req, res) => {
+    const { autoStart, wakeWordEnabled, wakeWordPhrases, setupComplete } = req.body || {};
+    const patch = {};
+    if (typeof autoStart === 'boolean') patch.autoStart = autoStart;
+    if (typeof wakeWordEnabled === 'boolean') patch.wakeWordEnabled = wakeWordEnabled;
+    if (Array.isArray(wakeWordPhrases)) patch.wakeWordPhrases = wakeWordPhrases;
+    if (typeof setupComplete === 'boolean') patch.setupComplete = setupComplete;
+
+    try {
+      saveAppSettings(patch);
+      const settings = getAppSettings();
+
+      // Apply auto-start via Electron bridge if present
+      let autoStartApplied = false;
+      if ('autoStart' in patch && globalThis.__ablespeakElectron) {
+        try {
+          globalThis.__ablespeakElectron.setAutoStart(settings.autoStart);
+          autoStartApplied = true;
+        } catch {}
+      }
+
+      // Live-update overlay: broadcast settings_update so wake-word toggles instantly
+      wsProxy._broadcastDashboard({
+        type: 'settings_update',
+        wakeWordEnabled: settings.wakeWordEnabled,
+        wakeWordPhrases: settings.wakeWordPhrases,
+        timestamp: new Date().toISOString(),
+      });
+
+      res.json({
+        ok: true,
+        settings,
+        autoStartApplied,
+        autoStartReason: !autoStartApplied && 'autoStart' in patch
+          ? (globalThis.__ablespeakElectron ? 'bridge_error' : 'not_running_in_electron')
+          : undefined,
+      });
+    } catch (err) {
+      console.error('[Setup/app-settings] Error:', err.message);
+      res.status(500).json({ error: 'Failed to save settings' });
+    }
+  });
+
+  // POST /api/setup/mic-tested — called by step 4 to mark mic tested this session
+  router.post('/setup/mic-tested', (req, res) => {
+    _micTestedThisSession = true;
+    res.json({ ok: true });
   });
 
   return router;
