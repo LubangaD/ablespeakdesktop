@@ -5,7 +5,7 @@
   "main": "electron-main.cjs",
   "type": "module",
   "scripts": {
-    "test": "node --test src/safety.test.mjs src/db.test.mjs",
+    "test": "node --test \"src/**/*.test.mjs\"",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "desktop": "electron electron-main.cjs",

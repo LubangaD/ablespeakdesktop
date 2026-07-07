@@ -177,6 +177,12 @@ export class WsProxy {
           // Process through AI engine
           const result = await this.aiEngine.processChat(msg.text, context);
 
+          // Store pending confirmation if a tool requires it (chat path)
+          const confirmItem = result.toolCalls?.find(tc => tc.result?.needsConfirmation);
+          if (confirmItem) {
+            this._pendingConfirmation = { toolName: confirmItem.result.toolName, args: confirmItem.result.args, prompt: confirmItem.result.prompt, expiresAt: Date.now() + 30000, unclearCount: 0 };
+          }
+
           // Persist to DB
           try {
             insertCommand({
@@ -191,11 +197,11 @@ export class WsProxy {
             console.error('[WsHub] DB insert error:', err.message);
           }
 
-          // Send response to dashboard
+          // Send response to dashboard — when confirmation is pending, override with the exact prompt
           this._broadcastDashboard({
             type: 'chat_assistant_message',
             id: commandId,
-            text: result.text,
+            text: confirmItem ? confirmItem.result.prompt : result.text,
             error: result.error || false,
             toolCalls: result.toolCalls,
             provider: result.provider,
@@ -379,7 +385,7 @@ export class WsProxy {
           this._broadcastDashboard({
             type: 'chat_assistant_message',
             id: commandId,
-            text: result.text,
+            text: confirmItem ? confirmItem.result.prompt : result.text,
             error: result.error || false,
             toolCalls: result.toolCalls,
             provider: result.provider,
