@@ -290,6 +290,8 @@ const MUTABLE_TS = { students: 'created_at', speech_profiles: 'updated_at', goal
  * Mutable tables: upsert only if incoming timestamp is newer (last-write-wins).
  * Returns { inserted, skipped }.
  */
+const SAFE_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export function ingestRows(table, rows, originDevice) {
   if (!rows || rows.length === 0) return { inserted: 0, skipped: 0 };
   if (!EVIDENCE_TABLES.has(table) && !MUTABLE_TABLES.has(table)) {
@@ -299,9 +301,13 @@ export function ingestRows(table, rows, originDevice) {
   let inserted = 0, skipped = 0;
 
   for (const rawRow of rows) {
-    // Build clean row (strip any sync-internal fields)
-    const row = { ...rawRow };
-    delete row._sync_cursor;
+    // Build clean row: strip sync-internal fields and any non-identifier keys —
+    // column names are interpolated into SQL, so only plain identifiers pass.
+    const row = {};
+    for (const [k, v] of Object.entries(rawRow)) {
+      if (k !== '_sync_cursor' && SAFE_IDENT.test(k)) row[k] = v;
+    }
+    if (Object.keys(row).length === 0) { skipped++; continue; }
 
     if (EVIDENCE_TABLES.has(table)) {
       // Stamp origin_device for tables that have the column
