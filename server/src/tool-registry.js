@@ -8,6 +8,7 @@
 
 import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
+import { isProtectedApplication, requiresConfirmation } from './safety.js';
 
 // ── Tool Definitions ──
 
@@ -579,8 +580,7 @@ const TOOLS = [
     selector: {},
     execute: async (args) => {
       // SAFETY: Never close browsers — use close_tab instead
-      const browserNames = ['chrome', 'brave', 'edge', 'firefox', 'safari', 'opera'];
-      if (browserNames.some(b => args.app_name.toLowerCase().includes(b))) {
+      if (isProtectedApplication(args.app_name)) {
         return { status: 'error', message: `Cannot close browser "${args.app_name}" — use close_tab to close individual tabs.` };
       }
       const { closeApplication } = await import('./system-tools.js');
@@ -647,7 +647,12 @@ export class ToolRegistry {
   /**
    * Execute a tool by name
    */
-  async executeTool(name, args, wsHub) {
+  async executeTool(name, args, wsHub, opts = {}) {
+    const check = requiresConfirmation(name, args);
+    if (check.required && !opts.confirmed) {
+      return { needsConfirmation: true, prompt: check.prompt, toolName: name, args };
+    }
+
     const tool = this.tools.find(t => t.name === name);
     if (!tool) {
       return { status: 'error', error: `Unknown tool: ${name}` };

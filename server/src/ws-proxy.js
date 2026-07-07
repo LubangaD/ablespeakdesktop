@@ -4,6 +4,7 @@ import { insertCommand, upsertHealthCheck } from './db.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
+import { parseConfirmationReply } from './safety.js';
 
 /**
  * AbleSpeak WebSocket Hub
@@ -25,6 +26,7 @@ export class WsProxy {
     this.lastContextUpdate = null;
     this.browserContext = { tabs: [], activeTab: null };
     this._voiceProcessing = false; // Mutex: prevents concurrent voice command processing
+    this._pendingConfirmation = null; // { toolName, args, prompt, expiresAt, unclearCount }
 
     // Extension-facing WS server
     this.extensionWss = new WebSocketServer({ noServer: true });
@@ -244,6 +246,39 @@ export class WsProxy {
           console.log(`[Voice] Command: "${text}"`);
 
           // ────────────────────────────────────────────
+          // CONFIRMATION GATE: pending yes/no reply?
+          // ────────────────────────────────────────────
+          if (this._pendingConfirmation) {
+            if (Date.now() >= this._pendingConfirmation.expiresAt) {
+              this._pendingConfirmation = null; // expired — fall through to normal processing
+            } else {
+              const reply = parseConfirmationReply(text);
+              if (reply === 'yes') {
+                const { toolName, args } = this._pendingConfirmation;
+                this._pendingConfirmation = null;
+                const toolResult = await this.aiEngine.toolRegistry.executeTool(toolName, args, this, { confirmed: true });
+                const responseText = this.aiEngine._summarizeToolResults([{ tool: toolName, result: toolResult }]);
+                try {
+                  insertCommand({ id: commandId, type: 'voice_confirm', direction: 'user_to_ai', payload: JSON.stringify({ text, toolName, args }), result: JSON.stringify(toolResult), latency_ms: Date.now() - startTime });
+                } catch {}
+                this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: toolResult?.status === 'error' || false, toolCalls: [{ tool: toolName, result: toolResult }], provider: 'confirmation', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+                return;
+              } else if (reply === 'no') {
+                this._pendingConfirmation = null;
+                this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: 'Cancelled.', error: false, toolCalls: null, provider: 'confirmation', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+                return;
+              } else { // unclear
+                this._pendingConfirmation.unclearCount = (this._pendingConfirmation.unclearCount || 0) + 1;
+                const { prompt, unclearCount } = this._pendingConfirmation;
+                const responseText = unclearCount >= 2 ? 'Cancelled.' : prompt;
+                if (unclearCount >= 2) this._pendingConfirmation = null;
+                this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: false, toolCalls: null, provider: 'confirmation', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
+                return;
+              }
+            }
+          }
+
+          // ────────────────────────────────────────────
           // FAST PATH: Match common commands instantly
           // ────────────────────────────────────────────
           const fastMatch = matchFastCommand(text);
@@ -307,6 +342,12 @@ export class WsProxy {
           };
 
           const result = await this.aiEngine.processChat(text, context);
+
+          // Store pending confirmation if a tool requires it
+          const confirmItem = result.toolCalls?.find(tc => tc.result?.needsConfirmation);
+          if (confirmItem) {
+            this._pendingConfirmation = { toolName: confirmItem.result.toolName, args: confirmItem.result.args, prompt: confirmItem.result.prompt, expiresAt: Date.now() + 30000, unclearCount: 0 };
+          }
 
           // Auto-focus browser if AI used browser tools
           if (result.toolCalls && Array.isArray(result.toolCalls)) {
