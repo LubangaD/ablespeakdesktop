@@ -715,6 +715,11 @@ export class WsProxy {
    * can forward them to the overlay without losing any gate behaviour.
    */
   async handleVoiceText(text, confidence) {
+    if (this._voiceProcessing) {
+      return [{ type: 'voice_busy', message: 'Still processing previous command', timestamp: new Date().toISOString() }];
+    }
+    this._voiceProcessing = true;
+
     const profile = this._loadSpeechProfile();
     const startTime = Date.now();
     const events = [];
@@ -732,6 +737,7 @@ export class WsProxy {
     try {
       await this._handleVoiceText(text, confidence, profile, mockWs, startTime);
     } finally {
+      this._voiceProcessing = false;
       this._fallbackCapture = null;
     }
 
