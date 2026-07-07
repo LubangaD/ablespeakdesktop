@@ -327,7 +327,11 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
       if (aiEngine) {
         try {
           switchResult = aiEngine.setProvider(provider);
-          switchResult.applied = true;
+          if (switchResult && typeof switchResult === 'object') {
+            switchResult.applied = true;
+          } else {
+            switchResult = { applied: true };
+          }
         } catch (err) {
           switchResult = { applied: false, reason: err.message };
         }

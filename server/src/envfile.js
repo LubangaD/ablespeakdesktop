@@ -11,13 +11,14 @@
  * Parse KEY=VALUE lines from env file text.
  * Comments (# …) and blank lines are skipped.
  * Returns a Map so insertion order is preserved.
+ * Tolerates both LF and CRLF line endings.
  *
  * @param {string} text
  * @returns {Map<string, string>}
  */
 export function parseEnvFile(text) {
   const map = new Map();
-  for (const line of String(text || '').split('\n')) {
+  for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const eqIdx = trimmed.indexOf('=');
@@ -49,14 +50,20 @@ export function serializeEnvFile(map) {
  * Preserves comments, blank lines, and all unrelated keys.
  * If the key already exists (any occurrence), every occurrence is updated.
  * If missing, appends KEY=VALUE at the end.
+ * Detects and preserves the input's line ending (LF or CRLF).
  *
  * @param {string} text   - raw .env file contents
  * @param {string} key    - env var name (no spaces)
  * @param {string} value  - new value (may contain '=')
- * @returns {string}      - updated file contents
+ * @returns {string}      - updated file contents with uniform line endings
  */
 export function upsertEnvVar(text, key, value) {
-  const lines = String(text || '').split('\n');
+  const textStr = String(text || '');
+  // Detect line ending: if input contains CRLF, use CRLF; else use LF
+  const isCRLF = textStr.includes('\r\n');
+  const lineEnding = isCRLF ? '\r\n' : '\n';
+
+  const lines = textStr.split(/\r?\n/);
   let found = false;
 
   const updated = lines.map(line => {
@@ -82,5 +89,5 @@ export function upsertEnvVar(text, key, value) {
     }
   }
 
-  return updated.join('\n');
+  return updated.join(lineEnding);
 }

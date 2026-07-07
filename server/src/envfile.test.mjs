@@ -81,10 +81,10 @@ test('upsertEnvVar: preserves unrelated lines on empty initial text', () => {
   assert.ok(out.includes('KEY=val'));
 });
 
-test('upsertEnvVar: only first occurrence updated if duplicated key (idempotent)', () => {
+test('upsertEnvVar: all occurrences updated if duplicated key', () => {
   const text = 'KEY=first\nKEY=second\n';
   const out = upsertEnvVar(text, 'KEY', 'new');
-  // Both occurrences should be updated (or at minimum the result parses to new)
+  // All occurrences are updated
   const m = parseEnvFile(out);
   assert.equal(m.get('KEY'), 'new');
 });
@@ -93,4 +93,19 @@ test('upsertEnvVar: value with = in it is preserved', () => {
   const text = 'A=1\n';
   const out = upsertEnvVar(text, 'URL', 'https://x.com?a=1');
   assert.ok(out.includes('URL=https://x.com?a=1'));
+});
+
+test('upsertEnvVar: CRLF line endings preserved uniformly', () => {
+  const text = 'KEY=old\r\nOTHER=val\r\n';
+  const out = upsertEnvVar(text, 'KEY', 'new');
+  // Output should preserve CRLF uniformly
+  assert.ok(out.includes('OTHER=val'), 'OTHER=val should be preserved');
+  assert.ok(out.includes('KEY=new'), 'KEY should be updated to new');
+  // All lines should end with \r\n
+  const lines = out.split('\r\n').filter(l => l.length > 0);
+  assert.equal(lines.length, 2, 'should have exactly 2 content lines');
+  // Parse should correctly extract both values
+  const m = parseEnvFile(out);
+  assert.equal(m.get('KEY'), 'new');
+  assert.equal(m.get('OTHER'), 'val');
 });
