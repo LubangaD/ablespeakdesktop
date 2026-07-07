@@ -10,7 +10,8 @@
     "activeTab",
     "tabs",
     "cookies",
-    "history"
+    "history",
+    "alarms"
   ],
   "icons": {
     "16": "images/icon-16.png",
