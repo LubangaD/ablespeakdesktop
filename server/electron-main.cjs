@@ -16,6 +16,20 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session, globalShort
 const path = require('path');
 const fs = require('fs');
 
+// ── Auto-start Electron bridge ──
+// Set BEFORE server import so REST endpoints can call it immediately.
+// When running headlessly (npm start), globalThis.__ablespeakElectron is absent.
+globalThis.__ablespeakElectron = {
+  setAutoStart(on) {
+    const args = app.isPackaged ? [] : [path.resolve(__dirname, '..')];
+    app.setLoginItemSettings({ openAtLogin: !!on, path: process.execPath, args });
+    return app.getLoginItemSettings().openAtLogin;
+  },
+  getAutoStart() {
+    return app.getLoginItemSettings().openAtLogin;
+  },
+};
+
 // ── Config ──
 const PORT = parseInt(process.env.GATEWAY_PORT || '3001');
 const DASHBOARD_URL = `http://localhost:${PORT}`;
@@ -79,19 +93,42 @@ app.on('second-instance', () => {
   }
 });
 
-// ── Boot Server ──
+// ── Boot Server (with single retry on failure) ──
 async function startServer() {
   // Set working directory so dotenv/.env resolves correctly
   process.chdir(path.join(__dirname));
 
-  // Dynamic import of the ESM server entry
+  // Dynamic import of the ESM server entry — retry once after 2 s on failure
   try {
     await import('./src/index.js');
     serverReady = true;
     console.log('[Electron] Server module loaded');
   } catch (err) {
-    console.error('[Electron] Failed to start server:', err);
+    console.error('[Electron] Failed to start server (attempt 1):', err.message);
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      await import('./src/index.js');
+      serverReady = true;
+      console.log('[Electron] Server module loaded (retry)');
+    } catch (err2) {
+      console.error('[Electron] Server failed on retry — showing error window:', err2.message);
+      showServerErrorWindow(err2.message);
+    }
   }
+}
+
+// ── Show visible error window on unrecoverable boot failure ──
+function showServerErrorWindow(message) {
+  const errWin = new BrowserWindow({
+    width: 520, height: 260, title: 'AbleSpeak — Startup Error',
+    autoHideMenuBar: true, alwaysOnTop: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+  errWin.loadURL(`data:text/html,<body style="background:#1a0a0a;color:#f87171;font-family:sans-serif;padding:32px">
+    <h2>AbleSpeak could not start</h2>
+    <p>The server module failed to load after two attempts.</p>
+    <pre style="font-size:12px;overflow:auto">${message.replace(/</g,'&lt;')}</pre>
+    <p>Check that Node.js dependencies are installed (<code>npm install</code>).</p></body>`);
 }
 
 // ── Create Main Dashboard Window ──
@@ -244,6 +281,15 @@ function createOverlay() {
 
   // When overlay loses focus, don't auto-hide (user might be interacting with another app)
   // The overlay auto-hides after AI responds via its own timer
+
+  // Auto-show overlay on boot — the student's primary interaction surface.
+  // Show after a brief delay to let the server bind the port first.
+  setTimeout(() => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.show();
+      console.log('[Electron] Overlay auto-shown on boot');
+    }
+  }, 2000);
 
   console.log('[Electron] Overlay window created');
 }
@@ -470,6 +516,17 @@ process.on('unhandledRejection', (err) => {
 });
 
 app.whenReady().then(async () => {
+  // Apply persisted auto-start preference before opening windows
+  try {
+    // Dynamic import: ESM module, loaded after app is ready
+    const { getAppSettings } = await import('./src/app-settings.js');
+    const settings = getAppSettings();
+    globalThis.__ablespeakElectron.setAutoStart(settings.autoStart);
+    console.log(`[Electron] Auto-start: ${settings.autoStart} (registry applied)`);
+  } catch (err) {
+    console.warn('[Electron] Could not apply auto-start preference:', err.message);
+  }
+
   // Load the AbleSpeak logo
   loadAppIcon();
 
