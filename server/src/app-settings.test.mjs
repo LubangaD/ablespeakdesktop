@@ -10,6 +10,8 @@ const DEFAULTS = {
   wakeWordEnabled: true,
   wakeWordPhrases: ['hey able', 'able speak'],
   setupComplete: false,
+  deviceId: '',
+  sync: { enabled: false, role: 'sender', targetUrl: '', classroomKey: '', intervalMs: 30000 },
 };
 
 let tmpDir;
@@ -34,7 +36,17 @@ test('getAppSettings: missing file returns defaults', () => {
   makeTmpPath();
   try {
     const s = getAppSettings();
-    assert.deepEqual(s, DEFAULTS);
+    assert.equal(s.autoStart, false);
+    assert.equal(s.wakeWordEnabled, true);
+    assert.deepEqual(s.wakeWordPhrases, ['hey able', 'able speak']);
+    assert.equal(s.setupComplete, false);
+    // T4: new defaults
+    assert.equal(s.deviceId, '');
+    assert.equal(s.sync.enabled, false);
+    assert.equal(s.sync.role, 'sender');
+    assert.equal(s.sync.targetUrl, '');
+    assert.equal(s.sync.classroomKey, '');
+    assert.equal(s.sync.intervalMs, 30000);
   } finally { cleanup(); }
 });
 
@@ -46,6 +58,8 @@ test('getAppSettings: all default fields present', () => {
     assert.ok('wakeWordEnabled' in s);
     assert.ok('wakeWordPhrases' in s);
     assert.ok('setupComplete' in s);
+    assert.ok('deviceId' in s);
+    assert.ok('sync' in s);
   } finally { cleanup(); }
 });
 
@@ -107,5 +121,41 @@ test('saveAppSettings: wakeWordEnabled can be toggled off', () => {
   try {
     saveAppSettings({ wakeWordEnabled: false });
     assert.equal(getAppSettings().wakeWordEnabled, false);
+  } finally { cleanup(); }
+});
+
+// ── T4: sync defaults + deviceId ──
+
+test('saveAppSettings: deviceId auto-generated on first write', () => {
+  makeTmpPath();
+  try {
+    saveAppSettings({ autoStart: false });
+    const s = getAppSettings();
+    assert.ok(s.deviceId, 'deviceId should be non-empty after first write');
+    assert.match(s.deviceId, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
+  } finally { cleanup(); }
+});
+
+test('saveAppSettings: deviceId stable across successive writes', () => {
+  makeTmpPath();
+  try {
+    saveAppSettings({});
+    const first = getAppSettings().deviceId;
+    saveAppSettings({ autoStart: true });
+    const second = getAppSettings().deviceId;
+    assert.equal(first, second, 'deviceId should not change on subsequent writes');
+  } finally { cleanup(); }
+});
+
+test('saveAppSettings: sync sub-object merges shallowly', () => {
+  makeTmpPath();
+  try {
+    saveAppSettings({ sync: { enabled: true, role: 'receiver' } });
+    const s = getAppSettings();
+    assert.equal(s.sync.enabled, true);
+    assert.equal(s.sync.role, 'receiver');
+    // Other sync fields retain defaults
+    assert.equal(s.sync.intervalMs, 30000);
+    assert.equal(s.sync.targetUrl, '');
   } finally { cleanup(); }
 });

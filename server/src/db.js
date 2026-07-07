@@ -94,6 +94,12 @@ function migrate() {
   db.run(`CREATE TABLE IF NOT EXISTS phase_changes (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, changed_at TEXT NOT NULL, label TEXT NOT NULL, note TEXT)`);
   db.run(`CREATE TABLE IF NOT EXISTS decision_flags (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, rule TEXT NOT NULL, fired_at TEXT NOT NULL, detail TEXT, acknowledged_at TEXT)`);
 
+  // T4: sync schema additions (additive ALTER TABLE — try/catch for idempotency)
+  try { db.run(`ALTER TABLE students ADD COLUMN sync_opt_in INTEGER DEFAULT 1`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN origin_device TEXT`); } catch {}
+  try { db.run(`ALTER TABLE sessions ADD COLUMN origin_device TEXT`); } catch {}
+  db.run(`CREATE TABLE IF NOT EXISTS sync_state (table_name TEXT PRIMARY KEY, last_cursor TEXT, updated_at TEXT)`);
+
   saveToFile();
 }
 
@@ -189,12 +195,13 @@ export function upsertStudent({ id, display_name, external_ref }) {
     [id, display_name, external_ref || null]);
 }
 
-export function updateStudent({ id, display_name, external_ref, active }) {
+export function updateStudent({ id, display_name, external_ref, active, sync_opt_in }) {
   const parts = [];
   const params = [];
   if (display_name !== undefined) { parts.push('display_name=?'); params.push(display_name); }
   if (external_ref !== undefined) { parts.push('external_ref=?'); params.push(external_ref); }
   if (active !== undefined) { parts.push('active=?'); params.push(active ? 1 : 0); }
+  if (sync_opt_in !== undefined) { parts.push('sync_opt_in=?'); params.push(sync_opt_in ? 1 : 0); }
   if (parts.length === 0) return;
   params.push(id);
   run(`UPDATE students SET ${parts.join(',')} WHERE id=?`, params);
@@ -222,4 +229,120 @@ export function saveSpeechProfile(profile) {
   const { id, student_id, custom_vocabulary, min_audio_b64, min_confidence, fuzzy_threshold, silence_threshold, silence_duration_ms, repair_enabled } = profile;
   run(`INSERT INTO speech_profiles (id,student_id,custom_vocabulary,min_audio_b64,min_confidence,fuzzy_threshold,silence_threshold,silence_duration_ms,repair_enabled,updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now','localtime')) ON CONFLICT(id) DO UPDATE SET student_id=excluded.student_id, custom_vocabulary=COALESCE(excluded.custom_vocabulary,custom_vocabulary), min_audio_b64=COALESCE(excluded.min_audio_b64,min_audio_b64), min_confidence=COALESCE(excluded.min_confidence,min_confidence), fuzzy_threshold=COALESCE(excluded.fuzzy_threshold,fuzzy_threshold), silence_threshold=COALESCE(excluded.silence_threshold,silence_threshold), silence_duration_ms=COALESCE(excluded.silence_duration_ms,silence_duration_ms), repair_enabled=COALESCE(excluded.repair_enabled,repair_enabled), updated_at=datetime('now','localtime')`,
     [id || null, student_id, custom_vocabulary ?? null, min_audio_b64 ?? null, min_confidence ?? null, fuzzy_threshold ?? null, silence_threshold ?? null, silence_duration_ms ?? null, repair_enabled ?? null]);
+}
+
+// ── T4 Sync Helpers ──
+
+/**
+ * Cursor strategy: INTEGER rowid (device-local, monotonically increasing per table).
+ * nextCursor = max rowid seen (as string). '0' = start from the beginning.
+ * Rows with student_id NULL are excluded when optInStudentIdsOnly is true.
+ */
+export function getRowsSince(table, cursor, { optInStudentIdsOnly = false } = {}) {
+  const rowid = parseInt(cursor) || 0;
+  const BATCH = 500;
+  const OPT_IN = `(SELECT id FROM students WHERE sync_opt_in=1)`;
+
+  let sql, params;
+
+  if (table === 'students') {
+    const f = optInStudentIdsOnly ? `AND sync_opt_in=1` : '';
+    sql = `SELECT *, rowid AS _sync_cursor FROM students WHERE rowid>? ${f} ORDER BY rowid LIMIT ?`;
+    params = [rowid, BATCH];
+  } else if (['commands', 'sessions', 'speech_profiles', 'goals', 'progress_points'].includes(table)) {
+    const f = optInStudentIdsOnly
+      ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
+      : '';
+    sql = `SELECT *, rowid AS _sync_cursor FROM ${table} WHERE rowid>? ${f} ORDER BY rowid LIMIT ?`;
+    params = [rowid, BATCH];
+  } else if (['phase_changes', 'decision_flags'].includes(table)) {
+    const f = optInStudentIdsOnly
+      ? `AND t.goal_id IN (SELECT id FROM goals WHERE student_id IS NOT NULL AND student_id IN ${OPT_IN})`
+      : '';
+    sql = `SELECT t.*, t.rowid AS _sync_cursor FROM ${table} t WHERE t.rowid>? ${f} ORDER BY t.rowid LIMIT ?`;
+    params = [rowid, BATCH];
+  } else {
+    throw new Error(`getRowsSince: unsupported table "${table}"`);
+  }
+
+  const rows = query(sql, params);
+  const nextCursor = rows.length > 0 ? String(rows[rows.length - 1]._sync_cursor) : String(rowid);
+
+  // Strip internal cursor alias before returning
+  return {
+    rows: rows.map(({ _sync_cursor, ...r }) => r),
+    nextCursor,
+  };
+}
+
+// Tables with origin_device column (stamped on ingest to identify the sending device)
+const ORIGIN_DEVICE_TABLES = new Set(['commands', 'sessions']);
+// Evidence tables: INSERT OR IGNORE by PK — immutable once written
+const EVIDENCE_TABLES = new Set(['commands', 'sessions', 'progress_points', 'phase_changes', 'decision_flags']);
+// Mutable tables: last-write-wins by comparing timestamp columns
+const MUTABLE_TABLES = new Set(['students', 'speech_profiles', 'goals']);
+// Timestamp column used for last-write-wins per mutable table
+const MUTABLE_TS = { students: 'created_at', speech_profiles: 'updated_at', goals: 'created_at' };
+
+/**
+ * Ingest rows from another device into the local database.
+ * Evidence tables: INSERT OR IGNORE by primary key; stamps origin_device where column exists.
+ * Mutable tables: upsert only if incoming timestamp is newer (last-write-wins).
+ * Returns { inserted, skipped }.
+ */
+export function ingestRows(table, rows, originDevice) {
+  if (!rows || rows.length === 0) return { inserted: 0, skipped: 0 };
+  if (!EVIDENCE_TABLES.has(table) && !MUTABLE_TABLES.has(table)) {
+    throw new Error(`ingestRows: unsupported table "${table}"`);
+  }
+
+  let inserted = 0, skipped = 0;
+
+  for (const rawRow of rows) {
+    // Build clean row (strip any sync-internal fields)
+    const row = { ...rawRow };
+    delete row._sync_cursor;
+
+    if (EVIDENCE_TABLES.has(table)) {
+      // Stamp origin_device for tables that have the column
+      if (ORIGIN_DEVICE_TABLES.has(table)) {
+        row.origin_device = originDevice;
+      }
+      const cols = Object.keys(row);
+      run(
+        `INSERT OR IGNORE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
+        cols.map(c => row[c])
+      );
+      if (db.getRowsModified() > 0) inserted++;
+      else skipped++;
+
+    } else {
+      // Mutable: last-write-wins
+      const tsCol = MUTABLE_TS[table];
+      const cols = Object.keys(row);
+      const setClauses = cols.filter(c => c !== 'id').map(c => `${c}=excluded.${c}`).join(',');
+      run(
+        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')}) ON CONFLICT(id) DO UPDATE SET ${setClauses} WHERE excluded.${tsCol} > ${table}.${tsCol}`,
+        cols.map(c => row[c])
+      );
+      if (db.getRowsModified() > 0) inserted++;
+      else skipped++;
+    }
+  }
+
+  return { inserted, skipped };
+}
+
+/** Read the persisted sync cursor for a table (returns '0' if none set). */
+export function getSyncCursor(table) {
+  const row = queryOne(`SELECT last_cursor FROM sync_state WHERE table_name=?`, [table]);
+  return row ? row.last_cursor : '0';
+}
+
+/** Persist the sync cursor for a table. */
+export function setSyncCursor(table, cursor) {
+  run(
+    `INSERT INTO sync_state (table_name,last_cursor,updated_at) VALUES (?,?,datetime('now','localtime')) ON CONFLICT(table_name) DO UPDATE SET last_cursor=excluded.last_cursor, updated_at=excluded.updated_at`,
+    [table, cursor]
+  );
 }

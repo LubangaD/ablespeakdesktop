@@ -140,12 +140,12 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
 
   router.patch('/students/:id', (req, res) => {
     const { id } = req.params;
-    const { display_name, external_ref, active } = req.body || {};
+    const { display_name, external_ref, active, sync_opt_in } = req.body || {};
     if (display_name !== undefined && !String(display_name).trim()) return res.status(400).json({ error: 'display_name cannot be blank' });
     const students = getStudents({ activeOnly: false });
     const existing = students.find(s => s.id === id);
     if (!existing) return res.status(404).json({ error: 'Student not found' });
-    updateStudent({ id, display_name, external_ref, active });
+    updateStudent({ id, display_name, external_ref, active, sync_opt_in });
     const updated = getStudents({ activeOnly: false }).find(s => s.id === id);
     res.json(updated);
   });
@@ -348,18 +348,24 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     }
   });
 
-  // POST /api/setup/app-settings — persist auto-start + wake-word preferences
+  // POST /api/setup/app-settings — persist auto-start + wake-word preferences + sync config
+  // SECURITY: classroomKey is never echoed in the response
   router.post('/setup/app-settings', async (req, res) => {
-    const { autoStart, wakeWordEnabled, wakeWordPhrases, setupComplete } = req.body || {};
+    const { autoStart, wakeWordEnabled, wakeWordPhrases, setupComplete, sync } = req.body || {};
     const patch = {};
     if (typeof autoStart === 'boolean') patch.autoStart = autoStart;
     if (typeof wakeWordEnabled === 'boolean') patch.wakeWordEnabled = wakeWordEnabled;
     if (Array.isArray(wakeWordPhrases)) patch.wakeWordPhrases = wakeWordPhrases;
     if (typeof setupComplete === 'boolean') patch.setupComplete = setupComplete;
+    // Accept sync sub-object (classroomKey included but never echoed back)
+    if (sync && typeof sync === 'object') patch.sync = sync;
 
     try {
       saveAppSettings(patch);
       const settings = getAppSettings();
+
+      // Notify index.js so the sync client can be started/stopped if needed
+      if (typeof req._restartSync === 'function') req._restartSync();
 
       // Apply auto-start via Electron bridge if present
       let autoStartApplied = false;
@@ -378,9 +384,14 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
         timestamp: new Date().toISOString(),
       });
 
+      // SECURITY: strip classroomKey from response
+      const { sync: { classroomKey: _omit, ...syncSafe } = {} } = settings;
+      const safeSettings = { ...settings, sync: { ...syncSafe, configured: !!settings.sync?.classroomKey } };
+      delete safeSettings.sync.classroomKey;
+
       res.json({
         ok: true,
-        settings,
+        settings: safeSettings,
         autoStartApplied,
         autoStartReason: !autoStartApplied && 'autoStart' in patch
           ? (globalThis.__ablespeakElectron ? 'bridge_error' : 'not_running_in_electron')
