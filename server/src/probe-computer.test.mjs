@@ -28,6 +28,7 @@ import {
   computeProbeValue,
   computeProbesForDate,
   evaluateAndFlag,
+  shouldRunProbeScheduler,
 } from './probe-computer.js';
 
 function tmpFile(name) {
@@ -40,6 +41,24 @@ function cleanup(...paths) {
     try { if (existsSync(p + '.tmp')) unlinkSync(p + '.tmp'); } catch {}
   }
 }
+
+// ── shouldRunProbeScheduler (pure) ──
+
+test('shouldRunProbeScheduler: false for receiver role', () => {
+  assert.equal(shouldRunProbeScheduler({ sync: { role: 'receiver' } }), false,
+    'receiver must not run scheduler — flags arrive via sync ingest');
+});
+
+test('shouldRunProbeScheduler: true for sender role', () => {
+  assert.equal(shouldRunProbeScheduler({ sync: { role: 'sender' } }), true);
+});
+
+test('shouldRunProbeScheduler: true when sync not configured (default)', () => {
+  assert.equal(shouldRunProbeScheduler({}), true, 'default (no sync key): should run');
+  assert.equal(shouldRunProbeScheduler({ sync: {} }), true, 'empty sync block: should run');
+  assert.equal(shouldRunProbeScheduler(undefined), true, 'undefined settings: should run');
+  assert.equal(shouldRunProbeScheduler(null), true, 'null settings: should run');
+});
 
 // ── computeProbeValue (pure, no DB) ──
 

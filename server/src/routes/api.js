@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent, getSpeechProfile, saveSpeechProfile, insertGoal, getGoals, updateGoalStatus, upsertProgressPoint, getProgressPoints, insertPhaseChange, getPhaseChanges, insertDecisionFlag, getDecisionFlags, acknowledgeFlag, getCommandsForStudentDate } from '../db.js';
 import { computeProbeValue, computeProbesForDate, evaluateAndFlag } from '../probe-computer.js';
 import { MEASURE_REGISTRY } from '../progress-rules.js';
-import { parseRosterCsv } from '../identity.js';
+import { parseRosterCsv, normalizeName } from '../identity.js';
 import { parseEnvFile, upsertEnvVar } from '../envfile.js';
 import { getAppSettings, saveAppSettings } from '../app-settings.js';
 
@@ -225,16 +225,32 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
       csv = req.body?.csv || '';
     }
     const { students, errors } = parseRosterCsv(csv);
-    let imported = 0;
+
+    // Fix 4: dedup re-imports by normalized display_name to prevent duplicate rows.
+    // Build a map of normalized name → existing active student id for O(1) lookup.
+    const existingActive = getStudents({ activeOnly: true });
+    const activeByNormName = new Map(
+      existingActive.map(s => [normalizeName(s.display_name), s])
+    );
+
+    let imported = 0, updated = 0;
     for (const s of students) {
       try {
-        upsertStudent({ id: uuidv4(), display_name: s.display_name, external_ref: s.external_ref });
-        imported++;
+        const norm = normalizeName(s.display_name);
+        const existing = activeByNormName.get(norm);
+        if (existing) {
+          // Student already exists — update external_ref only (preserve id, display_name, etc.)
+          updateStudent({ id: existing.id, external_ref: s.external_ref });
+          updated++;
+        } else {
+          upsertStudent({ id: uuidv4(), display_name: s.display_name, external_ref: s.external_ref });
+          imported++;
+        }
       } catch (err) {
         errors.push({ line: null, reason: err.message });
       }
     }
-    res.json({ imported, errors });
+    res.json({ imported, updated, errors });
   });
 
   // ── Manual Command ──

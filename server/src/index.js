@@ -20,7 +20,7 @@ import { createApiRouter } from './routes/api.js';
 import { getAppSettings } from './app-settings.js';
 import { SyncClient } from './sync-client.js';
 import { createSyncRouter } from './routes/sync.js';
-import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
+import { startProbeScheduler, stopProbeScheduler, shouldRunProbeScheduler } from './probe-computer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -39,14 +39,44 @@ console.log(`  Database:    ${DB_PATH}`);
 console.log(`  Port:        ${PORT}`);
 console.log('');
 
-// ── Initialize Database ──
-initDatabase(DB_PATH);
+// ── Initialize Database (Fix 2: top-level await — ESM supports it; electron-main.cjs
+// does `await import('./src/index.js')` so the import promise already propagates the
+// await, delaying server.listen until WASM is fully loaded and all schema migrations run) ──
+await initDatabase(DB_PATH);
 console.log('[DB] SQLite initialized');
+
+// ── Determine bind host (Fix 3: role-aware LAN exposure) ──
+// GATEWAY_HOST env override > receiver binds 0.0.0.0 (must accept LAN ingest from students)
+// > all other roles bind 127.0.0.1 (local-only — limits /api/voice/text & roster PII exposure).
+// Changing sync.role requires a server restart for the bind change to take effect.
+const _bootSettings = getAppSettings();
+const BIND_HOST = process.env.GATEWAY_HOST
+  ?? (_bootSettings.sync?.role === 'receiver' ? '0.0.0.0' : '127.0.0.1');
+if (BIND_HOST === '0.0.0.0') {
+  console.warn('[Security] Receiver mode: binding to 0.0.0.0 — all LAN interfaces exposed for student ingest. Keep classroomKey secret.');
+}
 
 // ── Express App ──
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+// Fix 3: scoped CORS origin allowlist.
+// Allows localhost/127.0.0.1 on the server port + Vite dev server.
+// Non-browser requests (no Origin header — sync client uses server-to-server fetch)
+// are always allowed; only browser-initiated cross-origin requests are gated.
+const _allowedOrigins = new Set([
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+  'http://localhost:5173', // Vite dev
+]);
+app.use(cors({
+  origin(origin, callback) {
+    // No Origin header = server-to-server / same-origin — allow unconditionally.
+    if (!origin) return callback(null, true);
+    if (_allowedOrigins.has(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 app.use(rateLimit({ windowMs: 60000, max: 300 }));
 
 // ── T4 Sync Client + Router (mounted BEFORE global body parser) ──
@@ -65,7 +95,15 @@ function applySyncSettings() {
     syncClient.stop();
     console.log('[Sync] Sender stopped');
   }
+  // Fix 1: keep probe scheduler in sync with role changes at runtime.
+  // A receiver must NOT run its own scheduler — it gets authoritative flags via ingest.
+  if (shouldRunProbeScheduler(s)) {
+    if (!_probeIntervalRunning) { startProbeScheduler(); _probeIntervalRunning = true; console.log('[ProbeScheduler] Started after role change'); }
+  } else {
+    if (_probeIntervalRunning) { stopProbeScheduler(); _probeIntervalRunning = false; console.log('[ProbeScheduler] Stopped — receiver role, flags come via sync'); }
+  }
 }
+let _probeIntervalRunning = false;
 applySyncSettings(); // start only if already enabled in settings (default OFF)
 app.use((req, res, next) => { req._restartSync = applySyncSettings; next(); });
 app.use('/api', createSyncRouter({ syncClient }));
@@ -264,9 +302,9 @@ if (existsSync(dashboardDist)) {
 }
 
 // ── Start Server ──
-server.listen(PORT, () => {
+server.listen(PORT, BIND_HOST, () => {
   console.log('');
-  console.log(`🟢 AbleSpeak AI Agent running at http://localhost:${PORT}`);
+  console.log(`🟢 AbleSpeak AI Agent running at http://${BIND_HOST}:${PORT}`);
   console.log(`   API:       http://localhost:${PORT}/api/health`);
   console.log(`   AI Status: http://localhost:${PORT}/api/ai/status`);
   console.log(`   Dashboard: http://localhost:${PORT}/`);
@@ -274,9 +312,16 @@ server.listen(PORT, () => {
   console.log(`   WS Dash:   ws://localhost:${PORT}/ws/dashboard`);
   console.log('');
 
-  // Start progress probe scheduler (after server is up and DB is initialized)
-  startProbeScheduler();
-  console.log('[ProbeScheduler] Started — daily probes + hourly recompute active');
+  // Fix 1: only start probe scheduler on non-receiver devices.
+  // Receivers get authoritative flags via T4 sync ingest; running the scheduler
+  // there would generate duplicate flags with different UUIDs that can't be jointly acked.
+  if (shouldRunProbeScheduler(getAppSettings())) {
+    startProbeScheduler();
+    _probeIntervalRunning = true;
+    console.log('[ProbeScheduler] Started — daily probes + hourly recompute active');
+  } else {
+    console.log('[ProbeScheduler] Skipped — receiver role, flags arrive via sync ingest');
+  }
 
   // Graceful shutdown: clear interval so the process can exit cleanly
   process.once('SIGTERM', () => { stopProbeScheduler(); });

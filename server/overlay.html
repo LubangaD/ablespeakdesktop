@@ -496,11 +496,12 @@
     // Wake dot: only visible in wake-listening state
     if (name === 'wake-listening') {
       wakeDot.classList.add('visible');
-      stateLine.setAttribute('aria-label', 'Waiting for wake word');
     } else {
       wakeDot.classList.remove('visible');
-      stateLine.removeAttribute('aria-label');
     }
+    // Fix 5 (WCAG): aria-label on a role="status" live region suppresses textContent
+    // announcements in some AT implementations. The textContent ("waiting for wake word",
+    // "listening…", etc.) is the intended announcement — no aria-label needed.
   }
 
   // Persistent last-transcript readout — stays visible across states

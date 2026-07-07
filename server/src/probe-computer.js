@@ -192,3 +192,22 @@ export function stopProbeScheduler() {
     _probeInterval = null;
   }
 }
+
+/**
+ * Returns true when the probe scheduler should run on this device.
+ *
+ * A sync RECEIVER (teacher device) gets authoritative points/flags via ingest;
+ * running the scheduler there would double-compute with different UUIDs,
+ * bypassing the INSERT OR IGNORE dedup in ingestRows → duplicate flag banners
+ * that cannot be jointly acknowledged.
+ *
+ * NOTE: changing sync.role requires a server restart for the bind-host change
+ * to take effect; the same restart resets the scheduler via this guard.
+ *
+ * @param {object} settings  result of getAppSettings()
+ * @returns {boolean}
+ */
+export function shouldRunProbeScheduler(settings) {
+  const role = settings?.sync?.role;
+  return role !== 'receiver';
+}

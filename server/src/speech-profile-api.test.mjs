@@ -7,7 +7,7 @@ import express from 'express';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unlinkSync, existsSync } from 'node:fs';
-import { initDatabase, closeDatabase, upsertStudent } from './db.js';
+import { initDatabase, closeDatabase, upsertStudent, getStudents } from './db.js';
 import { createApiRouter } from './routes/api.js';
 
 function tmpFile(name) {
@@ -24,6 +24,7 @@ function cleanup(...paths) {
 async function withServer(fn) {
   const app = express();
   app.use(express.json());
+  app.use(express.text({ type: 'text/plain', limit: '1mb' })); // roster CSV import
   app.use('/api', createApiRouter({ wsProxy: {}, logTailer: {}, libraryScanner: {}, voqalHomePath: tmpdir() }));
   const server = app.listen(0);
   await new Promise(r => server.once('listening', r));
@@ -110,6 +111,85 @@ test('speech-profile REST: GET/PUT roundtrip, validation, 404s', async () => {
       profile = await res.json();
       assert.equal(profile.min_confidence, 0.1);
       assert.equal(profile.min_audio_b64, 1800, 'untouched fields survive partial update');
+    });
+  } finally {
+    await closeDatabase();
+    cleanup(path);
+  }
+});
+
+// ── Fix 4: roster-csv re-import dedup ──
+
+test('roster-csv: re-importing same CSV does not create duplicate students', async () => {
+  const path = tmpFile('roster-dedup');
+  try {
+    await initDatabase(path);
+
+    await withServer(async (base) => {
+      const csv = 'display_name,external_ref\nAlice Brown,A001\nBob Smith,B002';
+
+      // First import — both students created
+      let res = await fetch(`${base}/students/roster-csv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: csv,
+      });
+      assert.equal(res.status, 200);
+      let body = await res.json();
+      assert.equal(body.imported, 2, 'first import: 2 new students');
+      assert.equal(body.updated, 0);
+
+      // Second import (same CSV) — must update, not duplicate
+      res = await fetch(`${base}/students/roster-csv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: csv,
+      });
+      assert.equal(res.status, 200);
+      body = await res.json();
+      assert.equal(body.imported, 0, 'second import: no new students');
+      assert.equal(body.updated, 2, 'second import: 2 updated');
+
+      // Only 2 active students exist after both imports
+      const all = getStudents({ activeOnly: true });
+      assert.equal(all.length, 2, 'exactly 2 students — no duplicates');
+    });
+  } finally {
+    await closeDatabase();
+    cleanup(path);
+  }
+});
+
+test('roster-csv: re-import updates external_ref without changing student id', async () => {
+  const path = tmpFile('roster-update-ref');
+  try {
+    await initDatabase(path);
+
+    await withServer(async (base) => {
+      // Import with old external_ref
+      await fetch(`${base}/students/roster-csv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: 'display_name,external_ref\nCarlos Rivera,OLD-001',
+      });
+
+      const before = getStudents({ activeOnly: true });
+      assert.equal(before.length, 1);
+      const origId = before[0].id;
+
+      // Re-import with updated external_ref
+      const res = await fetch(`${base}/students/roster-csv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: 'display_name,external_ref\nCarlos Rivera,NEW-001',
+      });
+      const body = await res.json();
+      assert.equal(body.updated, 1);
+
+      const after = getStudents({ activeOnly: true });
+      assert.equal(after.length, 1, 'still 1 student');
+      assert.equal(after[0].id, origId, 'same UUID preserved');
+      assert.equal(after[0].external_ref, 'NEW-001', 'external_ref updated');
     });
   } finally {
     await closeDatabase();
