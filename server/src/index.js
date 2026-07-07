@@ -20,6 +20,7 @@ import { createApiRouter } from './routes/api.js';
 import { getAppSettings } from './app-settings.js';
 import { SyncClient } from './sync-client.js';
 import { createSyncRouter } from './routes/sync.js';
+import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -272,6 +273,14 @@ server.listen(PORT, () => {
   console.log(`   WS Ext:    ws://localhost:${PORT}/ws/extension`);
   console.log(`   WS Dash:   ws://localhost:${PORT}/ws/dashboard`);
   console.log('');
+
+  // Start progress probe scheduler (after server is up and DB is initialized)
+  startProbeScheduler();
+  console.log('[ProbeScheduler] Started — daily probes + hourly recompute active');
+
+  // Graceful shutdown: clear interval so the process can exit cleanly
+  process.once('SIGTERM', () => { stopProbeScheduler(); });
+  process.once('SIGINT', () => { stopProbeScheduler(); });
 
   // Check API keys
   const status = aiEngine.getStatus();

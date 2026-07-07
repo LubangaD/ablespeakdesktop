@@ -3,7 +3,9 @@ import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
-import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent, getSpeechProfile, saveSpeechProfile } from '../db.js';
+import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getStudents, upsertStudent, updateStudent, getSpeechProfile, saveSpeechProfile, insertGoal, getGoals, updateGoalStatus, upsertProgressPoint, getProgressPoints, insertPhaseChange, getPhaseChanges, insertDecisionFlag, getDecisionFlags, acknowledgeFlag, getCommandsForStudentDate } from '../db.js';
+import { computeProbeValue, computeProbesForDate, evaluateAndFlag } from '../probe-computer.js';
+import { MEASURE_REGISTRY } from '../progress-rules.js';
 import { parseRosterCsv } from '../identity.js';
 import { parseEnvFile, upsertEnvVar } from '../envfile.js';
 import { getAppSettings, saveAppSettings } from '../app-settings.js';
@@ -407,6 +409,238 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   router.post('/setup/mic-tested', (req, res) => {
     _micTestedThisSession = true;
     res.json({ ok: true });
+  });
+
+  // ════════════════════════════════════════════════
+  // ── T5: Progress Monitoring REST Endpoints ──
+  // ════════════════════════════════════════════════
+
+  // GET /api/students/:id/baseline-suggestion?measure=X
+  // Returns { value, sampleDays, sampleSize } computed from last 14 days of commands.
+  router.get('/students/:id/baseline-suggestion', (req, res) => {
+    const { id } = req.params;
+    const { measure } = req.query;
+    if (!measure || !(measure in MEASURE_REGISTRY)) {
+      return res.status(400).json({ error: `measure must be one of: ${Object.keys(MEASURE_REGISTRY).join(', ')}` });
+    }
+    const students = getStudents({ activeOnly: false });
+    if (!students.find(s => s.id === id)) return res.status(404).json({ error: 'Student not found' });
+
+    // Collect all commands for the student in the last 14 days
+    const today = new Date().toISOString().slice(0, 10);
+    const cutoffMs = new Date(today).getTime() - 14 * 86400000;
+    const allCmds = [];
+    const days = new Set();
+
+    for (let d = 0; d <= 14; d++) {
+      const dateMs = cutoffMs + d * 86400000;
+      const isoDate = new Date(dateMs).toISOString().slice(0, 10);
+      if (isoDate > today) break;
+      const dayCmds = getCommandsForStudentDate(id, isoDate);
+      const dayAttempted = dayCmds.filter(c => c.outcome != null);
+      if (dayAttempted.length >= 3) {
+        days.add(isoDate);
+        allCmds.push(...dayCmds);
+      }
+    }
+
+    if (days.size === 0) {
+      return res.json({ value: null, sampleDays: 0, sampleSize: 0 });
+    }
+
+    // Compute per-day probe values and average them
+    let totalValue = 0;
+    let validDays = 0;
+    let totalSample = 0;
+    for (const isoDate of days) {
+      const dayCmds = getCommandsForStudentDate(id, isoDate);
+      const result = computeProbeValue(measure, dayCmds);
+      if (result !== null) {
+        totalValue += result.value;
+        validDays++;
+        totalSample += result.sampleSize;
+      }
+    }
+
+    if (validDays === 0) return res.json({ value: null, sampleDays: 0, sampleSize: totalSample });
+
+    res.json({
+      value: totalValue / validDays,
+      sampleDays: validDays,
+      sampleSize: totalSample,
+    });
+  });
+
+  // POST /api/students/:id/goals
+  // Body: { measure, baseline_value, baseline_date, target_value, target_date, decision_rule? }
+  // Validates inputs; auto-revises any prior active goal for same (student, measure).
+  router.post('/students/:id/goals', (req, res) => {
+    const { id } = req.params;
+    const students = getStudents({ activeOnly: false });
+    if (!students.find(s => s.id === id)) return res.status(404).json({ error: 'Student not found' });
+
+    const { measure, baseline_value, baseline_date, target_value, target_date, decision_rule } = req.body || {};
+    const errors = [];
+
+    if (!measure || !(measure in MEASURE_REGISTRY)) {
+      errors.push(`measure must be one of: ${Object.keys(MEASURE_REGISTRY).join(', ')}`);
+    }
+    if (typeof baseline_value !== 'number' || isNaN(baseline_value)) errors.push('baseline_value must be a number');
+    if (typeof target_value !== 'number' || isNaN(target_value)) errors.push('target_value must be a number');
+    if (!baseline_date || !/^\d{4}-\d{2}-\d{2}$/.test(baseline_date)) errors.push('baseline_date must be YYYY-MM-DD');
+    if (!target_date || !/^\d{4}-\d{2}-\d{2}$/.test(target_date)) errors.push('target_date must be YYYY-MM-DD');
+    if (baseline_date && target_date && target_date <= baseline_date) {
+      errors.push('target_date must be after baseline_date');
+    }
+    if (errors.length > 0) return res.status(400).json({ error: errors.join('; ') });
+
+    // Auto-revise any prior active goal for this (student, measure)
+    const existingActive = getGoals({ studentId: id, status: 'active' })
+      .filter(g => g.measure === measure);
+    for (const eg of existingActive) {
+      updateGoalStatus(eg.id, 'revised');
+    }
+
+    const goalId = uuidv4();
+    insertGoal({
+      id: goalId,
+      student_id: id,
+      measure,
+      baseline_value,
+      baseline_date,
+      target_value,
+      target_date,
+      decision_rule: decision_rule || '4_below_aim',
+    });
+
+    const goals = getGoals({ studentId: id });
+    res.status(201).json(goals.find(g => g.id === goalId));
+  });
+
+  // GET /api/students/:id/goals?status=active|all
+  router.get('/students/:id/goals', (req, res) => {
+    const { id } = req.params;
+    const students = getStudents({ activeOnly: false });
+    if (!students.find(s => s.id === id)) return res.status(404).json({ error: 'Student not found' });
+
+    const statusFilter = req.query.status === 'all' ? null : (req.query.status || 'active');
+    const goals = getGoals({ studentId: id, status: statusFilter });
+    res.json(goals);
+  });
+
+  // PATCH /api/goals/:id — status transitions only: active→met|revised|discontinued
+  router.patch('/goals/:id', (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const allowed = ['met', 'revised', 'discontinued'];
+    if (!status || !allowed.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` });
+    }
+    const goals = getGoals();
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    updateGoalStatus(id, status);
+    const updated = getGoals().find(g => g.id === id);
+    res.json(updated);
+  });
+
+  // GET /api/goals/:id/points
+  router.get('/goals/:id/points', (req, res) => {
+    const { id } = req.params;
+    const goals = getGoals();
+    if (!goals.find(g => g.id === id)) return res.status(404).json({ error: 'Goal not found' });
+    res.json(getProgressPoints(id));
+  });
+
+  // POST /api/goals/:id/points — manual probe
+  // Body: { measured_at, value }
+  router.post('/goals/:id/points', (req, res) => {
+    const { id } = req.params;
+    const goals = getGoals();
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+
+    const { measured_at, value } = req.body || {};
+    if (!measured_at || !/^\d{4}-\d{2}-\d{2}$/.test(measured_at)) {
+      return res.status(400).json({ error: 'measured_at must be YYYY-MM-DD' });
+    }
+    if (typeof value !== 'number' || isNaN(value)) {
+      return res.status(400).json({ error: 'value must be a number' });
+    }
+
+    const pointId = uuidv4();
+    upsertProgressPoint({
+      id: pointId,
+      goal_id: id,
+      student_id: goal.student_id,
+      measured_at,
+      value,
+      source: 'manual',
+      sample_size: null,
+    });
+
+    const pts = getProgressPoints(id);
+    res.status(201).json(pts.find(p => p.measured_at === measured_at));
+  });
+
+  // POST /api/goals/:id/phases — add phase change
+  // Body: { changed_at, label, note? }
+  router.post('/goals/:id/phases', (req, res) => {
+    const { id } = req.params;
+    const goals = getGoals();
+    if (!goals.find(g => g.id === id)) return res.status(404).json({ error: 'Goal not found' });
+
+    const { changed_at, label, note } = req.body || {};
+    if (!changed_at || !/^\d{4}-\d{2}-\d{2}$/.test(changed_at)) {
+      return res.status(400).json({ error: 'changed_at must be YYYY-MM-DD' });
+    }
+    if (!label || !String(label).trim()) {
+      return res.status(400).json({ error: 'label is required' });
+    }
+
+    const phaseId = uuidv4();
+    insertPhaseChange({ id: phaseId, goal_id: id, changed_at, label: String(label).trim(), note: note ? String(note).trim() : null });
+    const phases = getPhaseChanges(id);
+    res.status(201).json(phases.find(p => p.id === phaseId));
+  });
+
+  // GET /api/goals/:id/phases
+  router.get('/goals/:id/phases', (req, res) => {
+    const { id } = req.params;
+    const goals = getGoals();
+    if (!goals.find(g => g.id === id)) return res.status(404).json({ error: 'Goal not found' });
+    res.json(getPhaseChanges(id));
+  });
+
+  // GET /api/goals/:id/flags?unacknowledged=1
+  router.get('/goals/:id/flags', (req, res) => {
+    const { id } = req.params;
+    const goals = getGoals();
+    if (!goals.find(g => g.id === id)) return res.status(404).json({ error: 'Goal not found' });
+    const unacknowledgedOnly = req.query.unacknowledged === '1';
+    res.json(getDecisionFlags({ goalId: id, unacknowledgedOnly }));
+  });
+
+  // POST /api/flags/:id/ack — acknowledge a decision flag
+  router.post('/flags/:id/ack', (req, res) => {
+    acknowledgeFlag(req.params.id);
+    res.json({ ok: true });
+  });
+
+  // POST /api/progress/recompute — trigger probe computation for today
+  router.post('/progress/recompute', async (req, res) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      await computeProbesForDate(today);
+      const activeGoals = getGoals({ status: 'active' });
+      for (const g of activeGoals) {
+        await evaluateAndFlag(g.id, today);
+      }
+      res.json({ ok: true, date: today, goals: activeGoals.length });
+    } catch (err) {
+      console.error('[Recompute] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;
