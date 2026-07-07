@@ -8,9 +8,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Send pre-transcribed text directly to AI (Web Speech API path — fast)
-  sendText: (text) => {
-    ipcRenderer.send('overlay-voice-text', { text });
+  // Send pre-transcribed text directly to AI (Web Speech API path — fast).
+  // confidence: 0..1 from the recognizer, or null/undefined when unknown.
+  sendText: (text, confidence) => {
+    ipcRenderer.send('overlay-voice-text', { text, confidence: typeof confidence === 'number' ? confidence : null });
   },
 
   // Send recorded audio to main process for AI processing (Gemini fallback — slow)
@@ -18,9 +19,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('overlay-voice-audio', { audio: base64, mimeType });
   },
 
-  // Receive AI response from main process
+  // Receive AI response from main process (audio-blob fallback path)
   onResponse: (callback) => {
     ipcRenderer.on('overlay-response', (_event, data) => callback(data));
+  },
+
+  // Receive a structured server event via the IPC fallback path.
+  // Events have the same shape as WebSocket dashboard messages so
+  // the overlay can route them through handleWSMessage() unchanged.
+  onEvent: (callback) => {
+    ipcRenderer.on('overlay-event', (_event, data) => callback(data));
   },
 
   // Receive toggle-listen signal (from global shortcut)

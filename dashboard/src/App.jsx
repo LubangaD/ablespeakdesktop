@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutDashboard, MessageCircle, History, Wrench, GitBranch, ScrollText, Settings, FileText, Mic, Sun } from 'lucide-react';
+import { LayoutDashboard, MessageCircle, History, Wrench, GitBranch, ScrollText, Settings, FileText, Mic, Sun, Wand2, TrendingUp } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Commands from './pages/Commands';
 import Tools from './pages/Tools';
@@ -8,9 +8,14 @@ import Logs from './pages/Logs';
 import SettingsPage from './pages/Settings';
 import Chat from './pages/Chat';
 import Prompt from './pages/Prompt';
+import Setup from './pages/Setup';
+import Teacher from './pages/Teacher';
+import { useQuery } from '@tanstack/react-query';
 
 const navItems = [
+  { path: '/setup', label: 'Setup', icon: Wand2, ariaLabel: 'Navigate to Setup Wizard' },
   { path: '/', label: 'Dashboard', icon: LayoutDashboard, ariaLabel: 'Navigate to Dashboard' },
+  { path: '/teacher', label: 'Progress', icon: TrendingUp, ariaLabel: 'Navigate to Progress Monitoring' },
   { path: '/prompt', label: 'Prompt', icon: FileText, ariaLabel: 'Navigate to Prompt Editor' },
   { path: '/chat', label: 'Chat', icon: MessageCircle, ariaLabel: 'Navigate to Voice Chat' },
   { path: '/tools', label: 'Tools', icon: Wrench, ariaLabel: 'Navigate to Tools' },
@@ -21,6 +26,15 @@ const navItems = [
 ];
 
 export default function App() {
+  // Check if setup is complete — badge the Setup link if not
+  const { data: setupStatus } = useQuery({
+    queryKey: ['setupStatus'],
+    queryFn: () => fetch('/api/setup/status').then(r => r.ok ? r.json() : { setupComplete: true }),
+    refetchInterval: 30000,
+    retry: false,
+  });
+  const setupNeeded = setupStatus && !setupStatus.setupComplete;
+
   return (
     <BrowserRouter>
       <a href="#main-content" className="skip-nav">Skip to main content</a>
@@ -46,6 +60,12 @@ export default function App() {
               >
                 <Icon aria-hidden="true" />
                 <span>{label}</span>
+                {path === '/setup' && setupNeeded && (
+                  <span
+                    style={{ marginLeft: 'auto', background: '#f59e0b', color: '#0a0e1a', borderRadius: 10, fontSize: 10, fontWeight: 800, padding: '1px 7px' }}
+                    aria-label="Setup needed"
+                  >NEW</span>
+                )}
               </NavLink>
             ))}
           </div>
@@ -57,7 +77,9 @@ export default function App() {
         </nav>
         <main id="main-content" className="main-content" role="main">
           <Routes>
+            <Route path="/setup" element={<Setup />} />
             <Route path="/" element={<Dashboard />} />
+            <Route path="/teacher" element={<Teacher />} />
             <Route path="/prompt" element={<Prompt />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/commands" element={<Commands />} />

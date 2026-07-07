@@ -203,6 +203,127 @@
     width: 20px;
     height: 20px;
   }
+
+  /* ── Student Picker ── */
+  .picker-area {
+    display: none;
+    width: 100%;
+    padding: 6px 0 2px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 4px;
+  }
+
+  .picker-area.visible {
+    display: block;
+  }
+
+  .picker-question {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(110, 231, 183, 0.9);
+    text-align: center;
+    margin-bottom: 6px;
+  }
+
+  .picker-names {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .picker-name {
+    font-size: 24px; /* WCAG AA+: ≥24px */
+    font-weight: 700;
+    color: #fff;
+    background: rgba(167, 139, 250, 0.18);
+    border-radius: 10px;
+    padding: 4px 14px;
+    line-height: 1.2;
+  }
+
+  /* ── Truth-state line: wake-listening / listening / heard / working / done / failed / repair ── */
+  .state-line {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-align: center;
+    min-height: 0;
+  }
+  .state-line:empty { display: none; }
+  .state-line.wake-listening { color: #60a5fa; }
+  .state-line.listening { color: #6ee7b7; }
+  .state-line.heard     { color: #ffffff; }
+  .state-line.working   { color: #a78bfa; }
+  .state-line.done      { color: #6ee7b7; }
+  .state-line.failed    { color: #f87171; }
+  .state-line.repair    { color: #fbbf24; }
+
+  /* ── Wake-listening dot indicator ── */
+  .wake-dot {
+    display: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #60a5fa;
+    flex-shrink: 0;
+    animation: wakePulse 2s ease-in-out infinite;
+  }
+  .wake-dot.visible { display: inline-block; }
+
+  @keyframes wakePulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Persistent last-transcript readout: Heard: "…" ── */
+  .heard-line {
+    display: none;
+    width: 100%;
+    font-size: 20px;   /* readout ≥20px, high contrast */
+    font-weight: 600;
+    color: #ffffff;
+    text-align: center;
+    line-height: 1.3;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  .heard-line.visible { display: block; }
+
+  /* ── Repair prompt: Did you mean "X"? (matches picker style) ── */
+  .repair-area {
+    display: none;
+    width: 100%;
+    padding: 6px 0 2px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 4px;
+  }
+  .repair-area.visible { display: block; }
+  .repair-question {
+    font-size: 24px;   /* WCAG AA+: ≥24px */
+    font-weight: 700;
+    color: #fff;
+    background: rgba(251, 191, 36, 0.16);
+    border-radius: 10px;
+    padding: 6px 14px;
+    text-align: center;
+    line-height: 1.25;
+  }
+  .repair-hint {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  /* ── Reduced motion: keep the overlay calm for motion-sensitive users ── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -213,9 +334,31 @@
       Dictate <kbd>Ctrl + Shift + A</kbd>
     </div>
 
+    <!-- Wake-listening indicator (distinct from armed listening) -->
+    <div style="display:flex;align-items:center;gap:5px;justify-content:center;">
+      <span class="wake-dot" id="wakeDot" aria-hidden="true"></span>
+      <!-- Truth state: wake-listening / listening / heard / working / done / failed(reason) / repair -->
+      <div class="state-line" id="stateLine" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- Persistent last-transcript readout -->
+    <div class="heard-line" id="heardLine" aria-live="polite"></div>
+
     <!-- Transcript / status text -->
     <div class="transcript-area" id="transcriptArea">
       <div class="transcript-text" id="transcriptText"></div>
+    </div>
+
+    <!-- Student Picker (voice-driven, aria-live for screen readers) -->
+    <div class="picker-area" id="pickerArea" role="status" aria-live="polite" aria-atomic="true">
+      <div class="picker-question" id="pickerQuestion"></div>
+      <div class="picker-names" id="pickerNames"></div>
+    </div>
+
+    <!-- Repair prompt: "Did you mean X?" — answer by voice (yes / no) -->
+    <div class="repair-area" id="repairArea" role="alert" aria-atomic="true">
+      <div class="repair-question" id="repairQuestion"></div>
+      <div class="repair-hint">Say “yes” or “no”</div>
     </div>
 
     <!-- Button row -->
@@ -243,13 +386,60 @@
   const btnDashboard = document.getElementById('btnDashboard');
   const transcriptArea = document.getElementById('transcriptArea');
   const transcriptText = document.getElementById('transcriptText');
+  const pickerArea = document.getElementById('pickerArea');
+  const pickerQuestion = document.getElementById('pickerQuestion');
+  const pickerNames = document.getElementById('pickerNames');
+  const stateLine = document.getElementById('stateLine');
+  const heardLine = document.getElementById('heardLine');
+  const repairArea = document.getElementById('repairArea');
+  const repairQuestion = document.getElementById('repairQuestion');
+  const wakeDot = document.getElementById('wakeDot');
 
   // ── State ──
-  let state = 'idle'; // idle | listening | processing
+  let state = 'idle'; // idle | wake-listening | listening | processing
   let hasGreeted = false;
   let continuousMode = true; // Auto-restart recording after each command
   let consecutiveErrors = 0; // Stop continuous mode after repeated failures
   const MAX_CONSECUTIVE_ERRORS = 3;
+
+  // ── Wake-word settings (refreshed via settings_update WS message) ──
+  let wakeWordEnabled = true;
+  let wakeWordPhrases = ['hey able', 'able speak'];
+
+  // ── Backoff calculator (mirrors server/src/reconnect.js — see that file) ──
+  function nextRetryDelay(attempt, baseMs, capMs) {
+    baseMs = baseMs || 500; capMs = capMs || 15000;
+    return Math.min(capMs, baseMs * Math.pow(2, attempt));
+  }
+
+  // ── Wake-word matcher (mirrors server/src/speech-tuning.js isWakeWord — see that file) ──
+  function normWake(s) {
+    return String(s || '').toLowerCase().replace(/[^\w\s]/g, '').trim().replace(/\s+/g, ' ');
+  }
+  function lev(a, b) {
+    if (a === b) return 0; if (!a.length) return b.length; if (!b.length) return a.length;
+    let p = Array.from({length: b.length+1}, (_,i) => i), c = [];
+    for (let i = 1; i <= a.length; i++) {
+      c[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        c[j] = Math.min(p[j]+1, c[j-1]+1, p[j-1]+(a[i-1]===b[j-1]?0:1));
+      }
+      [p, c] = [c, p];
+    }
+    return p[b.length];
+  }
+  function isWakeWord(transcript, phrases) {
+    const t = normWake(transcript); const tns = t.replace(/\s/g,'');
+    for (const phrase of (phrases||[])) {
+      const p = normWake(phrase); if (!p) continue;
+      const pns = p.replace(/\s/g,'');
+      if (t.includes(p) || (pns && tns.includes(pns))) return true;
+      const ml = Math.max(t.length, p.length);
+      if (ml && lev(t,p)/ml <= 0.35) return true;
+      if (pns && tns) { const ml2 = Math.max(tns.length, pns.length); if (ml2 && lev(tns,pns)/ml2 <= 0.35) return true; }
+    }
+    return false;
+  }
 
   // ── Recording state ──
   let mediaRecorder = null;
@@ -288,17 +478,64 @@
     transcriptArea.style.display = text ? 'block' : 'none';
   }
 
+  // ── Truth states: wake-listening / listening / heard / working / done / failed(reason) / repair ──
+  // Every interaction ends in done, failed(<reason>) or repair — never a silent drop.
+  function setTruthState(name, detail) {
+    const labels = {
+      idle: '',
+      'wake-listening': 'waiting for wake word',
+      listening: 'listening…',
+      heard: 'heard',
+      working: 'working…',
+      done: 'done',
+      failed: `failed (${detail || 'error'})`,
+      repair: 'repair — answer yes or no',
+    };
+    stateLine.textContent = labels[name] !== undefined ? labels[name] : name;
+    stateLine.className = 'state-line ' + name;
+    // Wake dot: only visible in wake-listening state
+    if (name === 'wake-listening') {
+      wakeDot.classList.add('visible');
+    } else {
+      wakeDot.classList.remove('visible');
+    }
+    // Fix 5 (WCAG): aria-label on a role="status" live region suppresses textContent
+    // announcements in some AT implementations. The textContent ("waiting for wake word",
+    // "listening…", etc.) is the intended announcement — no aria-label needed.
+  }
+
+  // Persistent last-transcript readout — stays visible across states
+  function setHeard(text) {
+    if (!text) return;
+    heardLine.textContent = `Heard: "${text}"`;
+    heardLine.classList.add('visible');
+    setTruthState('heard');
+  }
+
+  function showRepair(question) {
+    repairQuestion.textContent = question;
+    repairArea.classList.add('visible');
+    setTruthState('repair');
+  }
+
+  function hideRepair() {
+    repairArea.classList.remove('visible');
+    repairQuestion.textContent = '';
+  }
+
   function setListeningUI() {
     state = 'listening';
     btnMic.className = 'btn btn-mic listening';
     btnMic.title = 'Listening... click to stop';
     setTranscript('Listening...', 'listening-label');
+    setTruthState('listening');
   }
 
   function setProcessingUI() {
     state = 'processing';
     btnMic.className = 'btn btn-mic processing';
     btnMic.title = 'Processing...';
+    setTruthState('working');
   }
 
   function setIdleUI() {
@@ -313,6 +550,7 @@
 
   let ws = null;
   let wsConnected = false;
+  let wsAttempt = 0;
 
   function connectWS() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -321,7 +559,12 @@
 
     ws.onopen = () => {
       wsConnected = true;
+      wsAttempt = 0;
       console.log('[Overlay] WebSocket connected — using fast dashboard pipeline');
+      // After reconnect, restore correct state
+      if (state === 'idle' && wakeWordEnabled) {
+        startWakeListener();
+      }
     };
 
     ws.onmessage = (event) => {
@@ -333,8 +576,11 @@
 
     ws.onclose = () => {
       wsConnected = false;
-      // Auto-reconnect
-      setTimeout(connectWS, 2000);
+      // Capped exponential backoff — mirrors reconnect.js nextRetryDelay
+      const delay = nextRetryDelay(wsAttempt);
+      wsAttempt++;
+      console.log(`[Overlay] WS closed, reconnecting in ${delay}ms (attempt ${wsAttempt})`);
+      setTimeout(connectWS, delay);
     };
 
     ws.onerror = () => {
@@ -342,20 +588,87 @@
     };
   }
 
+  function showPicker(question, names) {
+    pickerQuestion.textContent = question || "Who's using AbleSpeak?";
+    pickerNames.innerHTML = '';
+    (names || []).forEach(name => {
+      const span = document.createElement('span');
+      span.className = 'picker-name';
+      span.textContent = name;
+      pickerNames.appendChild(span);
+    });
+    pickerArea.classList.add('visible');
+  }
+
+  function hidePicker() {
+    pickerArea.classList.remove('visible');
+    pickerNames.innerHTML = '';
+    pickerQuestion.textContent = '';
+  }
+
   function handleWSMessage(data) {
-    // Voice transcription received — show what was heard
-    if (data.type === 'voice_transcription') {
-      setTranscript(data.text || '', 'listening-label');
+    // Settings update — live toggle of wake word from Setup wizard
+    if (data.type === 'settings_update') {
+      if (typeof data.wakeWordEnabled === 'boolean') wakeWordEnabled = data.wakeWordEnabled;
+      if (Array.isArray(data.wakeWordPhrases)) wakeWordPhrases = data.wakeWordPhrases;
+      if (!wakeWordEnabled) {
+        stopWakeListener();
+        if (state === 'wake-listening') { state = 'idle'; setTruthState('idle'); }
+      } else if (state === 'idle') {
+        startWakeListener();
+      }
       return;
     }
 
-    // No speech detected
-    if (data.type === 'voice_no_speech') {
-      if (continuousMode && active) {
-        setIdleUI();
-        setTimeout(() => { if (active) startListening(); }, 500);
+    // Student picker prompt — show roster names
+    if (data.type === 'picker_prompt') {
+      showPicker(data.question, data.names);
+      return;
+    }
+
+    // Picker resolved — hide picker UI
+    if (data.type === 'picker_clear') {
+      hidePicker();
+      return;
+    }
+
+    // Repair prompt — "Did you mean X?" (large display + spoken, then listen for yes/no)
+    if (data.type === 'repair_prompt') {
+      const q = data.question || `Did you mean "${data.candidate}"?`;
+      showRepair(q);
+      const utterance = speak(q);
+      const restart = () => {
+        if (continuousMode && active && state !== 'listening') { setIdleUI(); startListening(); }
+      };
+      if (utterance) {
+        utterance.onend = () => setTimeout(restart, 200);
+        setTimeout(restart, 5000); // TTS watchdog — never dead-end in repair
       } else {
-        setIdleUI();
+        setTimeout(restart, 800);
+      }
+      return;
+    }
+
+    // Repair resolved — hide repair UI
+    if (data.type === 'repair_clear') {
+      hideRepair();
+      return;
+    }
+
+    // Voice transcription received — persistent "Heard:" readout
+    if (data.type === 'voice_transcription') {
+      setHeard(data.text || '');
+      setTruthState('working');
+      return;
+    }
+
+    // Rejected input — show WHY (never a silent drop)
+    if (data.type === 'voice_no_speech') {
+      setTruthState('failed', data.reason || 'no_speech');
+      if (continuousMode && active) {
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 800);
+      } else {
+        setIdleUI(); resumeWake();
       }
       return;
     }
@@ -364,6 +677,7 @@
     if (data.type === 'voice_error') {
       consecutiveErrors++;
       setTranscript(data.error || 'Voice error', 'error');
+      setTruthState('failed', data.error || 'voice error');
       if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
         setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
       } else {
@@ -392,18 +706,26 @@
   }
 
   function handleResponse(data) {
+    // The repair question is rendered + spoken by the repair_prompt handler —
+    // skip the duplicate chat broadcast so it isn't spoken twice.
+    if (data.provider === 'repair' && typeof data.text === 'string' && data.text.indexOf('Did you mean') === 0) {
+      return;
+    }
+
     if (data.error) {
       consecutiveErrors++;
       setTranscript(data.text || data.error || 'Error', 'error');
+      setTruthState('failed', typeof data.error === 'string' ? data.error : 'command error');
       if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 1500);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
       return;
     }
 
     consecutiveErrors = 0;
+    setTruthState('done');
 
     // Determine if silent (action commands like scroll)
     const isSilent = data.silent === true ||
@@ -412,9 +734,9 @@
     if (isSilent) {
       setTranscript('✓', 'response');
       if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 300);
       } else {
-        setTimeout(() => { setIdleUI(); setTranscript('', ''); }, 400);
+        setTimeout(() => { setIdleUI(); setTranscript('', ''); resumeWake(); }, 400);
       }
       return;
     }
@@ -426,25 +748,32 @@
       const utterance = speak(responseText);
       if (utterance && continuousMode && active) {
         utterance.onend = () => {
-          setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+          setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 300);
         };
         setTimeout(() => {
           if (state !== 'listening' && active) {
             setIdleUI();
-            if (continuousMode) startListening();
+            if (continuousMode) startListening(); else resumeWake();
           }
         }, 6000);
       } else if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 2000);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 2000);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
     } else {
       if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+        setTimeout(() => { setIdleUI(); if (active) startListening(); else resumeWake(); }, 300);
       } else {
-        setIdleUI();
+        setIdleUI(); resumeWake();
       }
+    }
+  }
+
+  // Resume wake listening after an interaction — only when not armed/active
+  function resumeWake() {
+    if (!active && wakeWordEnabled && state !== 'wake-listening') {
+      setTimeout(startWakeListener, 500);
     }
   }
 
@@ -452,9 +781,198 @@
   connectWS();
 
   // ════════════════════════════════════════════════
-  // ── Voice Recording (same approach as dashboard mic) ──
+  // ── Wake-word listener loop ──
+  // Runs continuous speech recognition in low-key background mode.
+  // On match → arm the mic (enter normal listening state).
+  // Auto-restarts on onend/onerror with 500ms delay indefinitely,
+  // unless wakeWordEnabled=false or armed/processing.
   // ════════════════════════════════════════════════
 
+  let wakeRecognition = null;
+  let wakeListenerActive = false;
+
+  function startWakeListener() {
+    if (!wakeWordEnabled) return;
+    if (wakeListenerActive) return;
+    if (active) return; // Don't run while armed/processing — no double sessions
+    if (state === 'listening' || state === 'processing') return;
+    if (typeof window.webkitSpeechRecognition !== 'function') return;
+
+    wakeListenerActive = true;
+    state = 'wake-listening';
+    setTruthState('wake-listening');
+
+    try {
+      wakeRecognition = new webkitSpeechRecognition();
+    } catch (e) {
+      wakeListenerActive = false;
+      state = 'idle';
+      return;
+    }
+
+    wakeRecognition.lang = navigator.language || 'en-US';
+    wakeRecognition.continuous = true;  // continuous for wake listening
+    wakeRecognition.interimResults = false;
+    wakeRecognition.maxAlternatives = 1;
+
+    wakeRecognition.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const transcript = (e.results[i][0]?.transcript || '').trim();
+        if (!transcript) continue;
+        if (isWakeWord(transcript, wakeWordPhrases)) {
+          // Wake word detected — arm the mic
+          console.log('[Overlay] Wake word detected:', transcript);
+          stopWakeListener();
+          speak('Listening');
+          active = true;
+          continuousMode = true;
+          consecutiveErrors = 0;
+          setTimeout(() => { startListening(); }, 300);
+          return;
+        }
+      }
+    };
+
+    wakeRecognition.onend = () => {
+      wakeListenerActive = false;
+      wakeRecognition = null;
+      if (!active && wakeWordEnabled && state !== 'listening' && state !== 'processing') {
+        // Auto-restart on session end (sessions terminate ~60s on silence)
+        state = 'idle';
+        setTimeout(startWakeListener, 500);
+      } else if (state === 'wake-listening') {
+        state = 'idle';
+        setTruthState('idle');
+      }
+    };
+
+    wakeRecognition.onerror = (e) => {
+      if (e.error === 'aborted') return;
+      console.warn('[Overlay] Wake recognition error:', e.error);
+      wakeListenerActive = false;
+      wakeRecognition = null;
+      if (!active && wakeWordEnabled) {
+        state = 'idle';
+        setTimeout(startWakeListener, 500);
+      }
+    };
+
+    try {
+      wakeRecognition.start();
+    } catch (e) {
+      wakeListenerActive = false;
+      wakeRecognition = null;
+      state = 'idle';
+    }
+  }
+
+  function stopWakeListener() {
+    wakeListenerActive = false;
+    if (wakeRecognition) {
+      try { wakeRecognition.abort(); } catch {}
+      wakeRecognition = null;
+    }
+    if (state === 'wake-listening') {
+      state = 'idle';
+      setTruthState('idle');
+    }
+  }
+
+  // ── Microphone reconnect on device change ──
+  // If a mic is unplugged/replugged, reacquire on the next recording attempt.
+  // We don't need to pre-acquire; getUserMedia is called fresh each startBlobRecording.
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      console.log('[Overlay] Media device change detected — mic may have changed');
+      // If we were mid-recording, the stream will error; stopRecording gracefully
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    });
+  }
+
+  // ════════════════════════════════════════════════
+  // ── Primary ASR: Web Speech API (per-utterance confidence) ──
+  // ════════════════════════════════════════════════
+
+  let webSpeechFailed = false;
+  let recognition = null;
+
+  function startWebSpeech() {
+    try {
+      recognition = new webkitSpeechRecognition();
+    } catch (err) {
+      console.warn('[Overlay] Web Speech unavailable:', err.message);
+      webSpeechFailed = true;
+      startBlobRecording();
+      return;
+    }
+    recognition.lang = navigator.language || 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 3; // only the TOP alternative's confidence is used
+
+    recognition.onresult = (e) => {
+      const top = e.results[0] && e.results[0][0];
+      const text = ((top && top.transcript) || '').trim();
+      // Missing/zero confidence → null → server treats it as unknown (fuzzy path only)
+      const confidence = (top && typeof top.confidence === 'number' && top.confidence > 0) ? top.confidence : null;
+      if (!text) { handleNoSpeech(); return; }
+      setHeard(text);
+      setProcessingUI();
+      sendVoiceText(text, confidence);
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === 'no-speech') { handleNoSpeech(); return; }
+      if (e.error === 'aborted') { return; } // stopRecording() aborts intentionally
+      // network / not-allowed / service errors → permanent fallback to audio blobs
+      console.warn('[Overlay] Web Speech error:', e.error, '— falling back to audio recording');
+      webSpeechFailed = true;
+      setIdleUI();
+      if (active) startBlobRecording();
+    };
+
+    recognition.onend = () => {
+      lastRecordEnd = Date.now();
+      recognition = null;
+      // Ended while still "listening" with no result → treat as no speech
+      if (state === 'listening' && !webSpeechFailed) handleNoSpeech();
+    };
+
+    recognition.start();
+    setListeningUI();
+  }
+
+  function handleNoSpeech() {
+    // While a repair question is pending, a no-speech result must not clobber
+    // the repair UI with a contradictory failed(no_speech) state.  Keep the
+    // question visible and restart listening so the student can still answer.
+    if (repairArea.classList.contains('visible')) {
+      if (continuousMode && active) {
+        setTimeout(() => { if (active) startListening(); }, 600);
+      }
+      return;
+    }
+    setTruthState('failed', 'no_speech');
+    if (continuousMode && active) {
+      setIdleUI();
+      setTimeout(() => { if (active) startListening(); }, 600);
+    } else {
+      setIdleUI();
+    }
+  }
+
+  function sendVoiceText(text, confidence) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'voice_text', text, confidence }));
+    } else {
+      // IPC fallback when the WebSocket is down
+      window.electronAPI.sendText(text, confidence);
+    }
+  }
+
+  // Router: Web Speech first, audio-blob (Gemini) fallback
   async function startListening() {
     if (!active) return;
     if (state === 'listening' || state === 'processing') return;
@@ -465,6 +983,21 @@
       setTimeout(() => { if (active) startListening(); }, cooldownRemaining);
       return;
     }
+
+    if (!webSpeechFailed && typeof window.webkitSpeechRecognition === 'function') {
+      startWebSpeech();
+    } else {
+      startBlobRecording();
+    }
+  }
+
+  // ════════════════════════════════════════════════
+  // ── Fallback: Voice Recording → Gemini (same approach as dashboard mic) ──
+  // ════════════════════════════════════════════════
+
+  async function startBlobRecording() {
+    if (!active) return;
+    if (state === 'listening' || state === 'processing') return;
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -489,7 +1022,10 @@
         if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
         lastRecordEnd = Date.now();
 
-        if (hasSpeechDetected && blob.size > 5000) {
+        // Minimal client-side sanity gate only — the per-student audio floor
+        // (speech profile min_audio_b64) is enforced server-side, so quiet
+        // speakers' short recordings still reach transcription.
+        if (hasSpeechDetected && blob.size > 1500) {
           setProcessingUI();
           setTranscript('Processing...', '');
 
@@ -566,13 +1102,20 @@
     active = false;
     continuousMode = false;
     consecutiveErrors = 0;
+    if (recognition) {
+      try { recognition.abort(); } catch {}
+      recognition = null;
+    }
     if (mediaRecorder && mediaRecorder.state === 'recording') {
       mediaRecorder.stop();
     }
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    hideRepair();
     setIdleUI();
     setTranscript('Ready — click mic to start', '');
+    // Resume wake listening now that the student has disarmed
+    resumeWake();
   }
 
   // ════════════════════════════════════════════
@@ -585,6 +1128,8 @@
     if (active) {
       stopRecording();
     } else {
+      // Stop wake listener before arming — no double recognition sessions
+      stopWakeListener();
       active = true;
       continuousMode = true;
       consecutiveErrors = 0;
@@ -611,7 +1156,15 @@
     toggleListening();
   });
 
-  // ── IPC: AI Response (fallback when WS not connected) ──
+  // ── IPC: Structured server events from /api/voice/text (IPC fallback path) ──
+  // Events have the same shape as WS dashboard messages — route through
+  // handleWSMessage() so all gate states (repair, picker, voice_no_speech, …)
+  // are rendered exactly as they are on the WS path.
+  window.electronAPI.onEvent((event) => {
+    handleWSMessage(event);
+  });
+
+  // ── IPC: AI Response (audio-blob Gemini fallback when WS not connected) ──
   window.electronAPI.onResponse((data) => {
     handleResponse({
       text: data.text,
@@ -636,6 +1189,17 @@
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
   }
+
+  // ── Load persisted settings and start wake listener on boot ──
+  fetch('/api/setup/status').then(r => r.json()).then(s => {
+    if (typeof s.wakeWordEnabled === 'boolean') wakeWordEnabled = s.wakeWordEnabled;
+    if (Array.isArray(s.wakeWordPhrases)) wakeWordPhrases = s.wakeWordPhrases;
+  }).catch(() => {}).finally(() => {
+    // Start wake listener after settings load (or on error — use defaults)
+    if (wakeWordEnabled) {
+      setTimeout(startWakeListener, 1500);
+    }
+  });
 
 })();
 </script>

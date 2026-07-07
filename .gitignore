@@ -26,6 +26,10 @@ banner_to_pdf.js
 *.local
 *.db
 
+# Runtime data — contains user preferences and DB, not source
+server/data/app-settings.json
+server/data/
+
 # OS files
 .DS_Store
 Thumbs.db

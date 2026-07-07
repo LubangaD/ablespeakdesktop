@@ -55,6 +55,12 @@ function scheduleSave() {
   saveTimer = setInterval(saveToFile, 2000); // auto-save every 2s (reduced from 5s)
 }
 
+export function closeDatabase() {
+  if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
+  saveToFile();
+  db = null;
+}
+
 function migrate() {
   db.run(`
     CREATE TABLE IF NOT EXISTS commands (
@@ -75,6 +81,33 @@ function migrate() {
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_log_level ON log_events(level)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_health_comp ON health_checks(component)`); } catch {}
+
+  // T0: student identity + speech profiles + progress monitoring schema
+  db.run(`CREATE TABLE IF NOT EXISTS students (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, external_ref TEXT, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now','localtime')))`);
+  db.run(`CREATE TABLE IF NOT EXISTS speech_profiles (id TEXT PRIMARY KEY, student_id TEXT NOT NULL, custom_vocabulary TEXT DEFAULT '[]', min_audio_b64 INTEGER DEFAULT 4000, min_confidence REAL DEFAULT 0.45, fuzzy_threshold REAL DEFAULT 0.34, silence_threshold REAL DEFAULT 15, silence_duration_ms INTEGER DEFAULT 2000, repair_enabled INTEGER DEFAULT 1, updated_at TEXT DEFAULT (datetime('now','localtime')))`);
+  try { db.run(`ALTER TABLE sessions ADD COLUMN student_id TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN student_id TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN outcome TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN prompt_count INTEGER`); } catch {}
+  db.run(`CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, student_id TEXT NOT NULL, measure TEXT NOT NULL, baseline_value REAL NOT NULL, baseline_date TEXT NOT NULL, target_value REAL NOT NULL, target_date TEXT NOT NULL, decision_rule TEXT NOT NULL DEFAULT '4_below_aim', status TEXT DEFAULT 'active', created_at TEXT DEFAULT (datetime('now','localtime')))`);
+  db.run(`CREATE TABLE IF NOT EXISTS progress_points (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, student_id TEXT NOT NULL, measured_at TEXT NOT NULL, value REAL NOT NULL, source TEXT NOT NULL DEFAULT 'auto', sample_size INTEGER, UNIQUE(goal_id, measured_at))`);
+  db.run(`CREATE TABLE IF NOT EXISTS phase_changes (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, changed_at TEXT NOT NULL, label TEXT NOT NULL, note TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS decision_flags (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, rule TEXT NOT NULL, fired_at TEXT NOT NULL, detail TEXT, acknowledged_at TEXT)`);
+
+  // T4: sync schema additions (additive ALTER TABLE — try/catch for idempotency)
+  try { db.run(`ALTER TABLE students ADD COLUMN sync_opt_in INTEGER DEFAULT 1`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN origin_device TEXT`); } catch {}
+  try { db.run(`ALTER TABLE sessions ADD COLUMN origin_device TEXT`); } catch {}
+  db.run(`CREATE TABLE IF NOT EXISTS sync_state (table_name TEXT PRIMARY KEY, last_cursor TEXT, updated_at TEXT)`);
+
+  // Finding 1: mutable tables need updated_at for timestamp-based cursor (rowid never
+  // changes on UPDATE so rowid cursors silently miss updates after the first sync cycle).
+  // ALTER TABLE is try/catch for idempotency; backfill covers rows predating this migration.
+  try { db.run(`ALTER TABLE students ADD COLUMN updated_at TEXT`); } catch {}
+  db.run(`UPDATE students SET updated_at = created_at WHERE updated_at IS NULL`);
+  try { db.run(`ALTER TABLE goals ADD COLUMN updated_at TEXT`); } catch {}
+  db.run(`UPDATE goals SET updated_at = created_at WHERE updated_at IS NULL`);
+
   saveToFile();
 }
 
@@ -99,12 +132,13 @@ function run(sql, params = []) {
 
 // ── Commands ──
 
-export function insertCommand({ id, type, direction, payload, result, latency_ms, session_id }) {
-  run(`INSERT OR IGNORE INTO commands (id,type,direction,payload,result,latency_ms,session_id) VALUES (?,?,?,?,?,?,?)`,
+export function insertCommand({ id, type, direction, payload, result, latency_ms, session_id, student_id, outcome, prompt_count }) {
+  run(`INSERT OR IGNORE INTO commands (id,type,direction,payload,result,latency_ms,session_id,student_id,outcome,prompt_count) VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [id, type, direction || 'voqal_to_ext',
      typeof payload === 'string' ? payload : JSON.stringify(payload || {}),
      typeof result === 'string' ? result : JSON.stringify(result || {}),
-     latency_ms || null, session_id || null]);
+     latency_ms || null, session_id || null,
+     student_id || null, outcome || null, prompt_count ?? null]);
 }
 
 export function getCommands({ limit = 50, offset = 0, type = null, direction = null } = {}) {
@@ -128,7 +162,8 @@ export function getCommandStats() {
 
 // ── Sessions ──
 
-export function insertSession({ id, started_at }) { run('INSERT INTO sessions (id,started_at) VALUES (?,?)', [id, started_at]); }
+export function insertSession({ id, started_at, student_id }) { run('INSERT INTO sessions (id,started_at,student_id) VALUES (?,?,?)', [id, started_at, student_id || null]); }
+export function endSession(id) { run(`UPDATE sessions SET ended_at=datetime('now','localtime') WHERE id=?`, [id]); }
 export function getSessions({ limit = 20 } = {}) { return query('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?', [limit]); }
 
 // ── Log Events ──
@@ -159,4 +194,321 @@ export function getLatestHealthChecks() {
 
 export function getHealthAlerts() {
   return query(`SELECT h.* FROM health_checks h INNER JOIN (SELECT component, MAX(id) as max_id FROM health_checks GROUP BY component) latest ON h.id=latest.max_id WHERE h.status IN ('warn','error') ORDER BY h.checked_at DESC`);
+}
+
+// ── Students ──
+
+export function upsertStudent({ id, display_name, external_ref }) {
+  run(`INSERT INTO students (id,display_name,external_ref,updated_at) VALUES (?,?,?,datetime('now','localtime')) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, external_ref=excluded.external_ref, updated_at=datetime('now','localtime')`,
+    [id, display_name, external_ref || null]);
+}
+
+export function updateStudent({ id, display_name, external_ref, active, sync_opt_in }) {
+  const parts = [];
+  const params = [];
+  if (display_name !== undefined) { parts.push('display_name=?'); params.push(display_name); }
+  if (external_ref !== undefined) { parts.push('external_ref=?'); params.push(external_ref); }
+  if (active !== undefined) { parts.push('active=?'); params.push(active ? 1 : 0); }
+  if (sync_opt_in !== undefined) { parts.push('sync_opt_in=?'); params.push(sync_opt_in ? 1 : 0); }
+  if (parts.length === 0) return;
+  // Always bump updated_at so this write is visible to the timestamp-based sync cursor.
+  parts.push(`updated_at=datetime('now','localtime')`);
+  params.push(id);
+  run(`UPDATE students SET ${parts.join(',')} WHERE id=?`, params);
+}
+
+export function getStudents({ activeOnly = true } = {}) {
+  if (activeOnly) return query(`SELECT * FROM students WHERE active=1 ORDER BY display_name`);
+  return query(`SELECT * FROM students ORDER BY display_name`);
+}
+
+// ── Speech Profiles ──
+
+const SPEECH_PROFILE_DEFAULTS = {
+  custom_vocabulary: '[]', min_audio_b64: 4000, min_confidence: 0.45,
+  fuzzy_threshold: 0.34, silence_threshold: 15, silence_duration_ms: 2000, repair_enabled: 1,
+};
+
+export function getSpeechProfile(studentId) {
+  const row = queryOne(`SELECT * FROM speech_profiles WHERE student_id=?`, [studentId]);
+  if (row) return row;
+  return { ...SPEECH_PROFILE_DEFAULTS, student_id: studentId, id: null, updated_at: null };
+}
+
+export function saveSpeechProfile(profile) {
+  const { id, student_id, custom_vocabulary, min_audio_b64, min_confidence, fuzzy_threshold, silence_threshold, silence_duration_ms, repair_enabled } = profile;
+  run(`INSERT INTO speech_profiles (id,student_id,custom_vocabulary,min_audio_b64,min_confidence,fuzzy_threshold,silence_threshold,silence_duration_ms,repair_enabled,updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now','localtime')) ON CONFLICT(id) DO UPDATE SET student_id=excluded.student_id, custom_vocabulary=COALESCE(excluded.custom_vocabulary,custom_vocabulary), min_audio_b64=COALESCE(excluded.min_audio_b64,min_audio_b64), min_confidence=COALESCE(excluded.min_confidence,min_confidence), fuzzy_threshold=COALESCE(excluded.fuzzy_threshold,fuzzy_threshold), silence_threshold=COALESCE(excluded.silence_threshold,silence_threshold), silence_duration_ms=COALESCE(excluded.silence_duration_ms,silence_duration_ms), repair_enabled=COALESCE(excluded.repair_enabled,repair_enabled), updated_at=datetime('now','localtime')`,
+    [id || null, student_id, custom_vocabulary ?? null, min_audio_b64 ?? null, min_confidence ?? null, fuzzy_threshold ?? null, silence_threshold ?? null, silence_duration_ms ?? null, repair_enabled ?? null]);
+}
+
+// ── T4 Sync Helpers ──
+
+/**
+ * Cursor strategy — two modes depending on table type:
+ *
+ * Evidence tables (commands, sessions, progress_points, phase_changes, decision_flags):
+ *   INTEGER rowid cursor: monotonically increasing, never changes on UPDATE (immutable rows).
+ *   nextCursor = max rowid seen (as string). '0' = from the start.
+ *
+ * Mutable tables (students, speech_profiles, goals):
+ *   Timestamp (updated_at) cursor: rowid never changes on UPDATE so rowid cursors would
+ *   silently miss every post-first-sync UPDATE forever.
+ *   - '0' < any real ISO timestamp, so cursor='0' fetches all rows.
+ *   - Uses >= not >: same-second ties are included; re-sending a tie is harmless because
+ *     receiver ingestRows is idempotent / last-write-wins.
+ *   - nextCursor = max updated_at in the batch.
+ */
+export function getRowsSince(table, cursor, { optInStudentIdsOnly = false } = {}) {
+  const BATCH = 500;
+  const OPT_IN = `(SELECT id FROM students WHERE sync_opt_in=1)`;
+
+  let sql, params, isMutable;
+
+  if (table === 'students') {
+    isMutable = true;
+    const f = optInStudentIdsOnly ? `AND sync_opt_in=1` : '';
+    sql = `SELECT * FROM students WHERE updated_at >= ? ${f} ORDER BY updated_at LIMIT ?`;
+    params = [cursor, BATCH];
+  } else if (table === 'speech_profiles') {
+    isMutable = true;
+    const f = optInStudentIdsOnly
+      ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
+      : '';
+    sql = `SELECT * FROM speech_profiles WHERE updated_at >= ? ${f} ORDER BY updated_at LIMIT ?`;
+    params = [cursor, BATCH];
+  } else if (table === 'goals') {
+    isMutable = true;
+    const f = optInStudentIdsOnly
+      ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
+      : '';
+    sql = `SELECT * FROM goals WHERE updated_at >= ? ${f} ORDER BY updated_at LIMIT ?`;
+    params = [cursor, BATCH];
+  } else if (['commands', 'sessions', 'progress_points'].includes(table)) {
+    isMutable = false;
+    const rowid = parseInt(cursor) || 0;
+    const f = optInStudentIdsOnly
+      ? `AND student_id IS NOT NULL AND student_id IN ${OPT_IN}`
+      : '';
+    sql = `SELECT *, rowid AS _sync_cursor FROM ${table} WHERE rowid>? ${f} ORDER BY rowid LIMIT ?`;
+    params = [rowid, BATCH];
+  } else if (['phase_changes', 'decision_flags'].includes(table)) {
+    isMutable = false;
+    const rowid = parseInt(cursor) || 0;
+    const f = optInStudentIdsOnly
+      ? `AND t.goal_id IN (SELECT id FROM goals WHERE student_id IS NOT NULL AND student_id IN ${OPT_IN})`
+      : '';
+    sql = `SELECT t.*, t.rowid AS _sync_cursor FROM ${table} t WHERE t.rowid>? ${f} ORDER BY t.rowid LIMIT ?`;
+    params = [rowid, BATCH];
+  } else {
+    throw new Error(`getRowsSince: unsupported table "${table}"`);
+  }
+
+  const rows = query(sql, params);
+
+  if (isMutable) {
+    // Cursor = max updated_at in batch. >= on next call re-sends the boundary row —
+    // harmless because receiver ingestRows is idempotent / last-write-wins.
+    const nextCursor = rows.length > 0 ? rows[rows.length - 1].updated_at : cursor;
+    return { rows, nextCursor };
+  } else {
+    // Strip internal cursor alias before returning.
+    const nextCursor = rows.length > 0
+      ? String(rows[rows.length - 1]._sync_cursor)
+      : String(parseInt(cursor) || 0);
+    return {
+      rows: rows.map(({ _sync_cursor, ...r }) => r),
+      nextCursor,
+    };
+  }
+}
+
+// Tables with origin_device column (stamped on ingest to identify the sending device)
+const ORIGIN_DEVICE_TABLES = new Set(['commands', 'sessions']);
+// Evidence tables: INSERT OR IGNORE by PK — immutable once written
+const EVIDENCE_TABLES = new Set(['commands', 'sessions', 'progress_points', 'phase_changes', 'decision_flags']);
+// Mutable tables: last-write-wins by comparing timestamp columns
+const MUTABLE_TABLES = new Set(['students', 'speech_profiles', 'goals']);
+// Timestamp column used for last-write-wins per mutable table.
+// students and goals now compare updated_at — created_at never advanced for same-origin
+// rows so the old LWW comparison was a dead no-op; updated_at fixes that.
+const MUTABLE_TS = { students: 'updated_at', speech_profiles: 'updated_at', goals: 'updated_at' };
+
+/**
+ * Ingest rows from another device into the local database.
+ * Evidence tables: INSERT OR IGNORE by primary key; stamps origin_device where column exists.
+ * Mutable tables: upsert only if incoming timestamp is newer (last-write-wins).
+ * Returns { inserted, skipped }.
+ */
+const SAFE_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function ingestRows(table, rows, originDevice) {
+  if (!rows || rows.length === 0) return { inserted: 0, skipped: 0 };
+  if (!EVIDENCE_TABLES.has(table) && !MUTABLE_TABLES.has(table)) {
+    throw new Error(`ingestRows: unsupported table "${table}"`);
+  }
+
+  let inserted = 0, skipped = 0;
+
+  for (const rawRow of rows) {
+    // Build clean row: strip sync-internal fields and any non-identifier keys —
+    // column names are interpolated into SQL, so only plain identifiers pass.
+    const row = {};
+    for (const [k, v] of Object.entries(rawRow)) {
+      if (k !== '_sync_cursor' && SAFE_IDENT.test(k)) row[k] = v;
+    }
+    if (Object.keys(row).length === 0) { skipped++; continue; }
+
+    if (EVIDENCE_TABLES.has(table)) {
+      // Stamp origin_device for tables that have the column
+      if (ORIGIN_DEVICE_TABLES.has(table)) {
+        row.origin_device = originDevice;
+      }
+      const cols = Object.keys(row);
+      run(
+        `INSERT OR IGNORE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
+        cols.map(c => row[c])
+      );
+      if (db.getRowsModified() > 0) inserted++;
+      else skipped++;
+
+    } else {
+      // Mutable: last-write-wins
+      const tsCol = MUTABLE_TS[table];
+      const cols = Object.keys(row);
+      const setClauses = cols.filter(c => c !== 'id').map(c => `${c}=excluded.${c}`).join(',');
+      run(
+        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')}) ON CONFLICT(id) DO UPDATE SET ${setClauses} WHERE excluded.${tsCol} > ${table}.${tsCol}`,
+        cols.map(c => row[c])
+      );
+      if (db.getRowsModified() > 0) inserted++;
+      else skipped++;
+    }
+  }
+
+  return { inserted, skipped };
+}
+
+/** Read the persisted sync cursor for a table (returns '0' if none set). */
+export function getSyncCursor(table) {
+  const row = queryOne(`SELECT last_cursor FROM sync_state WHERE table_name=?`, [table]);
+  return row ? row.last_cursor : '0';
+}
+
+/** Persist the sync cursor for a table. */
+export function setSyncCursor(table, cursor) {
+  run(
+    `INSERT INTO sync_state (table_name,last_cursor,updated_at) VALUES (?,?,datetime('now','localtime')) ON CONFLICT(table_name) DO UPDATE SET last_cursor=excluded.last_cursor, updated_at=excluded.updated_at`,
+    [table, cursor]
+  );
+}
+
+// ── Goals ──
+
+/**
+ * Insert a new goal. updated_at is set explicitly so T4 cursor sync can see it.
+ * NEVER call without setting updated_at — rows with NULL updated_at are permanently
+ * invisible to mutable-table sync (see T4 "sync-invisibility trap").
+ */
+export function insertGoal({ id, student_id, measure, baseline_value, baseline_date, target_value, target_date, decision_rule = '4_below_aim' }) {
+  run(
+    `INSERT INTO goals (id,student_id,measure,baseline_value,baseline_date,target_value,target_date,decision_rule,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'active',datetime('now','localtime'))`,
+    [id, student_id, measure, baseline_value, baseline_date, target_value, target_date, decision_rule]
+  );
+}
+
+/**
+ * Query goals with optional student and status filters.
+ */
+export function getGoals({ studentId = null, status = null } = {}) {
+  let sql = 'SELECT * FROM goals WHERE 1=1';
+  const params = [];
+  if (studentId) { sql += ' AND student_id=?'; params.push(studentId); }
+  if (status) { sql += ' AND status=?'; params.push(status); }
+  sql += ' ORDER BY created_at DESC';
+  return query(sql, params);
+}
+
+/**
+ * Update a goal's status (active → met | revised | discontinued).
+ * Bumps updated_at so T4 sync cursor captures the change.
+ */
+export function updateGoalStatus(goalId, status) {
+  run(
+    `UPDATE goals SET status=?, updated_at=datetime('now','localtime') WHERE id=?`,
+    [status, goalId]
+  );
+}
+
+// ── Progress Points ──
+
+/**
+ * Upsert a progress point.
+ * Auto points (source='auto') only overwrite other auto points.
+ * Manual points always win (overwrite auto or manual).
+ */
+export function upsertProgressPoint({ id, goal_id, student_id, measured_at, value, source = 'auto', sample_size = null }) {
+  if (source === 'manual') {
+    // Manual always wins over any existing point for this (goal_id, measured_at)
+    run(
+      `INSERT INTO progress_points (id,goal_id,student_id,measured_at,value,source,sample_size) VALUES (?,?,?,?,?,?,?) ON CONFLICT(goal_id,measured_at) DO UPDATE SET id=excluded.id, student_id=excluded.student_id, value=excluded.value, source=excluded.source, sample_size=excluded.sample_size`,
+      [id, goal_id, student_id, measured_at, value, source, sample_size]
+    );
+  } else {
+    // Auto only overwrites if the existing point is also auto
+    run(
+      `INSERT INTO progress_points (id,goal_id,student_id,measured_at,value,source,sample_size) VALUES (?,?,?,?,?,?,?) ON CONFLICT(goal_id,measured_at) DO UPDATE SET id=excluded.id, student_id=excluded.student_id, value=excluded.value, source=excluded.source, sample_size=excluded.sample_size WHERE progress_points.source='auto'`,
+      [id, goal_id, student_id, measured_at, value, source, sample_size]
+    );
+  }
+}
+
+export function getProgressPoints(goalId) {
+  return query(`SELECT * FROM progress_points WHERE goal_id=? ORDER BY measured_at ASC`, [goalId]);
+}
+
+// ── Phase Changes ──
+
+export function insertPhaseChange({ id, goal_id, changed_at, label, note = null }) {
+  run(
+    `INSERT INTO phase_changes (id,goal_id,changed_at,label,note) VALUES (?,?,?,?,?)`,
+    [id, goal_id, changed_at, label, note]
+  );
+}
+
+export function getPhaseChanges(goalId) {
+  return query(`SELECT * FROM phase_changes WHERE goal_id=? ORDER BY changed_at ASC`, [goalId]);
+}
+
+// ── Decision Flags ──
+
+export function insertDecisionFlag({ id, goal_id, rule, fired_at, detail = null }) {
+  run(
+    `INSERT INTO decision_flags (id,goal_id,rule,fired_at,detail) VALUES (?,?,?,?,?)`,
+    [id, goal_id, rule, fired_at, detail]
+  );
+}
+
+export function getDecisionFlags({ goalId, unacknowledgedOnly = false } = {}) {
+  let sql = 'SELECT * FROM decision_flags WHERE goal_id=?';
+  const params = [goalId];
+  if (unacknowledgedOnly) { sql += ' AND acknowledged_at IS NULL'; }
+  sql += ' ORDER BY fired_at DESC';
+  return query(sql, params);
+}
+
+export function acknowledgeFlag(id) {
+  run(`UPDATE decision_flags SET acknowledged_at=datetime('now','localtime') WHERE id=?`, [id]);
+}
+
+// ── Commands for Probing ──
+
+/**
+ * Fetch all commands for a student on a specific date (YYYY-MM-DD).
+ * Used by the probe computer to compute daily measure values.
+ */
+export function getCommandsForStudentDate(studentId, isoDate) {
+  return query(
+    `SELECT * FROM commands WHERE student_id=? AND date(created_at)=?`,
+    [studentId, isoDate]
+  );
 }

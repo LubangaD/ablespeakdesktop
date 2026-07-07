@@ -464,6 +464,10 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
   }
 
   _summarizeToolResults(toolResults) {
+    // Confirmation gate: surface the spoken prompt before anything else
+    const needsConf = toolResults.find(r => r.result?.needsConfirmation);
+    if (needsConf) return needsConf.result.prompt;
+
     // Import the silent tool checker
     const SILENT = new Set([
       'scroll', 'scroll_to_top', 'scroll_to_bottom',
