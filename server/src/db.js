@@ -401,3 +401,114 @@ export function setSyncCursor(table, cursor) {
     [table, cursor]
   );
 }
+
+// ── Goals ──
+
+/**
+ * Insert a new goal. updated_at is set explicitly so T4 cursor sync can see it.
+ * NEVER call without setting updated_at — rows with NULL updated_at are permanently
+ * invisible to mutable-table sync (see T4 "sync-invisibility trap").
+ */
+export function insertGoal({ id, student_id, measure, baseline_value, baseline_date, target_value, target_date, decision_rule = '4_below_aim' }) {
+  run(
+    `INSERT INTO goals (id,student_id,measure,baseline_value,baseline_date,target_value,target_date,decision_rule,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'active',datetime('now','localtime'))`,
+    [id, student_id, measure, baseline_value, baseline_date, target_value, target_date, decision_rule]
+  );
+}
+
+/**
+ * Query goals with optional student and status filters.
+ */
+export function getGoals({ studentId = null, status = null } = {}) {
+  let sql = 'SELECT * FROM goals WHERE 1=1';
+  const params = [];
+  if (studentId) { sql += ' AND student_id=?'; params.push(studentId); }
+  if (status) { sql += ' AND status=?'; params.push(status); }
+  sql += ' ORDER BY created_at DESC';
+  return query(sql, params);
+}
+
+/**
+ * Update a goal's status (active → met | revised | discontinued).
+ * Bumps updated_at so T4 sync cursor captures the change.
+ */
+export function updateGoalStatus(goalId, status) {
+  run(
+    `UPDATE goals SET status=?, updated_at=datetime('now','localtime') WHERE id=?`,
+    [status, goalId]
+  );
+}
+
+// ── Progress Points ──
+
+/**
+ * Upsert a progress point.
+ * Auto points (source='auto') only overwrite other auto points.
+ * Manual points always win (overwrite auto or manual).
+ */
+export function upsertProgressPoint({ id, goal_id, student_id, measured_at, value, source = 'auto', sample_size = null }) {
+  if (source === 'manual') {
+    // Manual always wins over any existing point for this (goal_id, measured_at)
+    run(
+      `INSERT INTO progress_points (id,goal_id,student_id,measured_at,value,source,sample_size) VALUES (?,?,?,?,?,?,?) ON CONFLICT(goal_id,measured_at) DO UPDATE SET id=excluded.id, student_id=excluded.student_id, value=excluded.value, source=excluded.source, sample_size=excluded.sample_size`,
+      [id, goal_id, student_id, measured_at, value, source, sample_size]
+    );
+  } else {
+    // Auto only overwrites if the existing point is also auto
+    run(
+      `INSERT INTO progress_points (id,goal_id,student_id,measured_at,value,source,sample_size) VALUES (?,?,?,?,?,?,?) ON CONFLICT(goal_id,measured_at) DO UPDATE SET id=excluded.id, student_id=excluded.student_id, value=excluded.value, source=excluded.source, sample_size=excluded.sample_size WHERE progress_points.source='auto'`,
+      [id, goal_id, student_id, measured_at, value, source, sample_size]
+    );
+  }
+}
+
+export function getProgressPoints(goalId) {
+  return query(`SELECT * FROM progress_points WHERE goal_id=? ORDER BY measured_at ASC`, [goalId]);
+}
+
+// ── Phase Changes ──
+
+export function insertPhaseChange({ id, goal_id, changed_at, label, note = null }) {
+  run(
+    `INSERT INTO phase_changes (id,goal_id,changed_at,label,note) VALUES (?,?,?,?,?)`,
+    [id, goal_id, changed_at, label, note]
+  );
+}
+
+export function getPhaseChanges(goalId) {
+  return query(`SELECT * FROM phase_changes WHERE goal_id=? ORDER BY changed_at ASC`, [goalId]);
+}
+
+// ── Decision Flags ──
+
+export function insertDecisionFlag({ id, goal_id, rule, fired_at, detail = null }) {
+  run(
+    `INSERT INTO decision_flags (id,goal_id,rule,fired_at,detail) VALUES (?,?,?,?,?)`,
+    [id, goal_id, rule, fired_at, detail]
+  );
+}
+
+export function getDecisionFlags({ goalId, unacknowledgedOnly = false } = {}) {
+  let sql = 'SELECT * FROM decision_flags WHERE goal_id=?';
+  const params = [goalId];
+  if (unacknowledgedOnly) { sql += ' AND acknowledged_at IS NULL'; }
+  sql += ' ORDER BY fired_at DESC';
+  return query(sql, params);
+}
+
+export function acknowledgeFlag(id) {
+  run(`UPDATE decision_flags SET acknowledged_at=datetime('now','localtime') WHERE id=?`, [id]);
+}
+
+// ── Commands for Probing ──
+
+/**
+ * Fetch all commands for a student on a specific date (YYYY-MM-DD).
+ * Used by the probe computer to compute daily measure values.
+ */
+export function getCommandsForStudentDate(studentId, isoDate) {
+  return query(
+    `SELECT * FROM commands WHERE student_id=? AND date(created_at)=?`,
+    [studentId, isoDate]
+  );
+}
