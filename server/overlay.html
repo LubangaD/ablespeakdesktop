@@ -801,7 +801,10 @@
         if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
         lastRecordEnd = Date.now();
 
-        if (hasSpeechDetected && blob.size > 5000) {
+        // Minimal client-side sanity gate only — the per-student audio floor
+        // (speech profile min_audio_b64) is enforced server-side, so quiet
+        // speakers' short recordings still reach transcription.
+        if (hasSpeechDetected && blob.size > 1500) {
           setProcessingUI();
           setTranscript('Processing...', '');
 
