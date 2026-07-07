@@ -62,4 +62,16 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ sync }),
   }),
+  // ── T5: Progress Monitoring ──
+  getBaselineSuggestion: (studentId, measure) => fetchApi(`/students/${studentId}/baseline-suggestion?measure=${encodeURIComponent(measure)}`),
+  createGoal: (studentId, data) => fetchApi(`/students/${studentId}/goals`, { method: 'POST', body: JSON.stringify(data) }),
+  getGoals: (studentId, status = 'active') => fetchApi(`/students/${studentId}/goals?status=${status}`),
+  patchGoal: (goalId, data) => fetchApi(`/goals/${goalId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getPoints: (goalId) => fetchApi(`/goals/${goalId}/points`),
+  addManualPoint: (goalId, data) => fetchApi(`/goals/${goalId}/points`, { method: 'POST', body: JSON.stringify(data) }),
+  getPhases: (goalId) => fetchApi(`/goals/${goalId}/phases`),
+  addPhase: (goalId, data) => fetchApi(`/goals/${goalId}/phases`, { method: 'POST', body: JSON.stringify(data) }),
+  getFlags: (goalId, unacknowledgedOnly = false) => fetchApi(`/goals/${goalId}/flags${unacknowledgedOnly ? '?unacknowledged=1' : ''}`),
+  acknowledgeFlag: (flagId) => fetchApi(`/flags/${flagId}/ack`, { method: 'POST' }),
+  recomputeProgress: () => fetchApi('/progress/recompute', { method: 'POST' }),
 };
