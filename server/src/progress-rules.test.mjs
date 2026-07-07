@@ -278,6 +278,34 @@ test('evaluateRules: 4_below_aim fires when 5th point (not among recent 4) is ab
     '5 points, only most-recent 4 matter — oldest above-aim does not block firing');
 });
 
+// ── evaluateRules: 4_above_aim boundary (symmetric to 4_below_aim) ──
+
+test('evaluateRules: 4_above_aim does NOT fire with only 3 points above aim', () => {
+  const goal = makeGoal();
+  // aim at 2025-01-01 = 0.2; all values well above
+  const pts = [
+    pt('2025-01-01', 0.9),
+    pt('2025-01-02', 0.9),
+    pt('2025-01-03', 0.9),
+  ];
+  const rules = evaluateRules(goal, pts, '2025-01-03');
+  assert.ok(!rules.map(r => r.rule).includes('4_above_aim'),
+    '3 points above aim is not enough — 4_above_aim must not fire');
+});
+
+test('evaluateRules: 4_above_aim FIRES with exactly 4 consecutive points above aim', () => {
+  const goal = makeGoal();
+  const pts = [
+    pt('2025-01-01', 0.9),
+    pt('2025-01-02', 0.9),
+    pt('2025-01-03', 0.9),
+    pt('2025-01-04', 0.9),
+  ];
+  const rules = evaluateRules(goal, pts, '2025-01-04');
+  assert.ok(rules.map(r => r.rule).includes('4_above_aim'),
+    'Exactly 4 above-aim points must fire 4_above_aim');
+});
+
 // ── evaluateRules: direction-awareness for prompts_to_complete ──
 
 test('evaluateRules: prompts_to_complete — 4 NUMERICALLY ABOVE aim fires 4_below_aim', () => {
@@ -389,6 +417,31 @@ test('evaluateRules: trend_divergence skips when aim slope is 0', () => {
   const rules = evaluateRules(goal, pts, '2025-02-05');
   assert.ok(!rules.map(r => r.rule).includes('trend_divergence'),
     'Zero aim slope → rule is skipped');
+});
+
+test('trend_divergence: flat trend intentionally does not fire — stagnation is 4_below_aim\'s job', () => {
+  /**
+   * ≥6 points with a perfectly flat trend (all same value) against a rising aim.
+   * Flat trend.slope === 0 is NOT opposite-sign to aimSlope > 0, so isWrongDirection
+   * is false — trend_divergence must NOT fire.
+   * Stagnation is intentionally caught by 4_below_aim and insufficient_data instead.
+   */
+  const goal = makeGoal({
+    baseline_value: 0.2, target_value: 0.8,
+    baseline_date: '2025-01-01', target_date: '2025-07-01',
+  });
+  // All points at constant value → perfectly flat Theil-Sen slope (0)
+  const pts = [
+    pt('2025-01-01', 0.1),
+    pt('2025-01-08', 0.1),
+    pt('2025-01-15', 0.1),
+    pt('2025-01-22', 0.1),
+    pt('2025-01-29', 0.1),
+    pt('2025-02-05', 0.1),
+  ];
+  const rules = evaluateRules(goal, pts, '2025-02-05');
+  assert.ok(!rules.map(r => r.rule).includes('trend_divergence'),
+    'Flat trend against rising aim must NOT fire trend_divergence');
 });
 
 test('evaluateRules: trend_divergence does NOT fire when trend goes same direction as aim', () => {

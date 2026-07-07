@@ -153,7 +153,7 @@ function ProgressChart({ goal, points, phases }) {
         role="img"
         aria-label={ariaLabel}
         width={W} height={H}
-        style={{ display: 'block', background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', maxWidth: '100%', '@media(prefers-reduced-motion:reduce)': { animation: 'none' } }}
+        style={{ display: 'block', background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', maxWidth: '100%' }}
       >
         {/* Y grid lines */}
         {yTicks.map((v, i) => (
@@ -197,10 +197,10 @@ function ProgressChart({ goal, points, phases }) {
         <line x1={aimX1} y1={aimY1} x2={aimX2} y2={aimY2} stroke="#F5A623" strokeWidth={2} strokeDasharray="8 4" />
 
         {/* Trend line (solid, red) */}
-        <clipPath id="chart-clip">
+        <clipPath id={`chart-clip-${goal.id}`}>
           <rect x={ML} y={MT} width={CW} height={CH} />
         </clipPath>
-        <g clipPath="url(#chart-clip)">
+        <g clipPath={`url(#chart-clip-${goal.id})`}>
           {trendLineEl}
         </g>
 
@@ -222,13 +222,13 @@ function ProgressChart({ goal, points, phases }) {
             <rect key={p.id || p.measured_at}
               x={x - 5} y={y - 5} width={10} height={10}
               fill="#10b981" stroke="#065f46" strokeWidth={1.5}
-              role="img" aria-label={`Manual point ${p.measured_at}: ${Number(p.value).toFixed(3)}`}
+              aria-hidden="true"
             />
           ) : (
             <circle key={p.id || p.measured_at}
               cx={x} cy={y} r={5}
               fill="#3b82f6" stroke="#1e3a5f" strokeWidth={1.5}
-              role="img" aria-label={`Probe ${p.measured_at}: ${Number(p.value).toFixed(3)}`}
+              aria-hidden="true"
             />
           );
         })}

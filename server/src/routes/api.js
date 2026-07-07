@@ -426,11 +426,11 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     const students = getStudents({ activeOnly: false });
     if (!students.find(s => s.id === id)) return res.status(404).json({ error: 'Student not found' });
 
-    // Collect all commands for the student in the last 14 days
+    // Collect qualifying days: those with ≥ 3 attempted commands in the last 14 days.
+    // Query each day exactly once; keep the results for probe computation below.
     const today = new Date().toISOString().slice(0, 10);
     const cutoffMs = new Date(today).getTime() - 14 * 86400000;
-    const allCmds = [];
-    const days = new Set();
+    const qualifyingDays = new Map(); // isoDate → dayCmds[]
 
     for (let d = 0; d <= 14; d++) {
       const dateMs = cutoffMs + d * 86400000;
@@ -439,12 +439,11 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
       const dayCmds = getCommandsForStudentDate(id, isoDate);
       const dayAttempted = dayCmds.filter(c => c.outcome != null);
       if (dayAttempted.length >= 3) {
-        days.add(isoDate);
-        allCmds.push(...dayCmds);
+        qualifyingDays.set(isoDate, dayCmds);
       }
     }
 
-    if (days.size === 0) {
+    if (qualifyingDays.size === 0) {
       return res.json({ value: null, sampleDays: 0, sampleSize: 0 });
     }
 
@@ -452,8 +451,7 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     let totalValue = 0;
     let validDays = 0;
     let totalSample = 0;
-    for (const isoDate of days) {
-      const dayCmds = getCommandsForStudentDate(id, isoDate);
+    for (const [isoDate, dayCmds] of qualifyingDays) {
       const result = computeProbeValue(measure, dayCmds);
       if (result !== null) {
         totalValue += result.value;
@@ -469,6 +467,7 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
       sampleDays: validDays,
       sampleSize: totalSample,
     });
+
   });
 
   // POST /api/students/:id/goals
