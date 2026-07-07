@@ -200,8 +200,9 @@ function createOverlay() {
   const { width: screenW, height: screenH } = primaryDisplay.workAreaSize;
 
   // Position at bottom-center of screen
+  // (height fits transcript readout + repair prompt; pill anchors to bottom)
   const overlayW = 420;
-  const overlayH = 180;
+  const overlayH = 260;
   const x = Math.round((screenW - overlayW) / 2);
   const y = screenH - overlayH - 20;
 
