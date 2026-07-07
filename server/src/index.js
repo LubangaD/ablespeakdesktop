@@ -19,6 +19,7 @@ import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
 import { getAppSettings } from './app-settings.js';
 import { SyncClient } from './sync-client.js';
+import { createSyncRouter } from './routes/sync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -133,6 +134,7 @@ app.use((req, res, next) => { req._restartSync = applySyncSettings; next(); });
 
 // ── API Routes ──
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
+app.use('/api', createSyncRouter({ syncClient }));
 
 // ── Additional AI-specific API routes ──
 
