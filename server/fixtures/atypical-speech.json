@@ -1,0 +1,19 @@
+[
+  { "id": "quiet-scroll",  "transcript": "scroll down", "confidence": 0.62, "audioB64Len": 2500, "intent": "scroll down" },
+  { "id": "quiet-back",    "transcript": "go back",     "confidence": 0.58, "audioB64Len": 3100, "intent": "go back" },
+  { "id": "quiet-close",   "transcript": "close tab",   "confidence": 0.66, "audioB64Len": 3900, "intent": "close tab" },
+  { "id": "quiet-volume",  "transcript": "volume up",   "confidence": 0.55, "audioB64Len": 2000, "intent": "volume up" },
+
+  { "id": "miss-scoll",    "transcript": "scoll down",  "confidence": 0.38, "audioB64Len": 8200, "intent": "scroll down" },
+  { "id": "miss-cloze",    "transcript": "cloze tab",   "confidence": 0.35, "audioB64Len": 7600, "intent": "close tab" },
+  { "id": "miss-gobak",    "transcript": "go bak",      "confidence": 0.42, "audioB64Len": 6900, "intent": "go back" },
+  { "id": "miss-volu",     "transcript": "vol u",       "confidence": 0.33, "audioB64Len": 7100, "intent": "volume up" },
+  { "id": "miss-opncrm",   "transcript": "opn crm",     "confidence": 0.31, "audioB64Len": 8000, "intent": "open chrome" },
+
+  { "id": "silence-empty",    "transcript": "",        "confidence": null, "audioB64Len": 500,  "intent": null },
+  { "id": "silence-sentinel", "transcript": "SILENCE", "confidence": null, "audioB64Len": 6000, "intent": null },
+
+  { "id": "clear-scroll",  "transcript": "scroll down", "confidence": 0.85, "audioB64Len": 9000, "intent": "scroll down" },
+  { "id": "clear-back",    "transcript": "go back",     "confidence": 0.90, "audioB64Len": 8400, "intent": "go back" },
+  { "id": "clear-close",   "transcript": "close tab",   "confidence": 0.70, "audioB64Len": 7500, "intent": "close tab" }
+]

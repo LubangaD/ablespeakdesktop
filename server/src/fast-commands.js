@@ -32,9 +32,35 @@ const BROWSER_TOOLS = new Set([
   'zoom_tab', 'pin_tab', 'mute_tab',
 ]);
 
+// ── Canonical phrases: one hand-written example per pattern below ──
+// Used as the fuzzy-repair vocabulary for atypical speech (speech-tuning.js).
+// Keep in sync with the pattern table in matchFastCommand.
+// NOTE: guarded destructive phrases (e.g. "close the window" → Alt+F4) are
+// deliberately excluded so a repair prompt never suggests a destructive action.
+const CANONICAL_PHRASES = [
+  'scroll down', 'scroll up', 'scroll to top', 'scroll to bottom',
+  'page down', 'page up',
+  'go back', 'go forward', 'reload', 'close tab', 'new tab',
+  'next', 'previous',
+  'play', 'pause spotify', 'next song', 'previous song', 'stop the music',
+  'volume up', 'volume down', 'mute', 'unmute',
+  'escape', 'enter', 'space', 'undo', 'redo', 'copy', 'paste', 'cut',
+  'select all', 'save',
+  'switch student',
+  'open chrome',
+];
+
+/**
+ * One canonical example phrase per fast-command pattern.
+ * Consumers pass this (plus per-student vocabulary) to evaluateTranscript.
+ */
+export function listCanonicalPhrases() {
+  return CANONICAL_PHRASES;
+}
+
 /**
  * Clean transcription text: remove punctuation, trailing filler words.
- * Gemini often outputs "Scroll down." or "Scroll down on this tab." 
+ * Gemini often outputs "Scroll down." or "Scroll down on this tab."
  */
 function cleanTranscription(text) {
   return text
