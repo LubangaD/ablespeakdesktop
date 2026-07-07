@@ -32,6 +32,7 @@ export class WsProxy {
     this._pendingRepair = null; // { candidate, expiresAt, unclearCount } — "Did you mean X?" state
     this._activeSession = null; // { studentId, sessionId } — set by startStudentSession
     this._pickerState = null;   // null | { retryCount, awaitingConfirmation, pendingStudent }
+    this._fallbackCapture = null; // callback installed by handleVoiceText() for HTTP/IPC path
 
     // Extension-facing WS server
     this.extensionWss = new WebSocketServer({ noServer: true });
@@ -698,12 +699,43 @@ export class WsProxy {
   // ── Broadcasting ──
 
   _broadcastDashboard(message) {
+    if (this._fallbackCapture) this._fallbackCapture(message);
     const raw = JSON.stringify(message);
     this.dashboardClients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(raw);
       }
     });
+  }
+
+  /**
+   * Public entry point for the HTTP/IPC fallback path.
+   * Runs the same gate pipeline as the WS voice_text path and returns
+   * the collected events (same WS broadcast message shape) so the caller
+   * can forward them to the overlay without losing any gate behaviour.
+   */
+  async handleVoiceText(text, confidence) {
+    const profile = this._loadSpeechProfile();
+    const startTime = Date.now();
+    const events = [];
+
+    // Capture messages sent directly to the overlay via ws.send (reject path)
+    const mockWs = {
+      send: (raw) => {
+        try { events.push(JSON.parse(raw)); } catch {}
+      }
+    };
+
+    // Capture messages broadcast to dashboard clients
+    this._fallbackCapture = (msg) => events.push(msg);
+
+    try {
+      await this._handleVoiceText(text, confidence, profile, mockWs, startTime);
+    } finally {
+      this._fallbackCapture = null;
+    }
+
+    return events;
   }
 
   // ── Public API ──

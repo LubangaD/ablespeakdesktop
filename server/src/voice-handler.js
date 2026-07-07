@@ -86,7 +86,6 @@ export class VoiceHandler {
       prompt += ` The speaker may use these words or commands: ${vocabulary.join(', ')}. Prefer them when the audio is ambiguous.`;
     }
 
-
     // Try up to 2 times (initial + 1 retry)
     for (let attempt = 0; attempt < 2; attempt++) {
       try {

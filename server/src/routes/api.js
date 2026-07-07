@@ -234,6 +234,23 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     res.json({ sent: !!result, target });
   });
 
+  // ── Voice Text (IPC/HTTP fallback — same gate pipeline as WS voice_text) ──
+  // Used by the Electron IPC handler when the overlay's WebSocket is down.
+  router.post('/voice/text', async (req, res) => {
+    const { text, confidence } = req.body || {};
+    if (!text || !String(text).trim()) {
+      return res.status(400).json({ error: 'text is required' });
+    }
+    const conf = typeof confidence === 'number' ? confidence : null;
+    try {
+      const events = await wsProxy.handleVoiceText(String(text).trim(), conf);
+      res.json({ events });
+    } catch (err) {
+      console.error('[VoiceText] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 

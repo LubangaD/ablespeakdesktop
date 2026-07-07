@@ -284,30 +284,25 @@ function setupOverlayIPC() {
     console.log(`[Overlay] ⚡ Text command: "${userText}"${conf != null ? ` (confidence ${conf.toFixed(2)})` : ''}`);
 
     try {
-      const chatRes = await fetch(`http://localhost:${PORT}/api/ai/chat`, {
+      // Route through the full gate pipeline (confirmation → repair → picker → evaluate → normal)
+      // instead of /api/ai/chat which bypasses all gates.
+      const voiceRes = await fetch(`http://localhost:${PORT}/api/voice/text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: userText, confidence: conf }),
       });
 
-      if (!chatRes.ok) {
-        throw new Error(`AI chat failed: ${chatRes.status}`);
+      if (!voiceRes.ok) {
+        throw new Error(`Voice text failed: ${voiceRes.status}`);
       }
 
-      const result = await chatRes.json();
+      const { events } = await voiceRes.json();
 
-      // Silent mode: fast-path sets it, or detect from empty text + tools
-      const isSilent = result.silent === true ||
-        (result.toolCalls && Array.isArray(result.toolCalls) && !result.text?.trim());
-
+      // Forward each server event to the overlay — handleWSMessage() handles them all.
       if (overlayWindow && !overlayWindow.isDestroyed()) {
-        overlayWindow.webContents.send('overlay-response', {
-          text: result.text,
-          userText,
-          error: result.error || false,
-          toolCalls: result.toolCalls,
-          silent: isSilent,
-        });
+        for (const ev of (events || [])) {
+          overlayWindow.webContents.send('overlay-event', ev);
+        }
       }
     } catch (err) {
       console.error('[Overlay] Error processing text command:', err.message);

@@ -334,7 +334,7 @@
     </div>
 
     <!-- Repair prompt: "Did you mean X?" — answer by voice (yes / no) -->
-    <div class="repair-area" id="repairArea" role="status" aria-live="assertive" aria-atomic="true">
+    <div class="repair-area" id="repairArea" role="alert" aria-atomic="true">
       <div class="repair-question" id="repairQuestion"></div>
       <div class="repair-hint">Say “yes” or “no”</div>
     </div>
@@ -733,6 +733,15 @@
   }
 
   function handleNoSpeech() {
+    // While a repair question is pending, a no-speech result must not clobber
+    // the repair UI with a contradictory failed(no_speech) state.  Keep the
+    // question visible and restart listening so the student can still answer.
+    if (repairArea.classList.contains('visible')) {
+      if (continuousMode && active) {
+        setTimeout(() => { if (active) startListening(); }, 600);
+      }
+      return;
+    }
     setTruthState('failed', 'no_speech');
     if (continuousMode && active) {
       setIdleUI();
@@ -890,6 +899,7 @@
     }
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    hideRepair();
     setIdleUI();
     setTranscript('Ready — click mic to start', '');
   }
@@ -930,7 +940,15 @@
     toggleListening();
   });
 
-  // ── IPC: AI Response (fallback when WS not connected) ──
+  // ── IPC: Structured server events from /api/voice/text (IPC fallback path) ──
+  // Events have the same shape as WS dashboard messages — route through
+  // handleWSMessage() so all gate states (repair, picker, voice_no_speech, …)
+  // are rendered exactly as they are on the WS path.
+  window.electronAPI.onEvent((event) => {
+    handleWSMessage(event);
+  });
+
+  // ── IPC: AI Response (audio-blob Gemini fallback when WS not connected) ──
   window.electronAPI.onResponse((data) => {
     handleResponse({
       text: data.text,
