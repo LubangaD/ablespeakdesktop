@@ -668,8 +668,10 @@ export class WsProxy {
       }
     }
 
-    // Try to match a student name
-    const { student, confidence } = matchStudentName(text, students);
+    // Try to match a student name — honour "I'm {name}" pattern by extracting name first
+    const preFast = matchFastCommand(text);
+    const matchText = preFast?.tool === 'set_student_by_name' ? preFast.args.name : text;
+    const { student, confidence } = matchStudentName(matchText, students);
 
     if (student && confidence >= 0.8) {
       // High confidence — select immediately
