@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizedEditDistance, findRepairCandidate, evaluateTranscript, checkAudioFloor } from './speech-tuning.js';
+import { normalizedEditDistance, findRepairCandidate, evaluateTranscript, checkAudioFloor, isWakeWord } from './speech-tuning.js';
 
 const DEFAULTS = {
   custom_vocabulary: '[]', min_audio_b64: 4000, min_confidence: 0.45,
@@ -203,4 +203,58 @@ test('checkAudioFloor: tuned profile lowers the floor per student', () => {
 test('checkAudioFloor: tuned profile still rejects below its floor', () => {
   const profile = { ...DEFAULTS, min_audio_b64: 1800 };
   assert.equal(checkAudioFloor(1500, profile).pass, false);
+});
+
+// ── isWakeWord ──
+
+const WAKE_PHRASES = ['hey able', 'able speak'];
+
+test('isWakeWord: exact match → true', () => {
+  assert.equal(isWakeWord('hey able', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: case-insensitive exact match → true', () => {
+  assert.equal(isWakeWord('Hey Able', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: second phrase exact → true', () => {
+  assert.equal(isWakeWord('able speak', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: containment — phrase inside longer transcript → true', () => {
+  assert.equal(isWakeWord('okay hey able please', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: near-miss "hey abel" → true (NED ≤ 0.35)', () => {
+  assert.equal(isWakeWord('hey abel', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: space-stripped form "heyable" → true', () => {
+  assert.equal(isWakeWord('heyable', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: punctuation-stripped "hey, able!" → true', () => {
+  assert.equal(isWakeWord('hey, able!', WAKE_PHRASES), true);
+});
+
+test('isWakeWord: completely unrelated transcript → false', () => {
+  assert.equal(isWakeWord('scroll down please', WAKE_PHRASES), false);
+});
+
+test('isWakeWord: empty transcript → false', () => {
+  assert.equal(isWakeWord('', WAKE_PHRASES), false);
+});
+
+test('isWakeWord: empty phrases array → false', () => {
+  assert.equal(isWakeWord('hey able', []), false);
+});
+
+test('isWakeWord: null/undefined transcript → false (no throw)', () => {
+  assert.equal(isWakeWord(null, WAKE_PHRASES), false);
+  assert.equal(isWakeWord(undefined, WAKE_PHRASES), false);
+});
+
+test('isWakeWord: close but out-of-threshold (> 0.35) → false', () => {
+  // "xyz abc def" has no similarity to "hey able" — should be false
+  assert.equal(isWakeWord('xyz abc def', WAKE_PHRASES), false);
 });

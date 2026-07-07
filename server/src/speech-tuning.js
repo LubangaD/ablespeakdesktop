@@ -129,3 +129,45 @@ export function checkAudioFloor(audioBase64Length, profile) {
   const floor = profile?.min_audio_b64 ?? PROFILE_DEFAULTS.min_audio_b64;
   return { pass: (audioBase64Length || 0) >= floor, floor };
 }
+
+/**
+ * Wake-word matcher — returns true when `transcript` matches any phrase in
+ * `phrases` using tolerant (case / space / punctuation-insensitive) containment
+ * OR normalizedEditDistance ≤ 0.35 (also tried on space-stripped forms).
+ *
+ * Examples that must match for ["hey able", "able speak"]:
+ *   "hey able" (exact), "hey abel" (NED≈0.11), "heyable" (stripped containment),
+ *   "Hey Able" (case), "hey, able!" (punctuation stripped).
+ *
+ * Duplicate logic is intentionally inlined in overlay.html (no module system
+ * available there) — see the isWakeWord comment block in that file.
+ *
+ * @param {string} transcript
+ * @param {string[]} phrases
+ * @returns {boolean}
+ */
+export function isWakeWord(transcript, phrases) {
+  // Normalize: lowercase, strip punctuation, collapse whitespace
+  function normWake(s) {
+    return String(s ?? '').toLowerCase().replace(/[^\w\s]/g, '').trim().replace(/\s+/g, ' ');
+  }
+  const t = normWake(transcript);
+  const tNoSp = t.replace(/\s/g, '');
+  for (const phrase of (phrases || [])) {
+    const p = normWake(phrase);
+    if (!p) continue;
+    const pNoSp = p.replace(/\s/g, '');
+    // Containment: normal and space-stripped forms
+    if (t.includes(p)) return true;
+    if (pNoSp && tNoSp.includes(pNoSp)) return true;
+    // Fuzzy (normal form)
+    const maxLen = Math.max(t.length, p.length);
+    if (maxLen > 0 && levenshtein(t, p) / maxLen <= 0.35) return true;
+    // Fuzzy (space-stripped form)
+    if (pNoSp && tNoSp) {
+      const maxLenSp = Math.max(tNoSp.length, pNoSp.length);
+      if (maxLenSp > 0 && levenshtein(tNoSp, pNoSp) / maxLenSp <= 0.35) return true;
+    }
+  }
+  return false;
+}
