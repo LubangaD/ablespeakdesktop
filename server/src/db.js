@@ -148,7 +148,8 @@ export function getCommandStats() {
 
 // ── Sessions ──
 
-export function insertSession({ id, started_at }) { run('INSERT INTO sessions (id,started_at) VALUES (?,?)', [id, started_at]); }
+export function insertSession({ id, started_at, student_id }) { run('INSERT INTO sessions (id,started_at,student_id) VALUES (?,?,?)', [id, started_at, student_id || null]); }
+export function endSession(id) { run(`UPDATE sessions SET ended_at=datetime('now','localtime') WHERE id=?`, [id]); }
 export function getSessions({ limit = 20 } = {}) { return query('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?', [limit]); }
 
 // ── Log Events ──
@@ -186,6 +187,17 @@ export function getHealthAlerts() {
 export function upsertStudent({ id, display_name, external_ref }) {
   run(`INSERT INTO students (id,display_name,external_ref) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, external_ref=excluded.external_ref`,
     [id, display_name, external_ref || null]);
+}
+
+export function updateStudent({ id, display_name, external_ref, active }) {
+  const parts = [];
+  const params = [];
+  if (display_name !== undefined) { parts.push('display_name=?'); params.push(display_name); }
+  if (external_ref !== undefined) { parts.push('external_ref=?'); params.push(external_ref); }
+  if (active !== undefined) { parts.push('active=?'); params.push(active ? 1 : 0); }
+  if (parts.length === 0) return;
+  params.push(id);
+  run(`UPDATE students SET ${parts.join(',')} WHERE id=?`, params);
 }
 
 export function getStudents({ activeOnly = true } = {}) {

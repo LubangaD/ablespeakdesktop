@@ -1,6 +1,6 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { insertCommand, upsertHealthCheck } from './db.js';
+import { insertCommand, insertSession, endSession, upsertHealthCheck } from './db.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
@@ -27,6 +27,8 @@ export class WsProxy {
     this.browserContext = { tabs: [], activeTab: null };
     this._voiceProcessing = false; // Mutex: prevents concurrent voice command processing
     this._pendingConfirmation = null; // { toolName, args, prompt, expiresAt, unclearCount }
+    this._activeSession = null; // { studentId, sessionId } — set by startStudentSession
+    this._pickerState = null;   // null | { retryCount, awaitingConfirmation, pendingStudent }
 
     // Extension-facing WS server
     this.extensionWss = new WebSocketServer({ noServer: true });
@@ -192,6 +194,8 @@ export class WsProxy {
               payload: JSON.stringify({ text: msg.text }),
               result: JSON.stringify(result),
               latency_ms: result.latency || 0,
+              session_id: this._activeSession?.sessionId ?? null,
+              student_id: this._activeSession?.studentId ?? null,
             });
           } catch (err) {
             console.error('[WsHub] DB insert error:', err.message);
@@ -265,7 +269,7 @@ export class WsProxy {
                 const toolResult = await this.aiEngine.toolRegistry.executeTool(toolName, args, this, { confirmed: true });
                 const responseText = this.aiEngine._summarizeToolResults([{ tool: toolName, result: toolResult }]);
                 try {
-                  insertCommand({ id: commandId, type: 'voice_confirm', direction: 'user_to_ai', payload: JSON.stringify({ text, toolName, args }), result: JSON.stringify(toolResult), latency_ms: Date.now() - startTime });
+                  insertCommand({ id: commandId, type: 'voice_confirm', direction: 'user_to_ai', payload: JSON.stringify({ text, toolName, args }), result: JSON.stringify(toolResult), latency_ms: Date.now() - startTime, session_id: this._activeSession?.sessionId ?? null, student_id: this._activeSession?.studentId ?? null });
                 } catch {}
                 this._broadcastDashboard({ type: 'chat_assistant_message', id: commandId, text: responseText, error: toolResult?.status === 'error' || false, toolCalls: [{ tool: toolName, result: toolResult }], provider: 'confirmation', model: 'gate', latency: Date.now() - startTime, source: 'voice', timestamp: new Date().toISOString() });
                 return;
@@ -308,6 +312,8 @@ export class WsProxy {
                 payload: JSON.stringify({ text, fastTool: fastMatch.tool }),
                 result: JSON.stringify(toolResult),
                 latency_ms: latency,
+                session_id: this._activeSession?.sessionId ?? null,
+                student_id: this._activeSession?.studentId ?? null,
               });
             } catch (err) {
               console.error('[WsHub] DB insert error:', err.message);
@@ -377,6 +383,8 @@ export class WsProxy {
               payload: JSON.stringify({ text, source: 'microphone' }),
               result: JSON.stringify(result),
               latency_ms: result.latency || 0,
+              session_id: this._activeSession?.sessionId ?? null,
+              student_id: this._activeSession?.studentId ?? null,
             });
           } catch (err) {
             console.error('[WsHub] DB insert error:', err.message);
@@ -553,6 +561,22 @@ export class WsProxy {
 
   getLastContext() {
     return this.lastContextUpdate;
+  }
+
+  // ── Student Session Management ──
+
+  startStudentSession(studentId) {
+    if (this._activeSession) {
+      try { endSession(this._activeSession.sessionId); } catch {}
+    }
+    const sessionId = uuidv4();
+    try {
+      insertSession({ id: sessionId, started_at: new Date().toISOString(), student_id: studentId });
+    } catch (err) {
+      console.error('[WsHub] startStudentSession DB error:', err.message);
+    }
+    this._activeSession = { studentId, sessionId };
+    return this._activeSession;
   }
 
   // Legacy compat
