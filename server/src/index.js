@@ -17,6 +17,8 @@ import { WsProxy } from './ws-proxy.js';
 import { LogTailer } from './log-tailer.js';
 import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
+import { getAppSettings } from './app-settings.js';
+import { SyncClient } from './sync-client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -108,6 +110,26 @@ const logTailer = new LogTailer({
   }
 });
 logTailer.start().then(() => console.log('[LogTailer] Started'));
+
+// ── T4 Sync Client (sender) ──
+// Settings are re-read every cycle, so URL/key/interval changes apply live.
+// The loop itself starts/stops when sync.enabled or sync.role changes (applySyncSettings
+// is invoked from POST /api/setup/app-settings via req._restartSync).
+const syncClient = new SyncClient({ settings: getAppSettings });
+
+function applySyncSettings() {
+  const s = getAppSettings();
+  const shouldRun = !!(s.sync?.enabled && s.sync?.role === 'sender');
+  if (shouldRun && !syncClient.isRunning()) {
+    syncClient.start();
+    console.log('[Sync] Sender started (interval', (s.sync.intervalMs || 30000) + 'ms)');
+  } else if (!shouldRun && syncClient.isRunning()) {
+    syncClient.stop();
+    console.log('[Sync] Sender stopped');
+  }
+}
+applySyncSettings(); // start only if already enabled in settings (default OFF)
+app.use((req, res, next) => { req._restartSync = applySyncSettings; next(); });
 
 // ── API Routes ──
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
