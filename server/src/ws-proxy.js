@@ -718,9 +718,7 @@ export class WsProxy {
     if (this._voiceProcessing) {
       return [{ type: 'voice_busy', message: 'Still processing previous command', timestamp: new Date().toISOString() }];
     }
-    this._voiceProcessing = true;
 
-    const profile = this._loadSpeechProfile();
     const startTime = Date.now();
     const events = [];
 
@@ -734,7 +732,10 @@ export class WsProxy {
     // Capture messages broadcast to dashboard clients
     this._fallbackCapture = (msg) => events.push(msg);
 
+    this._voiceProcessing = true;
+
     try {
+      const profile = this._loadSpeechProfile();
       await this._handleVoiceText(text, confidence, profile, mockWs, startTime);
     } finally {
       this._voiceProcessing = false;

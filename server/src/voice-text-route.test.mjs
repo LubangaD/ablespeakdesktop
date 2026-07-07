@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unlinkSync, existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { initDatabase, closeDatabase } from './db.js';
+import { initDatabase, closeDatabase, getCommands } from './db.js';
 import { WsProxy } from './ws-proxy.js';
 
 async function withServer(wsProxy, fn) {
@@ -197,6 +197,13 @@ test('gate pipeline (Test B): confirming "yes" executes repaired command path', 
 
       const assistMsg = events.find(e => e.type === 'chat_assistant_message');
       assert.ok(assistMsg, 'should emit chat_assistant_message after executing repaired command');
+
+      // Assert DB: most recent command has outcome='repaired' and prompt_count=1
+      const commands = getCommands({ limit: 10 });
+      assert.ok(commands.length > 0, 'should have at least one command in DB');
+      const repairedCmd = commands[0];
+      assert.equal(repairedCmd.outcome, 'repaired', 'repaired command should have outcome="repaired"');
+      assert.equal(repairedCmd.prompt_count, 1, 'repaired command should have prompt_count=1');
     } finally {
       proxy.destroy();
     }
