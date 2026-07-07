@@ -5,6 +5,27 @@ let enabled = false;
 let contextUpdaters = [defaultContextUpdater];
 let contextUpdaterMessageId = 0;
 
+// ── Capped exponential backoff (mirrors server/src/reconnect.js nextRetryDelay) ──
+let _reconnectAttempt = 0;
+function nextRetryDelay(attempt, baseMs, capMs) {
+  baseMs = baseMs || 500; capMs = capMs || 15000;
+  return Math.min(capMs, baseMs * Math.pow(2, attempt));
+}
+
+// ── chrome.alarms keepalive for MV3 service-worker wake ──
+// MV3 service workers can be suspended; the alarm wakes us so we can reconnect.
+const ALARM_NAME = 'ablespeak-keepalive';
+chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== ALARM_NAME) return;
+  if (!enabled) return;
+  // If disconnected, attempt reconnect
+  if (!webSocket || webSocket.readyState === WebSocket.CLOSED || webSocket.readyState === WebSocket.CLOSING) {
+    console.log('[SW] Alarm woke service worker — reconnecting');
+    connect();
+  }
+});
+
 const updaterStats = new Map(); // { updater: { count, totalTime } }
 setInterval(async () => {
     if (webSocket && webSocket.readyState === WebSocket.OPEN) {
@@ -263,6 +284,7 @@ function _doConnect(primaryUrl, fallbackUrl) {
     webSocket.onopen = () => {
         chrome.action.setIcon({path: 'icons/socket-active.png'});
         console.log('WebSocket connection established to:', primaryUrl);
+        _reconnectAttempt = 0; // reset backoff on successful connect
         clearReconnectInterval();
         startKeepAlive();
     };
@@ -812,9 +834,13 @@ function _doConnect(primaryUrl, fallbackUrl) {
 
         if (enabled) {
             chrome.action.setIcon({path: 'icons/socket-inactive.png'});
-            if (!reconnectIntervalId) {
-                startReconnectionLoop();
-            }
+            // Capped exponential backoff — mirrors reconnect.js nextRetryDelay
+            const delay = nextRetryDelay(_reconnectAttempt);
+            _reconnectAttempt++;
+            console.log('[SW] WS closed, reconnecting in', delay, 'ms (attempt', _reconnectAttempt, ')');
+            setTimeout(() => {
+                if (enabled) connect();
+            }, delay);
         }
     };
 }
@@ -864,12 +890,16 @@ function startReconnectionLoop() {
     console.log('Starting reconnection loop...');
     chrome.action.setIcon({path: 'icons/socket-inactive.png'});
     contextUpdaters = [defaultContextUpdater];
+    _reconnectAttempt = 0; // reset backoff on explicit enable
 
     connect();
+    // Fallback polling interval — the per-close backoff handles most cases;
+    // this catches any edge-case where onclose doesn't fire (e.g. network change)
     reconnectIntervalId = setInterval(() => {
-        //console.log('Attempting to reconnect...');
-        connect();
-    }, 5000);
+        if (!webSocket || webSocket.readyState === WebSocket.CLOSED || webSocket.readyState === WebSocket.CLOSING) {
+            connect();
+        }
+    }, 30000);
 }
 
 function stopReconnectionLoop() {
