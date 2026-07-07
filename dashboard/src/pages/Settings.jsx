@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState, Fragment } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { Brain, Globe, Check, AlertCircle, Users, Upload, UserPlus, ToggleLeft, ToggleRight, Mic, ChevronDown, ChevronUp } from 'lucide-react';
+import { Brain, Globe, Check, AlertCircle, Users, Upload, UserPlus, ToggleLeft, ToggleRight, Mic, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -100,6 +100,9 @@ export default function Settings() {
       {/* Students Roster */}
       <StudentsSection />
 
+      {/* Classroom Sync */}
+      <SyncSection />
+
       {/* Gateway Info */}
       <section aria-label="Gateway information">
         <h3 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: 16, fontWeight: 600 }}>ABLESPEAK GATEWAY</h3>
@@ -146,6 +149,13 @@ function StudentsSection() {
     } catch {}
   };
 
+  const toggleSyncOptIn = async (student) => {
+    try {
+      await api.updateStudent(student.id, { sync_opt_in: !student.sync_opt_in });
+      queryClient.invalidateQueries(['students']);
+    } catch {}
+  };
+
   const importCsv = async () => {
     setCsvError(''); setCsvResult(null);
     try {
@@ -176,7 +186,7 @@ function StudentsSection() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr>
-                  {['Name', 'External Ref', 'Active', 'Speech'].map(h => (
+                  {['Name', 'External Ref', 'Active', 'Sync', 'Speech'].map(h => (
                     <th key={h} scope="col" style={{ textAlign: 'left', padding: '6px 10px', color: 'var(--text-muted)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr>
@@ -199,6 +209,18 @@ function StudentsSection() {
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <button
+                          onClick={() => toggleSyncOptIn(s)}
+                          role="switch"
+                          aria-checked={!!s.sync_opt_in}
+                          aria-label={s.sync_opt_in ? `Stop syncing ${s.display_name}'s data to the teacher device` : `Sync ${s.display_name}'s data to the teacher device`}
+                          title={s.sync_opt_in ? 'Syncing — click to keep this student\'s data on this device only' : 'Not syncing — this student\'s data stays on this device'}
+                          style={{ minWidth: 44, minHeight: 44, background: 'none', border: 'none', cursor: 'pointer', color: s.sync_opt_in ? 'var(--success)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                        >
+                          {s.sync_opt_in ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                        </button>
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>
+                        <button
                           onClick={() => setSpeechExpandedId(speechExpandedId === s.id ? null : s.id)}
                           aria-expanded={speechExpandedId === s.id}
                           aria-label={`${speechExpandedId === s.id ? 'Hide' : 'Show'} speech settings for ${s.display_name}`}
@@ -210,7 +232,7 @@ function StudentsSection() {
                     </tr>
                     {speechExpandedId === s.id && (
                       <tr>
-                        <td colSpan={4} style={{ padding: '4px 10px 14px' }}>
+                        <td colSpan={5} style={{ padding: '4px 10px 14px' }}>
                           <SpeechProfileEditor student={s} />
                         </td>
                       </tr>
@@ -316,6 +338,163 @@ function StudentsSection() {
         )}
       </div>
     </section>
+  );
+}
+
+// ── Classroom sync (T4): teacher-hosted, local-first, opt-in ──
+// SECURITY: the classroom key is write-only. GET /api/sync/status returns only
+// `configured: true/false` — the key input below is never prefilled.
+
+function SyncSection() {
+  const { data: syncStatus, isLoading } = useQuery({
+    queryKey: ['syncStatus'],
+    queryFn: api.getSyncStatus,
+    refetchInterval: 5000,
+  });
+
+  return (
+    <section aria-label="Classroom sync" style={{ marginBottom: 32 }}>
+      <h3 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: 16, fontWeight: 600 }}>
+        CLASSROOM SYNC
+      </h3>
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <RefreshCw size={20} style={{ color: 'var(--accent)' }} />
+          <h4 style={{ fontWeight: 600, fontSize: '1rem' }}>Share Progress With Teacher Device</h4>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+          Off by default. When sending, only students with the roster “Sync” toggle on are shared —
+          everyone else's data never leaves this computer. Everything keeps working offline.
+        </p>
+        {isLoading || !syncStatus ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Loading sync status…</p>
+        ) : (
+          <SyncForm key={`${syncStatus.role}-${syncStatus.enabled}-${syncStatus.targetUrl}-${syncStatus.intervalMs}`} status={syncStatus} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SyncForm({ status }) {
+  const queryClient = useQueryClient();
+  const [role, setRole] = useState(status.enabled ? status.role : 'off');
+  const [targetUrl, setTargetUrl] = useState(status.targetUrl || '');
+  const [classroomKey, setClassroomKey] = useState(''); // NEVER prefilled from the server
+  const [intervalSec, setIntervalSec] = useState(Math.round((status.intervalMs || 30000) / 1000));
+  const [saveMsg, setSaveMsg] = useState('');
+  const [saveErr, setSaveErr] = useState('');
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaveMsg(''); setSaveErr('');
+    if (role === 'sender' && !targetUrl.trim()) { setSaveErr('Teacher address is required to send'); return; }
+    if (role !== 'off' && !status.configured && !classroomKey.trim()) { setSaveErr('Classroom key is required'); return; }
+    try {
+      const sync = {
+        enabled: role !== 'off',
+        role: role === 'off' ? (status.role || 'sender') : role,
+        targetUrl: targetUrl.trim(),
+        intervalMs: Math.max(5, Number(intervalSec) || 30) * 1000,
+      };
+      // Only send the key when the adult typed a new one — an empty field keeps the stored key
+      if (classroomKey.trim()) sync.classroomKey = classroomKey.trim();
+      await api.saveSyncSettings(sync);
+      setClassroomKey(''); // clear the field after save — key is never displayed
+      setSaveMsg('Sync settings saved');
+      queryClient.invalidateQueries(['syncStatus']);
+      setTimeout(() => setSaveMsg(''), 4000);
+    } catch (err) {
+      setSaveErr('Could not save sync settings');
+    }
+  };
+
+  const inputStyle = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
+  const labelStyle = { display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 };
+
+  return (
+    <form onSubmit={save} aria-label="Sync settings" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div>
+        <label htmlFor="sync-role" style={labelStyle}>Sync mode</label>
+        <select id="sync-role" value={role} onChange={e => setRole(e.target.value)} style={inputStyle}>
+          <option value="off">Off — keep all data on this computer</option>
+          <option value="sender">Send to teacher — push this device's data</option>
+          <option value="receiver">Receive as teacher — collect from student devices</option>
+        </select>
+      </div>
+
+      {role === 'sender' && (
+        <div>
+          <label htmlFor="sync-target" style={labelStyle}>Teacher device address</label>
+          <input
+            id="sync-target" type="url" value={targetUrl}
+            onChange={e => setTargetUrl(e.target.value)}
+            placeholder="http://192.168.1.20:3001"
+            style={inputStyle}
+          />
+        </div>
+      )}
+
+      {role !== 'off' && (
+        <>
+          <div>
+            <label htmlFor="sync-key" style={labelStyle}>
+              Classroom key {status.configured ? '(already set — leave blank to keep it)' : ''}
+            </label>
+            <input
+              id="sync-key" type="password" value={classroomKey}
+              onChange={e => setClassroomKey(e.target.value)}
+              autoComplete="new-password"
+              placeholder={status.configured ? '••••••••' : 'Shared phrase, same on every device'}
+              style={inputStyle}
+            />
+          </div>
+          {role === 'sender' && (
+            <div>
+              <label htmlFor="sync-interval" style={labelStyle}>Send every (seconds)</label>
+              <input
+                id="sync-interval" type="number" min={5} max={3600} value={intervalSec}
+                onChange={e => setIntervalSec(e.target.value)}
+                style={{ ...inputStyle, width: 140 }}
+              />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Live status line */}
+      <p aria-live="polite" style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+        {!status.enabled && 'Sync is off — nothing leaves this computer.'}
+        {status.enabled && status.role === 'sender' && (
+          status.lastSyncAt
+            ? `Last sent to teacher: ${new Date(status.lastSyncAt).toLocaleTimeString()}`
+            : (status.lastSyncError ? 'Waiting to reach the teacher device — data is safe and will send when connected.' : 'Sending is on — waiting for the first sync.')
+        )}
+        {status.enabled && status.role === 'receiver' && (
+          status.lastIngestAt
+            ? `Last received: ${new Date(status.lastIngestAt).toLocaleTimeString()} — ${status.devicesSeen.length} device${status.devicesSeen.length !== 1 ? 's' : ''} connected`
+            : 'Receiving is on — no student devices have sent data yet.'
+        )}
+      </p>
+
+      {saveErr && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--error)', fontSize: 13 }}>
+          <AlertCircle size={14} /> {saveErr}
+        </div>
+      )}
+      {saveMsg && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--success)', fontSize: 13 }}>
+          <Check size={14} /> {saveMsg}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        style={{ alignSelf: 'flex-start', padding: '10px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}
+      >
+        Save Sync Settings
+      </button>
+    </form>
   );
 }
 

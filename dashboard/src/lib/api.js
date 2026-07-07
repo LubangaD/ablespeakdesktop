@@ -56,4 +56,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(data),
   }),
+  // ── Sync (T4) — classroomKey is write-only: sent via saveSyncSettings, never returned by getSyncStatus ──
+  getSyncStatus: () => fetchApi('/sync/status'),
+  saveSyncSettings: (sync) => fetchApi('/setup/app-settings', {
+    method: 'POST',
+    body: JSON.stringify({ sync }),
+  }),
 };
