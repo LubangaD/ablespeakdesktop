@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AbleSpeak — Grounding Case Annotator</title>
+<style>
+  body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:20px;color:#1a1a1a;background:#fafafa}
+  h1{font-size:20px} h2{font-size:15px;margin:18px 0 6px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  label{font-size:13px;color:#444} input,select{padding:6px 8px;border:1px solid #ccc;border-radius:5px;font:inherit}
+  input[type=text]{min-width:280px}
+  button{padding:7px 14px;border:0;border-radius:6px;background:#2d6cdf;color:#fff;font:inherit;cursor:pointer}
+  button.secondary{background:#666} button:disabled{opacity:.5;cursor:not-allowed}
+  #stage{position:relative;display:inline-block;border:1px solid #bbb;background:#000;max-width:100%;margin-top:8px}
+  #stage img{display:block;max-width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+  #box{position:absolute;border:2px dashed #2ecc71;background:rgba(46,204,113,.15);pointer-events:none;display:none}
+  #overlay{position:absolute;inset:0;cursor:crosshair}
+  table{border-collapse:collapse;margin-top:10px;background:#fff;width:100%}
+  th,td{border:1px solid #ddd;padding:5px 9px;text-align:left;font-size:13px} th{background:#f0f0f0}
+  .hint{color:#666;font-size:12px} .pill{background:#eee;border-radius:4px;padding:1px 7px;font-size:12px}
+  code{background:#eee;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+  <h1>Grounding Case Annotator</h1>
+  <p class="hint">1) Load a screenshot. 2) Drag a box around the correct click target. 3) Fill in the instruction and category, then <b>Add case</b>. 4) <b>Export</b> when done. Keep your screenshots in an <code>images/</code> folder next to the exported <code>dataset.json</code> (the path prefix below is prepended to each filename).</p>
+
+  <div class="row">
+    <label>Screenshot: <input type="file" id="file" accept="image/png,image/jpeg"></label>
+    <label>Path prefix: <input type="text" id="prefix" value="images/" style="min-width:120px"></label>
+  </div>
+
+  <div id="stage">
+    <img id="img" alt="">
+    <div id="overlay"></div>
+    <div id="box"></div>
+  </div>
+
+  <h2>Case details</h2>
+  <div class="row">
+    <label>ID: <input type="text" id="cid" placeholder="wiki-link" style="min-width:160px"></label>
+    <label>Category:
+      <select id="cat"><option value="web">web</option><option value="desktop">desktop</option><option value="other">other</option></select>
+    </label>
+  </div>
+  <div class="row">
+    <label>Instruction: <input type="text" id="instr" placeholder="click the Wikipedia link"></label>
+  </div>
+  <div class="row">
+    <span id="boxinfo" class="pill">box: (none yet)</span>
+    <button id="add" disabled>Add case</button>
+    <button id="clearbox" class="secondary">Clear box</button>
+  </div>
+
+  <h2>Cases (<span id="count">0</span>)</h2>
+  <table id="tbl"><thead><tr><th>#</th><th>id</th><th>category</th><th>instruction</th><th>image</th><th>box [x,y,w,h]</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="row">
+    <button id="export" disabled>Export dataset.json</button>
+    <button id="reset" class="secondary">Reset all</button>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const img = $('img'), stage = $('stage'), overlay = $('overlay'), boxEl = $('box');
+  let fileName = '', natW = 0, natH = 0;
+  let drag = null;            // {x0,y0} in displayed px
+  let boxNat = null;          // {x,y,w,h} in natural px
+  const cases = [];
+
+  $('file').addEventListener('change', (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    fileName = f.name;
+    const url = URL.createObjectURL(f);
+    img.onload = () => { natW = img.naturalWidth; natH = img.naturalHeight; clearBox(); };
+    img.src = url;
+    if (!$('cid').value) $('cid').value = f.name.replace(/\.[^.]+$/, '');
+  });
+
+  function dispToNat() { return natW / img.clientWidth; }   // displayed px -> natural px
+
+  overlay.addEventListener('mousedown', (e) => {
+    if (!natW) return;
+    const r = overlay.getBoundingClientRect();
+    drag = { x0: e.clientX - r.left, y0: e.clientY - r.top };
+    boxEl.style.display = 'block';
+    updateBox(drag.x0, drag.y0, 0, 0);
+  });
+  overlay.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const r = overlay.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const left = Math.min(drag.x0, x), top = Math.min(drag.y0, y);
+    updateBox(left, top, Math.abs(x - drag.x0), Math.abs(y - drag.y0));
+  });
+  window.addEventListener('mouseup', () => {
+    if (!drag) return;
+    const s = dispToNat();
+    const left = parseFloat(boxEl.style.left), top = parseFloat(boxEl.style.top);
+    const w = parseFloat(boxEl.style.width), h = parseFloat(boxEl.style.height);
+    drag = null;
+    if (w < 4 || h < 4) { clearBox(); return; }
+    boxNat = { x: Math.round(left * s), y: Math.round(top * s), w: Math.round(w * s), h: Math.round(h * s) };
+    $('boxinfo').textContent = `box: [${boxNat.x}, ${boxNat.y}, ${boxNat.w}, ${boxNat.h}] (of ${natW}×${natH})`;
+    refreshAddBtn();
+  });
+
+  function updateBox(l, t, w, h) {
+    boxEl.style.left = l + 'px'; boxEl.style.top = t + 'px';
+    boxEl.style.width = w + 'px'; boxEl.style.height = h + 'px';
+  }
+  function clearBox() {
+    boxEl.style.display = 'none'; boxNat = null;
+    $('boxinfo').textContent = 'box: (none yet)'; refreshAddBtn();
+  }
+  $('clearbox').addEventListener('click', clearBox);
+
+  function refreshAddBtn() {
+    $('add').disabled = !(fileName && boxNat && $('instr').value.trim() && $('cid').value.trim());
+  }
+  ['instr', 'cid'].forEach(id => $(id).addEventListener('input', refreshAddBtn));
+
+  $('add').addEventListener('click', () => {
+    const c = {
+      id: $('cid').value.trim(),
+      image: $('prefix').value.trim() + fileName,
+      instruction: $('instr').value.trim(),
+      category: $('cat').value,
+      box: [boxNat.x, boxNat.y, boxNat.w, boxNat.h],
+    };
+    cases.push(c);
+    renderTable();
+    // Prep for the next case on the same image: keep image, clear instruction/box.
+    $('instr').value = ''; $('cid').value = '';
+    clearBox();
+  });
+
+  function renderTable() {
+    const tb = $('tbl').querySelector('tbody');
+    tb.innerHTML = cases.map((c, i) =>
+      `<tr><td>${i + 1}</td><td>${c.id}</td><td>${c.category}</td><td>${c.instruction}</td><td>${c.image}</td><td>[${c.box.join(', ')}]</td>` +
+      `<td><button class="secondary" data-i="${i}">×</button></td></tr>`).join('');
+    tb.querySelectorAll('button[data-i]').forEach(b =>
+      b.addEventListener('click', () => { cases.splice(+b.dataset.i, 1); renderTable(); }));
+    $('count').textContent = cases.length;
+    $('export').disabled = cases.length === 0;
+  }
+
+  $('export').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify({ cases }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'dataset.json'; a.click();
+  });
+  $('reset').addEventListener('click', () => { cases.length = 0; renderTable(); });
+</script>
+</body>
+</html>

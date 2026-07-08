@@ -37,4 +37,13 @@ export const api = {
   }),
   getSystem: () => fetchApi('/system'),
   getAiStatus: () => fetchApi('/ai/status'),
+
+  // ── Teacher Dashboard ──
+  getTeacherAnalytics: () => fetchApi('/teacher/analytics'),
+  getStudents: () => fetchApi('/teacher/students'),
+  addStudent: (name, session_prefix) => fetchApi('/teacher/students', {
+    method: 'POST',
+    body: JSON.stringify({ name, session_prefix }),
+  }),
+  deleteStudent: (id) => fetchApi(`/teacher/students/${id}`, { method: 'DELETE' }),
 };

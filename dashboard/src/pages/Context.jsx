@@ -153,8 +153,14 @@ function ContextTreeNode({ label, value, path, depth, onSelect, selectedKey, def
         className={`as-tree-leaf ${isSelected ? 'selected' : ''}`}
         style={{ paddingLeft: depth * 20 + 12 }}
         onClick={() => onSelect(path, value)}
+        role="treeitem"
+        tabIndex={0}
+        aria-selected={isSelected}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(path, value); }
+        }}
       >
-        <FileText size={14} className="as-tree-icon leaf" />
+        <FileText size={14} className="as-tree-icon leaf" aria-hidden="true" />
         <span className="as-tree-key">{label}</span>
       </div>
     );
@@ -163,21 +169,30 @@ function ContextTreeNode({ label, value, path, depth, onSelect, selectedKey, def
   const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
 
   return (
-    <div className="as-tree-node">
+    <div className="as-tree-node" role="treeitem" aria-expanded={open}>
       <div
         className={`as-tree-branch ${isSelected ? 'selected' : ''}`}
         style={{ paddingLeft: depth * 20 + 4 }}
         onClick={handleClick}
+        tabIndex={0}
+        role="button"
+        aria-expanded={open}
+        aria-label={`${label}, ${open ? 'expanded' : 'collapsed'}`}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); }
+          if (e.key === 'ArrowRight' && !open) { e.preventDefault(); setOpen(true); }
+          if (e.key === 'ArrowLeft' && open) { e.preventDefault(); setOpen(false); }
+        }}
       >
         {open
-          ? <ChevronDown size={16} className="as-tree-chevron" />
-          : <ChevronRight size={16} className="as-tree-chevron" />
+          ? <ChevronDown size={16} className="as-tree-chevron" aria-hidden="true" />
+          : <ChevronRight size={16} className="as-tree-chevron" aria-hidden="true" />
         }
-        <Folder size={14} className="as-tree-icon folder" />
+        <Folder size={14} className="as-tree-icon folder" aria-hidden="true" />
         <span className="as-tree-label">{label}</span>
       </div>
       {open && (
-        <div className="as-tree-children">
+        <div className="as-tree-children" role="group">
           {entries.map(([key, val]) => (
             <ContextTreeNode
               key={key}

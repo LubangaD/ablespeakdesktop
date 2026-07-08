@@ -14,10 +14,16 @@
 const SILENT_COMMANDS = new Set([
   'scroll', 'scroll_to_top', 'scroll_to_bottom',
   'go_back', 'go_forward', 'focus_next', 'focus_prev',
-  'reload_tab', 'close_tab', 'click_element',
+  'reload_tab', 'close_tab', 'click_element', 'select_option',
+  'search_in_page', 'clear_field',
   'press_key_combination', 'media_control',
   'system_media_control', 'system_volume',
   'send_system_keys', 'focus_application',
+  // Action commands — execute silently, restart mic immediately
+  'create_tab', 'open_url', 'make_tab_active',
+  'open_application', 'close_application',
+  'desktop_scroll', 'system_type_text', 'mouse_click',
+  'click_desktop_element', 'window_control',
 ]);
 
 // ── Browser tools: auto-focus Chrome after these ──
@@ -25,7 +31,8 @@ const BROWSER_TOOLS = new Set([
   'create_tab', 'open_url', 'make_tab_active', 'close_tab',
   'reload_tab', 'go_back', 'go_forward', 'scroll',
   'scroll_to_top', 'scroll_to_bottom', 'scroll_element',
-  'click_element', 'type_text', 'search_web', 'search_youtube',
+  'click_element', 'navigate_to_link', 'select_option', 'type_text', 'search_web', 'search_youtube', 'search_in_page',
+  'clear_field',
   'media_control', 'focus_next', 'focus_prev',
   'get_page_content', 'get_page_state',
   'press_key_combination', 'right_click',
@@ -53,6 +60,19 @@ function cleanTranscription(text) {
  */
 export function matchFastCommand(text) {
   const t = cleanTranscription(text);
+
+  // ── Dictation Mode Toggle ──
+  if (/^(start\s+)?(dictat(e|ed|ing|ion)|typ(e|ing))(\s+mode)?$/i.test(t) || /^(type|write)\s+(for me|mode)$/i.test(t) || /^(start\s+)?(typing|writing)$/i.test(t)) {
+    return { tool: 'dictation_mode', args: { enabled: true }, silent: false };
+  }
+  // "dictate My name is Derek..." — activate AND type the trailing text
+  const dictateWithText = t.match(/^(?:start\s+)?dictat(?:e|ed|ing)\s+(.{5,})$/i);
+  if (dictateWithText) {
+    return { tool: 'dictation_mode', args: { enabled: true, initialText: dictateWithText[1] }, silent: false };
+  }
+  if (/^(stop|end|exit)\s+(dictat(ing|ion)|typ(ing|e))(\s+mode)?$/i.test(t) || /^command\s+mode$/i.test(t)) {
+    return { tool: 'dictation_mode', args: { enabled: false }, silent: false };
+  }
 
   // ── Scrolling ──
   if (/^scroll\s+(down|up|left|right)(\s+\d+)?$/.test(t)) {
@@ -99,14 +119,44 @@ export function matchFastCommand(text) {
     return { tool: 'focus_prev', args: {}, silent: true };
   }
 
+  // ── Search — "search for X", "google X", "look up X" ──
+  const searchMatch = t.match(/^(?:search\s+(?:for\s+)?|google\s+|look\s+up\s+)(.+)$/);
+  if (searchMatch) {
+    const query = searchMatch[1].trim();
+    if (query) {
+      // Use search_in_page (clears search bar and types new query in-place)
+      return { tool: 'search_in_page', args: { query }, silent: true };
+    }
+  }
+
+  // ── Clear — "clear", "clear the search bar", "erase", "clear the field" ──
+  if (/^(clear|erase)((\s+the)?(\s+search)?(\s+bar|\s+field|\s+input|\s+text))?$/.test(t)) {
+    return { tool: 'clear_field', args: {}, silent: true };
+  }
+
   // ── Media (browser) ──
-  if (/^(pause|play)(\s+(the\s+)?(video|music|media))?$/.test(t) || /^toggle\s+(play|pause)$/.test(t)) {
+  if (/^(pause|play|stop|resume)(\s+(the\s+)?(video|music|media|song|this|it))?$/.test(t) || /^toggle\s+(play|pause)$/.test(t)) {
     return { tool: 'media_control', args: { action: 'toggle' }, silent: true };
+  }
+  // "mute this tab", "mute the tab" — quick tab mute
+  if (/^mute\s+(this\s+)?tab$/.test(t)) {
+    return { tool: 'mute_tab', args: {}, silent: true };
   }
 
   // ── System Media (Spotify, VLC, etc.) ──
-  if (/^(pause|play|resume)\s+(spotify|vlc|music|media\s+player)$/.test(t)) {
+  // When the user NAMES the app, target it directly — global media keys go to
+  // whichever app played media last (often the browser), not the named app.
+  const namedMedia = t.match(/^(pause|play|resume)\s+(spotify|vlc)$/);
+  if (namedMedia) {
+    return { tool: 'system_media_control', args: { action: 'play_pause', app_name: namedMedia[2] }, silent: true };
+  }
+  if (/^(pause|play|resume)\s+(music|media\s+player)$/.test(t)) {
     return { tool: 'system_media_control', args: { action: 'play_pause' }, silent: true };
+  }
+  const namedSkip = t.match(/^(next|previous|prev)\s+(song|track)\s+on\s+(spotify|vlc)$/);
+  if (namedSkip) {
+    const action = namedSkip[1] === 'next' ? 'next' : 'previous';
+    return { tool: 'system_media_control', args: { action, app_name: namedSkip[3] }, silent: true };
   }
   if (/^(next\s+song|skip(\s+song)?|next\s+track)$/.test(t)) {
     return { tool: 'system_media_control', args: { action: 'next' }, silent: true };
@@ -170,10 +220,44 @@ export function matchFastCommand(text) {
     return { tool: 'send_system_keys', args: { keys: 'Alt+F4' }, silent: true };
   }
 
-  // ── Click (by label) — "click X" ──
-  const clickMatch = t.match(/^click\s+(?:on\s+)?(?:the\s+)?(.+)$/);
-  if (clickMatch) {
-    return { tool: 'click_element', args: { label: clickMatch[1].trim() }, silent: true };
+  // ── Window management ──
+  if (/^minimi(z|s)e( (this|the|that))?( window| app)?$/.test(t)) {
+    return { tool: 'window_control', args: { action: 'minimize' }, silent: true };
+  }
+  if (/^maximi(z|s)e( (this|the|that))?( window| app)?$/.test(t) || /^full\s*screen$/.test(t)) {
+    return { tool: 'window_control', args: { action: 'maximize' }, silent: true };
+  }
+  if (/^restore( (this|the|that))?( window)?$/.test(t) || /^un\s*maximi(z|s)e$/.test(t)) {
+    return { tool: 'window_control', args: { action: 'restore' }, silent: true };
+  }
+  if (/^snap( (this|the|that))?( window)?\s+(to (the )?)?left$/.test(t) || /^(dock|move)\s+(window\s+)?left$/.test(t)) {
+    return { tool: 'window_control', args: { action: 'snap_left' }, silent: true };
+  }
+  if (/^snap( (this|the|that))?( window)?\s+(to (the )?)?right$/.test(t) || /^(dock|move)\s+(window\s+)?right$/.test(t)) {
+    return { tool: 'window_control', args: { action: 'snap_right' }, silent: true };
+  }
+
+  // ── Click — always use the full AI path ──
+  // The AI has the screenshot and knows if the foreground is a browser,
+  // Spotify, or any other desktop app. Don't fast-match clicks.
+  // (Previously fast-matched to browser click_element, which broke
+  //  desktop app clicks like "click on the artist profile" in Spotify.)
+
+  // ── Select / Choose / Pick — form controls (radio, checkbox, dropdown) ──
+  // "select dark mode", "choose economy", "pick one-way"
+  const selectMatch = t.match(/^(?:select|choose|pick|switch to)\s+(?:the\s+)?(.+?)(?:\s+(?:option|mode|theme|style|radio|button))?$/);
+  if (selectMatch) {
+    const label = selectMatch[1].trim();
+    // Don't match if it's "select all" (that's Ctrl+A) or app focus patterns
+    if (label && label !== 'all' && !/^(dashboard|home|chat|voice|tools|context|commands|history|logs|settings|preferences|options|prompt)$/.test(label) && !/\b(tab|window|app|field)\b/i.test(label)) {
+      return { tool: 'select_option', args: { label }, silent: true };
+    }
+  }
+
+  // "check [label]" / "uncheck [label]" — checkboxes
+  const checkMatch = t.match(/^(check|tick|uncheck|untick)\s+(?:the\s+)?(.+)$/);
+  if (checkMatch) {
+    return { tool: 'select_option', args: { label: checkMatch[2].trim() }, silent: true };
   }
 
   // ── Browser Focus — "bring browser/chrome/brave to front" ──
@@ -197,7 +281,56 @@ export function matchFastCommand(text) {
     }
   }
 
+  // ── AbleSpeak Dashboard Navigation — "go to settings", "open chat" ──
+  const NAV_MAP = {
+    dashboard: 'dashboard', home: 'dashboard',
+    chat: 'chat', voice: 'chat',
+    tools: 'tools',
+    context: 'context',
+    commands: 'commands', history: 'commands',
+    logs: 'logs',
+    settings: 'settings', preferences: 'settings', options: 'settings',
+    prompt: 'prompt', 'prompt editor': 'prompt',
+  };
+  const navMatch = t.match(/^(?:go to|open|show|navigate to|switch to)\s+(?:the\s+)?(.+?)(?:\s+page)?$/);
+  if (navMatch) {
+    const page = NAV_MAP[navMatch[1].trim()];
+    if (page) {
+      return { tool: 'navigate_dashboard', args: { page }, silent: false };
+    }
+  }
+
   // No match — fall through to AI engine
+  return null;
+}
+
+/**
+ * Destructive command confirmation system.
+ * Returns a confirmation prompt instead of executing immediately.
+ */
+let pendingDestructive = null;
+
+export function matchWithConfirmation(text) {
+  const t = cleanTranscription(text);
+
+  // If there's a pending destructive command, check for confirmation
+  if (pendingDestructive) {
+    const pending = pendingDestructive;
+    pendingDestructive = null;
+
+    if (/^(yes|confirm|do it|go ahead|okay|ok|yep|sure)$/.test(t)) {
+      return { ...pending, confirmed: true };
+    }
+    // Anything else cancels
+    return { tool: 'answer_question', args: { text: 'Cancelled.' }, silent: false, confirmed: true };
+  }
+
+  // Check if this is a destructive command that needs confirmation
+  if (/^(close|quit)$/.test(t) || /^close\s+(the\s+)?(window|app|application)$/.test(t)) {
+    pendingDestructive = { tool: 'send_system_keys', args: { keys: 'Alt+F4' }, silent: true };
+    return { tool: 'answer_question', args: { text: 'Close this window? Say "yes" to confirm or anything else to cancel.' }, silent: false, needsConfirmation: true };
+  }
+
   return null;
 }
 

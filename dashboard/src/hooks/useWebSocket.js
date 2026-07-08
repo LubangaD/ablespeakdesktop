@@ -9,7 +9,13 @@ export function useWebSocket(path = '/ws/dashboard') {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}${path}`;
+    // If a pairing token is provided (window global or <meta name="ablespeak-ws-token">),
+    // include it. The server origin-locks + loopback-locks regardless; the token
+    // is extra defense on shared machines.
+    const token = window.__ABLESPEAK_WS_TOKEN__ ||
+      document.querySelector('meta[name="ablespeak-ws-token"]')?.content || '';
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    const url = `${protocol}//${window.location.host}${path}${qs}`;
 
     try { wsRef.current = new WebSocket(url); } catch { return; }
 

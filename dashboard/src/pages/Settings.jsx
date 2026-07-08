@@ -116,6 +116,28 @@ export default function Settings() {
 
 function ProviderCard({ id, provider, isActive, onSwitch }) {
   const [selectedModel, setSelectedModel] = useState(provider.defaultModel);
+  const queryClient = useQueryClient();
+
+  // LIVE model list from the provider's API (falls back to the static list)
+  const { data: liveModels, isFetching: modelsLoading } = useQuery({
+    queryKey: ['models', id],
+    queryFn: () => fetch(`/api/ai/models?provider=${id}`).then(r => r.json()),
+    enabled: !!provider.configured,
+    staleTime: 5 * 60 * 1000,
+  });
+  const models = liveModels?.models?.length ? liveModels.models : provider.models;
+
+  // Keep the selection valid when the live list arrives
+  useEffect(() => {
+    if (models.length && !models.includes(selectedModel)) {
+      setSelectedModel(models[0]);
+    }
+  }, [models]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refreshModels = async () => {
+    await fetch(`/api/ai/models?provider=${id}&refresh=1`);
+    queryClient.invalidateQueries(['models', id]);
+  };
 
   return (
     <div className="card" style={{
@@ -143,12 +165,28 @@ function ProviderCard({ id, provider, isActive, onSwitch }) {
         </span>
       </div>
 
-      {/* Model selector */}
+      {/* Model selector (live list from provider API) */}
       <div style={{ marginBottom: 12 }}>
-        <label style={{ fontSize: 13, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Model</label>
+        <label style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span>Model {liveModels?.models?.length ? `(${liveModels.models.length} available)` : '(default list)'}</span>
+          {provider.configured && (
+            <button
+              onClick={refreshModels}
+              aria-label={`Refresh ${provider.name} model list`}
+              title="Refresh model list"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-muted)', padding: 4, display: 'flex', alignItems: 'center',
+              }}
+            >
+              <RefreshCw size={14} style={modelsLoading ? { animation: 'spin 1s linear infinite' } : undefined} />
+            </button>
+          )}
+        </label>
         <select
           value={selectedModel}
           onChange={e => setSelectedModel(e.target.value)}
+          aria-label={`${provider.name} model`}
           style={{
             width: '100%', padding: '8px 12px',
             background: 'var(--bg-primary)', border: '1px solid var(--border)',
@@ -156,7 +194,7 @@ function ProviderCard({ id, provider, isActive, onSwitch }) {
             fontSize: 14, fontFamily: 'inherit',
           }}
         >
-          {provider.models.map(m => (
+          {models.map(m => (
             <option key={m} value={m}>{m}</option>
           ))}
         </select>

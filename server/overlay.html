@@ -18,6 +18,15 @@
     -webkit-app-region: no-drag;
   }
 
+  /* ── Reduced Motion — respect user preference ── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
   /* ── Container ── */
   .overlay-root {
     display: flex;
@@ -87,8 +96,8 @@
   .transcript-area {
     width: 100%;
     min-height: 0;
-    max-height: 80px;
-    overflow: hidden;
+    max-height: 140px;
+    overflow-y: auto;
     text-align: center;
     transition: all 0.2s ease;
   }
@@ -138,8 +147,8 @@
   }
 
   .btn {
-    width: 40px;
-    height: 40px;
+    width: 56px;
+    height: 56px;
     border-radius: 50%;
     border: none;
     cursor: pointer;
@@ -148,7 +157,6 @@
     justify-content: center;
     transition: all 0.15s ease;
     position: relative;
-    outline: none;
     background: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.7);
   }
@@ -157,6 +165,11 @@
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
     transform: scale(1.08);
+  }
+
+  .btn:focus-visible {
+    outline: 3px solid #6ee7b7;
+    outline-offset: 2px;
   }
 
   .btn:active {
@@ -175,8 +188,8 @@
 
   /* ── Mic Button (special) ── */
   .btn-mic {
-    width: 44px;
-    height: 44px;
+    width: 60px;
+    height: 60px;
     background: rgba(255, 255, 255, 0.08);
   }
 
@@ -199,6 +212,39 @@
     animation: none;
   }
 
+  .btn-mic.dictating {
+    background: rgba(251, 191, 36, 0.25);
+    color: #fbbf24;
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4);
+    animation: dictPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes dictPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.35); }
+    70%  { box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  }
+
+  /* ── Speaking state — mic becomes a red stop button ── */
+  .btn-mic.speaking {
+    background: rgba(248, 113, 113, 0.22);
+    color: #f87171;
+    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.4);
+    animation: speakPulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes speakPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.35); }
+    70%  { box-shadow: 0 0 0 12px rgba(248, 113, 113, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+  }
+
+  /* ── Continuous-listening toggle ── */
+  .btn.loop-on {
+    background: rgba(110, 231, 183, 0.18);
+    color: #6ee7b7;
+  }
+
   .btn-mic svg {
     width: 20px;
     height: 20px;
@@ -206,40 +252,71 @@
 </style>
 </head>
 <body>
-<div class="overlay-root">
+<div class="overlay-root" role="application" aria-label="AbleSpeak Voice Overlay">
   <div class="pill" id="pill">
     <!-- Shortcut hint -->
-    <div class="shortcut-hint">
+    <div class="shortcut-hint" aria-hidden="true">
       Dictate <kbd>Ctrl + Shift + A</kbd>
     </div>
 
-    <!-- Transcript / status text -->
-    <div class="transcript-area" id="transcriptArea">
+    <!-- Transcript / status text (screen reader announces changes) -->
+    <div class="transcript-area" id="transcriptArea" aria-live="assertive" aria-atomic="true" role="status">
       <div class="transcript-text" id="transcriptText"></div>
     </div>
 
     <!-- Button row -->
-    <div class="btn-row">
-      <button class="btn btn-mic" id="btnMic" title="Click to speak">
-        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+    <div class="btn-row" role="toolbar" aria-label="Voice controls">
+      <button class="btn btn-mic" id="btnMic"
+              role="switch"
+              aria-label="Microphone — click to start listening"
+              aria-pressed="false"
+              title="Click to speak">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
       </button>
-      <button class="btn" id="btnText" title="Type a command (coming soon)" style="opacity:0.4;cursor:default;">
-        <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      <button class="btn" id="btnLoop"
+              role="switch"
+              aria-label="Continuous listening mode"
+              aria-pressed="false"
+              title="Continuous listening OFF — one command per activation (click to turn on)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
       </button>
-      <button class="btn" id="btnDashboard" title="Open Dashboard">
-        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <button class="btn" id="btnDashboard"
+              aria-label="Open AbleSpeak Dashboard"
+              title="Open Dashboard">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       </button>
     </div>
   </div>
 </div>
 
 <script>
+// Compatibility shim: provides no-op stubs when running outside Electron
+// so overlay.html works as a plain browser page served from the Node server.
+if (!window.electronAPI) {
+  window.electronAPI = {
+    speak: null,
+    stopTTS: null,
+    captureScreen: null,
+    showDashboard: () => window.open('http://localhost:3001', '_blank'),
+    hideOverlay: () => {},
+    onToggleListen: () => {},
+    onShown: () => {},
+    onStop: () => {},
+    onResponse: () => {},
+    onError: () => {},
+    onTTSState: () => {},
+    onConfig: () => {},
+    onShortcut: () => {},
+  };
+}
+
 (() => {
   'use strict';
 
   // ── DOM refs ──
   const pill = document.getElementById('pill');
   const btnMic = document.getElementById('btnMic');
+  const btnLoop = document.getElementById('btnLoop');
   const btnDashboard = document.getElementById('btnDashboard');
   const transcriptArea = document.getElementById('transcriptArea');
   const transcriptText = document.getElementById('transcriptText');
@@ -247,38 +324,77 @@
   // ── State ──
   let state = 'idle'; // idle | listening | processing
   let hasGreeted = false;
-  let continuousMode = true; // Auto-restart recording after each command
-  let consecutiveErrors = 0; // Stop continuous mode after repeated failures
-  const MAX_CONSECUTIVE_ERRORS = 3;
+  // Continuous mode = auto-restart the mic after each command (hands-free).
+  // ON by default for accessibility: hands-free users need the mic to
+  // keep listening. Users can toggle it off if ambient noise is an issue.
+  let continuousMode = (localStorage.getItem('ablespeak_continuous') !== '0');
+  let consecutiveErrors = 0; // Track repeated failures for backoff delay
+  const MAX_CONSECUTIVE_ERRORS = 10; // Very forgiving — don't kill the mic
 
   // ── Recording state ──
   let mediaRecorder = null;
   let audioChunks = [];
   let stream = null;
-  let audioCtx = null;
+  let audioCtx = null;     // Reused across turns — see startListening (Fix #7)
+  let audioSource = null;  // Latest MediaStreamSource node, disconnected between turns
   let silenceStart = null;
   const SILENCE_THRESHOLD = 15;
-  const SILENCE_DURATION = 1500; // 1.5s silence = speech finished
-  const MIN_RECORD_MS = 1000;    // Minimum 1s recording before silence check
-  const COOLDOWN_MS = 2000;      // Minimum 2s between recordings (rate limit protection)
+  const SPEECH_THRESHOLD = 45;  // Higher = less likely to trigger on music
+  let SILENCE_DURATION = 1500; // 1.5s silence after speech = done talking
+  const MIN_RECORD_MS = 600;     // Minimum 600ms recording before silence check
+  const COOLDOWN_MS = 500;       // 500ms between recordings
   let recordStart = 0;
   let lastRecordEnd = 0;         // When the last recording stopped
+  let ttsActive = false;         // True while TTS audio is playing (mutes the mic — Gap 3)
+  const TTS_COOLDOWN_MS = 2500;  // Wait after TTS finishes before re-opening the mic
+  let ttsWatchdog = null;        // Failsafe: force-clears ttsActive if 'done' is ever lost
+  const TTS_MAX_MS = 10000;      // Max plausible TTS duration — shorter to prevent mic deadlock
 
-  // ── TTS ──
+  // SVG icons — swapped on the mic button depending on state
+  const MIC_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
+  const STOP_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>`;
+  let sleeping = false;          // True while in sleep mode (Gap 5)
+  let dictationMode = false;     // True while in dictation mode (typing speech directly)
+
+  // ── TTS (via Electron main process → PowerShell SAPI) ──
+  // Browser speechSynthesis fails silently in transparent Electron windows.
+  // Route through the main process instead.
+
   function speak(text) {
-    if (!window.speechSynthesis || !text) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.1;
-    u.pitch = 1.0;
-    u.volume = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-      v.name.includes('Microsoft Zira') || v.name.includes('Google') || v.lang.startsWith('en')
-    );
-    if (preferred) u.voice = preferred;
-    window.speechSynthesis.speak(u);
-    return u;
+    if (!text) return null;
+
+    // Use Electron IPC → Edge neural TTS (SAPI fallback in main process).
+    // Returns null: the mic restart is driven by the real 'tts-state' 'done'
+    // event from the main process, not an estimated timer. We mark ttsActive
+    // synchronously so nothing re-opens the mic before the 'speaking' event lands.
+    if (window.electronAPI && window.electronAPI.speak) {
+      console.log(`[TTS] Speaking via Electron TTS: "${text.slice(0, 50)}..."`);
+      ttsActive = true;
+      // Failsafe: if the main process never sends 'tts-state' 'done' (e.g. the
+      // window is destroyed mid-speech), force-clear so the mic can't deadlock.
+      if (ttsWatchdog) clearTimeout(ttsWatchdog);
+      ttsWatchdog = setTimeout(() => {
+        console.warn('[TTS] Watchdog fired — no done event; re-enabling mic');
+        ttsActive = false;
+        if (active && state !== 'listening') { setIdleUI(); startListening(); }
+      }, TTS_MAX_MS);
+      window.electronAPI.speak(text);
+      return null;
+    }
+
+    // Fallback: browser speechSynthesis
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.1;
+      u.pitch = 1.0;
+      u.volume = 1.0;
+      window.speechSynthesis.speak(u);
+      return u;
+    }
+
+    console.warn('[TTS] No TTS engine available');
+    return null;
   }
 
   // ── UI helpers ──
@@ -290,21 +406,69 @@
 
   function setListeningUI() {
     state = 'listening';
-    btnMic.className = 'btn btn-mic listening';
     btnMic.title = 'Listening... click to stop';
-    setTranscript('Listening...', 'listening-label');
+    btnMic.setAttribute('aria-label', 'Microphone — currently listening, click to stop');
+    btnMic.setAttribute('aria-pressed', 'true');
+    // While asleep we keep the mic on (to hear "wake up") but show a sleep cue.
+    if (sleeping) {
+      btnMic.className = 'btn btn-mic listening';
+      btnMic.style.opacity = '0.5';
+      setTranscript('💤 Sleeping — say "wake up"', 'listening-label');
+    } else if (dictationMode) {
+      btnMic.className = 'btn btn-mic dictating';
+      btnMic.style.opacity = '';
+      setTranscript('✏️ Dictating...', 'listening-label');
+    } else {
+      btnMic.className = 'btn btn-mic listening';
+      btnMic.style.opacity = '';
+      setTranscript('Listening...', 'listening-label');
+    }
   }
 
   function setProcessingUI() {
     state = 'processing';
     btnMic.className = 'btn btn-mic processing';
     btnMic.title = 'Processing...';
+    btnMic.setAttribute('aria-label', 'Microphone — processing your command');
+    btnMic.setAttribute('aria-pressed', 'false');
+    startWatchdog();
   }
 
   function setIdleUI() {
     state = 'idle';
     btnMic.className = 'btn btn-mic';
     btnMic.title = 'Click to speak';
+    btnMic.setAttribute('aria-label', 'Microphone — click to start listening');
+    btnMic.setAttribute('aria-pressed', 'false');
+    clearWatchdog();
+  }
+
+  // ── Processing Watchdog ──
+  // In command mode: wait 60s (page summaries take time) then just show a hint.
+  // In dictation mode: 8s is more than enough (transcribe + COM type). If the
+  // server dropped the packet, restart the mic so the user isn't locked out.
+  const PROCESSING_TIMEOUT_MS = 60000;
+  const DICTATION_TIMEOUT_MS = 8000;
+  let watchdogTimer = null;
+
+  function startWatchdog() {
+    clearWatchdog();
+    const delay = dictationMode ? DICTATION_TIMEOUT_MS : PROCESSING_TIMEOUT_MS;
+    watchdogTimer = setTimeout(() => {
+      console.warn('[Overlay] Watchdog fired after', delay, 'ms — resetting mic');
+      setIdleUI();
+      setTranscript(dictationMode ? '✏️ Dictating...' : 'Ready', 'listening-label');
+      if (active) startListening();
+    }, delay);
+  }
+
+  function clearWatchdog() {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+  }
+
+  function feedWatchdog() {
+    // Evidence of progress (e.g. transcription arrived) — restart the timer
+    if (state === 'processing') startWatchdog();
   }
 
   // ════════════════════════════════════════════════
@@ -322,6 +486,11 @@
     ws.onopen = () => {
       wsConnected = true;
       console.log('[Overlay] WebSocket connected — using fast dashboard pipeline');
+      // On reconnect after server restart: if active but mic isn't running, restart it.
+      // Covers the case where state was reset to idle by ws.onclose above.
+      if (active && state === 'idle') {
+        setTimeout(() => { if (active && state === 'idle') startListening(); }, 600);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -333,7 +502,13 @@
 
     ws.onclose = () => {
       wsConnected = false;
-      // Auto-reconnect
+      // If we were processing a command when the server went down, unblock the mic.
+      // Without this, state stays 'processing' forever and startListening() never runs.
+      if (state === 'processing') {
+        setIdleUI();
+        setTranscript(dictationMode ? '✏️ Reconnecting...' : 'Reconnecting...', 'listening-label');
+      }
+      clearWatchdog();
       setTimeout(connectWS, 2000);
     };
 
@@ -346,35 +521,40 @@
     // Voice transcription received — show what was heard
     if (data.type === 'voice_transcription') {
       setTranscript(data.text || '', 'listening-label');
+      feedWatchdog();
       return;
     }
 
-    // No speech detected
+    // No speech detected. This is TERMINAL for the current turn: the server
+    // found nothing actionable (silence, noise, or a filtered transcript), and
+    // it sends exactly one terminal message per command. If we're 'processing',
+    // this IS the answer — so always recover, otherwise the mic sticks in
+    // 'processing' until the 60s watchdog. (This was the stuck-overlay bug.)
     if (data.type === 'voice_no_speech') {
-      if (continuousMode && active) {
-        setIdleUI();
-        setTimeout(() => { if (active) startListening(); }, 500);
-      } else {
-        setIdleUI();
-      }
+      clearWatchdog();
+      setIdleUI();
+      if (!dictationMode) setTranscript('Ready', 'listening-label');
+      setTimeout(() => { if (active) startListening(); }, 300);
       return;
     }
 
-    // Voice error
+    // Voice error — also terminal for this turn. Recover even while processing.
     if (data.type === 'voice_error') {
+      clearWatchdog();
       consecutiveErrors++;
       setTranscript(data.error || 'Voice error', 'error');
-      if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
-      } else {
-        setIdleUI();
-      }
+      // Always restart — use increasing backoff delay instead of killing the mic
+      const backoff = Math.min(consecutiveErrors * 500, 3000);
+      setTimeout(() => { setIdleUI(); if (active) startListening(); }, backoff);
       return;
     }
 
-    // Voice busy
+    // Voice busy — server is still on the previous command.
+    // Stay in processing state with mic OFF — don't restart listening.
     if (data.type === 'voice_busy') {
-      setTranscript('Processing...', '');
+      setTranscript('Still working… mic paused', '');
+      if (state !== 'processing') setProcessingUI();
+      feedWatchdog(); // Extend the watchdog since we know the server is alive
       return;
     }
 
@@ -392,14 +572,17 @@
   }
 
   function handleResponse(data) {
+    clearWatchdog();
+
+    // In always-listening mode, never deactivate
+    // (active stays true so mic restarts after command)
+
     if (data.error) {
       consecutiveErrors++;
       setTranscript(data.text || data.error || 'Error', 'error');
-      if (continuousMode && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 1500);
-      } else {
-        setIdleUI();
-      }
+      // Always restart — use increasing backoff delay instead of killing the mic
+      const backoff = Math.min(consecutiveErrors * 500, 3000);
+      setTimeout(() => { setIdleUI(); if (active) startListening(); }, backoff);
       return;
     }
 
@@ -411,11 +594,8 @@
 
     if (isSilent) {
       setTranscript('✓', 'response');
-      if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
-      } else {
-        setTimeout(() => { setIdleUI(); setTranscript('', ''); }, 400);
-      }
+      // Immediately restart listening
+      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
       return;
     }
 
@@ -424,27 +604,34 @@
     if (responseText && responseText !== 'Done') {
       setTranscript(responseText, 'response');
       const utterance = speak(responseText);
-      if (utterance && continuousMode && active) {
+      if (utterance) {
+        // Browser speechSynthesis path — restart when the utterance ends.
         utterance.onend = () => {
-          setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+          setTimeout(() => { setIdleUI(); if (active) startListening(); }, 200);
         };
+        // Safety fallback: if TTS hangs, force restart after 8s
         setTimeout(() => {
-          if (state !== 'listening' && active) {
+          if (state !== 'listening' && active && !ttsActive) {
             setIdleUI();
-            if (continuousMode) startListening();
+            startListening();
           }
-        }, 6000);
-      } else if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 2000);
+        }, 8000);
+      } else if (ttsActive) {
+        // Electron TTS path — the mic restart is driven by the 'tts-state' 'done'
+        // event. Safety fallback only, in case that event never arrives.
+        setTimeout(() => {
+          if (state !== 'listening' && active && !ttsActive) {
+            setIdleUI();
+            startListening();
+          }
+        }, 12000);
       } else {
-        setIdleUI();
+        // No TTS engine available — restart immediately
+        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
       }
     } else {
-      if (continuousMode && active) {
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
-      } else {
-        setIdleUI();
-      }
+      // Empty response — restart immediately
+      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
     }
   }
 
@@ -452,11 +639,12 @@
   connectWS();
 
   // ════════════════════════════════════════════════
-  // ── Voice Recording (same approach as dashboard mic) ──
+  // ── Voice Recording (MediaRecorder + Gemini transcription) ──
   // ════════════════════════════════════════════════
 
   async function startListening() {
     if (!active) return;
+    if (ttsActive) return; // Don't capture our own TTS output (Gap 3)
     if (state === 'listening' || state === 'processing') return;
 
     // Enforce cooldown
@@ -468,11 +656,41 @@
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,  // Boost voice, suppress background
+          sampleRate: 16000,
+        }
       });
 
       audioChunks = [];
       let hasSpeechDetected = false;
+
+      // Record directly from the raw mic stream — matches the dashboard
+      // Chat page's proven-working capture path. (An earlier attempt routed
+      // recording through a highpass/compressor/MediaStreamDestination graph
+      // for noise filtering; that's removed because it could leave
+      // startListening() hung or throwing before the recorder ever started,
+      // which is worse than no filtering at all.)
+      //
+      // Reuse a single AudioContext across turns instead of creating a new
+      // one every call (Fix #7, borrowed from the dashboard's Chat page) —
+      // Chrome caps concurrent/recently-created AudioContexts, and an
+      // always-listening loop that creates+closes one every turn can exhaust
+      // that cap after only a handful of commands even though each one is
+      // individually closed, since close() isn't guaranteed to fully release
+      // the underlying hardware context before the next create.
+      if (!audioCtx || audioCtx.state === 'closed') {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } else if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      audioSource = source; // tracked so the next turn can disconnect it cleanly
 
       mediaRecorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -486,58 +704,60 @@
       mediaRecorder.onstop = async () => {
         const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+        if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
         lastRecordEnd = Date.now();
 
         if (hasSpeechDetected && blob.size > 5000) {
-          setProcessingUI();
-          setTranscript('Processing...', '');
-
-          // Send audio over WebSocket — SAME as dashboard (fast!)
           if (ws && ws.readyState === WebSocket.OPEN) {
+            setProcessingUI();
+            setTranscript('Processing...', '');
             const reader = new FileReader();
-            reader.onload = () => {
+            reader.onload = async () => {
               const base64 = reader.result.split(',')[1];
-              console.log(`[Overlay] Sending ${Math.round(blob.size/1024)}KB audio over WebSocket`);
+              console.log(`[Overlay] Sending ${Math.round(blob.size/1024)}KB audio`);
+
+              // ── Screen Vision (borrowed from Clicky) ──
+              // Capture desktop screenshot so the AI can SEE what the user sees
+              let screenshot = null;
+              try {
+                if (window.electronAPI && window.electronAPI.captureScreen) {
+                  screenshot = await window.electronAPI.captureScreen();
+                  if (screenshot) console.log(`[Overlay] Screenshot captured (${Math.round(screenshot.length/1024)}KB)`);
+                }
+              } catch (err) {
+                console.warn('[Overlay] Screenshot failed:', err.message);
+              }
+
               ws.send(JSON.stringify({
                 type: 'voice_audio',
                 audio: base64,
                 mimeType: blob.type || 'audio/webm',
+                screenshot, // base64 JPEG or null
               }));
             };
             reader.readAsDataURL(blob);
           } else {
-            // Fallback to IPC if WS not connected
-            console.warn('[Overlay] WebSocket not connected, using IPC fallback');
-            const reader = new FileReader();
-            reader.onload = () => {
-              window.electronAPI.sendAudio(reader.result.split(',')[1], blob.type);
-            };
-            reader.readAsDataURL(blob);
+            // Socket isn't open — DON'T sit in 'processing' forever. Recover and
+            // (re)connect so the next utterance can actually be sent.
+            console.warn('[Overlay] WebSocket not open — cannot send command; resetting and reconnecting');
+            setIdleUI();
+            setTranscript(dictationMode ? '✏️ Reconnecting…' : 'Reconnecting…', 'listening-label');
+            connectWS();
+            setTimeout(() => { if (active) startListening(); }, 800);
           }
         } else {
-          if (continuousMode && active) {
-            setIdleUI();
-            setTimeout(() => { if (active) startListening(); }, 300);
-          } else {
-            setIdleUI();
-          }
+          setIdleUI();
+          setTimeout(() => { if (active) startListening(); }, 300);
         }
       };
 
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
       mediaRecorder.start(200);
       recordStart = Date.now();
       setListeningUI();
 
       silenceStart = null;
       const data = new Uint8Array(analyser.frequencyBinCount);
-      const SPEECH_THRESHOLD = 25;
-      const MAX_RECORD_MS = 15000;
+      const MAX_RECORD_MS = 8000;   // 8s max — shorter to limit music bleed
 
       function checkSilence() {
         if (state !== 'listening' || !mediaRecorder || mediaRecorder.state !== 'recording') return;
@@ -549,7 +769,9 @@
         if (elapsed < MIN_RECORD_MS) { requestAnimationFrame(checkSilence); return; }
         if (avg < SILENCE_THRESHOLD) {
           if (!silenceStart) silenceStart = Date.now();
-          const silenceNeeded = hasSpeechDetected ? SILENCE_DURATION : 3000;
+          // Dictation mode: submit after 900ms silence — quick enough between sentences
+          // Command mode: wait the full SILENCE_DURATION (1.5s) for deliberate pauses
+          const silenceNeeded = hasSpeechDetected ? (dictationMode ? 900 : SILENCE_DURATION) : 2000;
           if (Date.now() - silenceStart > silenceNeeded) { mediaRecorder.stop(); return; }
         } else { silenceStart = null; }
         requestAnimationFrame(checkSilence);
@@ -563,16 +785,22 @@
   }
 
   function stopRecording() {
-    active = false;
-    continuousMode = false;
+    // Stop the recording but DON'T deactivate — we want to stay ready
     consecutiveErrors = 0;
     if (mediaRecorder && mediaRecorder.state === 'recording') {
       mediaRecorder.stop();
     }
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
     setIdleUI();
-    setTranscript('Ready — click mic to start', '');
+    setTranscript('Ready — say something', '');
+  }
+
+  function fullStop() {
+    // Fully deactivate — used when user explicitly clicks mic to turn off
+    active = false;
+    stopRecording();
+    setTranscript('Mic off — click to start', '');
   }
 
   // ════════════════════════════════════════════
@@ -580,20 +808,73 @@
   // ════════════════════════════════════════════
 
   let active = false; // Master switch
+  let recoveryInterval = null; // Global stuck-state recovery
 
   function toggleListening() {
     if (active) {
-      stopRecording();
+      fullStop();  // User explicitly wants to turn off
+      if (recoveryInterval) { clearInterval(recoveryInterval); recoveryInterval = null; }
     } else {
       active = true;
-      continuousMode = true;
       consecutiveErrors = 0;
       startListening();
+      // Start global recovery timer — catches ALL stuck states
+      if (recoveryInterval) clearInterval(recoveryInterval);
+      recoveryInterval = setInterval(() => {
+        if (!active) return;
+        // If stuck in 'processing' for >20s, force restart
+        if (state === 'processing') {
+          console.warn('[Recovery] Stuck in processing — forcing restart');
+          ttsActive = false;
+          setIdleUI();
+          startListening();
+        }
+        // If idle but should be listening (active + continuous), restart
+        if (state === 'idle' && continuousMode && !ttsActive) {
+          console.warn('[Recovery] Idle but should be listening — restarting');
+          startListening();
+        }
+        // Force-clear ttsActive if it's been true too long
+        if (ttsActive) {
+          console.warn('[Recovery] Clearing stuck ttsActive flag');
+          ttsActive = false;
+          if (state !== 'listening') { setIdleUI(); startListening(); }
+        }
+      }, 15000); // Check every 15 seconds
     }
   }
 
+  function setContinuousMode(on) {
+    continuousMode = on;
+    localStorage.setItem('ablespeak_continuous', on ? '1' : '0');
+    btnLoop.classList.toggle('loop-on', on);
+    btnLoop.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btnLoop.setAttribute('aria-label', on
+      ? 'Continuous listening mode — ON, mic restarts after each command'
+      : 'Continuous listening mode — OFF, one command per activation');
+    btnLoop.title = on
+      ? 'Continuous listening ON — mic restarts after each command (click to turn off)'
+      : 'Continuous listening OFF — one command per activation (click to turn on)';
+  }
+
   // ── Button handlers ──
-  btnMic.addEventListener('click', toggleListening);
+  btnMic.addEventListener('click', () => {
+    if (ttsActive) {
+      // Stop TTS immediately — user wants to interrupt
+      if (window.electronAPI && window.electronAPI.stopTTS) window.electronAPI.stopTTS();
+      window.speechSynthesis?.cancel();
+      ttsActive = false;
+      btnMic.innerHTML = MIC_SVG;
+      setTranscript('Stopped', '');
+      if (ttsWatchdog) { clearTimeout(ttsWatchdog); ttsWatchdog = null; }
+      setTimeout(() => { if (active && !ttsActive) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+    toggleListening();
+  });
+
+  btnLoop.addEventListener('click', () => setContinuousMode(!continuousMode));
+  setContinuousMode(continuousMode); // apply persisted state to the button UI
 
   btnDashboard.addEventListener('click', () => {
     window.electronAPI.showDashboard();
@@ -601,15 +882,81 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      stopRecording();
+      fullStop();
       window.electronAPI.hideOverlay();
     }
   });
 
-  // ── IPC: Global shortcut triggered ──
+  // ── IPC: Global shortcut triggered (legacy toggle path) ──
   window.electronAPI.onToggleListen(() => {
     toggleListening();
   });
+
+  // ── IPC: Overlay shown via shortcut — always start fresh ──
+  if (window.electronAPI.onShown) {
+    window.electronAPI.onShown(() => {
+      // Reset any stale state from a previous session
+      clearWatchdog();
+      if (state === 'processing') setIdleUI();
+      if (!active) {
+        active = true;
+        consecutiveErrors = 0;
+      }
+      if (state !== 'listening') startListening();
+    });
+  }
+
+  // ── IPC: Overlay hiding — stop the mic but DON'T deactivate ──
+  // In always-listening mode, hiding is temporary (e.g. voice "dismiss")
+  if (window.electronAPI.onStop) {
+    window.electronAPI.onStop(() => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+      setIdleUI();
+      setTranscript('', '');
+    });
+  }
+
+  // ── AUTO-START: Make overlay always-listening like dictation tools ──
+  // After WebSocket connects, auto-activate the mic so the user never needs
+  // a keyboard shortcut. The overlay is always visible and always listening.
+  let autoStartDone = false;
+  function tryAutoStart() {
+    if (autoStartDone) return;
+    autoStartDone = true;
+    // Small delay to let the UI settle
+    setTimeout(() => {
+      if (!active && state === 'idle') {
+        console.log('[Overlay] Auto-starting continuous listening mode');
+        active = true;
+        consecutiveErrors = 0;
+        startListening();
+      }
+    }, 1500);
+  }
+  // Try auto-start when WS connects (fast path) or after a timeout (fallback)
+  const origOnOpen = ws ? ws.onopen : null;
+  if (ws) {
+    const prevOnOpen = ws.onopen;
+    ws.onopen = function() {
+      if (prevOnOpen) prevOnOpen.apply(this, arguments);
+      tryAutoStart();
+    };
+  }
+  setTimeout(tryAutoStart, 4000); // Fallback if WS was already open
+
+  // ── IPC: Show the actually-registered shortcut in the hint ──
+  if (window.electronAPI.onShortcut) {
+    window.electronAPI.onShortcut(({ shortcut }) => {
+      const hint = document.querySelector('.shortcut-hint');
+      if (hint && shortcut) {
+        hint.innerHTML = 'Dictate <kbd>' + shortcut.replace(/\+/g, ' + ') + '</kbd>';
+      }
+    });
+  }
 
   // ── IPC: AI Response (fallback when WS not connected) ──
   window.electronAPI.onResponse((data) => {
@@ -630,6 +977,136 @@
       setIdleUI();
     }
   });
+
+  // ── IPC: TTS playback state — mute the mic while audio plays (Gap 3) ──
+  if (window.electronAPI.onTTSState) {
+    window.electronAPI.onTTSState((s) => {
+      if (s === 'speaking') {
+        ttsActive = true;
+        // Turn the mic button into a stop button so the user can interrupt
+        btnMic.innerHTML = STOP_SVG;
+        btnMic.className = 'btn btn-mic speaking';
+        btnMic.setAttribute('aria-label', 'Speaking — click to stop');
+        btnMic.title = 'Click to stop speaking';
+        // Stop any in-progress recording so we don't capture our own voice
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          try { mediaRecorder.stop(); } catch {}
+        }
+      } else if (s === 'done') {
+        ttsActive = false;
+        // Restore the mic button
+        btnMic.innerHTML = MIC_SVG;
+        if (ttsWatchdog) { clearTimeout(ttsWatchdog); ttsWatchdog = null; }
+        // Cooldown, then re-open the mic (TTS finished speaking)
+        if (active) {
+          setTimeout(() => {
+            if (active && !ttsActive) { setIdleUI(); startListening(); }
+          }, TTS_COOLDOWN_MS);
+        }
+      }
+    });
+  }
+
+  // ── IPC: Configure silence timeout (from settings) ──
+  if (window.electronAPI.onConfig) {
+    window.electronAPI.onConfig((config) => {
+      if (config.silenceTimeout && typeof config.silenceTimeout === 'number') {
+        SILENCE_DURATION = Math.max(1000, Math.min(8000, config.silenceTimeout));
+        console.log('[Overlay] Silence timeout set to', SILENCE_DURATION, 'ms');
+      }
+      if (typeof config.continuousMode === 'boolean') {
+        setContinuousMode(config.continuousMode);
+      }
+    });
+  }
+
+  // ── Voice control routing ──
+  // "Dismiss" words hide the overlay (handled locally). Interrupt ("stop"/"cancel"),
+  // sleep, and wake are owned by the server (ws-proxy) so they never reach the LLM;
+  // the server replies with voice_cancelled / voice_sleeping / voice_awake, which we
+  // react to below. We keep DISMISS narrow to avoid colliding with those phrases.
+  const DISMISS_PHRASES = /^(close|dismiss|hide|go away)\.?$/i;
+  const INTERRUPT_PHRASES = /^(stop|cancel|abort|shut up|be quiet|quiet)[\s.,!]?/i;
+  const _origHandleWSMessage = handleWSMessage;
+  handleWSMessage = function(data) {
+    // Local fast-path: hide overlay on dismiss words.
+    if (data.type === 'voice_transcription' && DISMISS_PHRASES.test((data.text || '').trim())) {
+      stopRecording();
+      setTranscript('', '');
+      window.electronAPI.hideOverlay();
+      return;
+    }
+
+    // Local fast-path: stop TTS immediately on interrupt words (the server also
+    // cancels server-side so the utterance never reaches the LLM).
+    if (data.type === 'voice_transcription' && INTERRUPT_PHRASES.test((data.text || '').trim())) {
+      if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
+      window.speechSynthesis?.cancel();
+      ttsActive = false;
+      setTranscript('Stopped', '');
+      clearWatchdog();
+      // Restart mic so user can give a new command immediately
+      setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+
+    // Server told us the current operation was cancelled.
+    if (data.type === 'voice_cancelled') {
+      if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
+      ttsActive = false;
+      setTranscript('Stopped', '');
+      clearWatchdog();
+      setTimeout(() => { if (active && !ttsActive) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+
+    // Server entered sleep mode — keep the mic on (to hear "wake up") but go quiet.
+    if (data.type === 'voice_sleeping') {
+      sleeping = true;
+      clearWatchdog();
+      if (data.say) speak(data.say); // 'done' event will re-open the mic
+      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+
+    // Server woke up — resume normal operation.
+    if (data.type === 'voice_awake') {
+      sleeping = false;
+      btnMic.style.opacity = '';
+      clearWatchdog();
+      if (data.say) speak(data.say);
+      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+
+    // ── Dictation Mode ──
+    if (data.type === 'dictation_mode') {
+      dictationMode = data.enabled;
+      clearWatchdog();
+      if (dictationMode) {
+        // Enter dictation mode — green mic, different label
+        btnMic.className = 'btn btn-mic dictating';
+        setTranscript('✏️ Dictating...', 'listening-label');
+      } else {
+        setIdleUI();
+        setTranscript('Command mode', 'listening-label');
+      }
+      if (data.say) speak(data.say);
+      else setTimeout(() => { if (active) startListening(); }, 300);
+      return;
+    }
+
+    // Dictation text was typed — show brief feedback, restart mic immediately
+    if (data.type === 'dictation_typed') {
+      setTranscript('✏️ ' + (data.text || '').trim().slice(0, 60), 'listening-label');
+      clearWatchdog();
+      // state may still be 'processing' — must reset before startListening() or it bails
+      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
+      return;
+    }
+
+    _origHandleWSMessage(data);
+  };
 
   // ── Ensure voices are loaded for TTS ──
   if (window.speechSynthesis) {

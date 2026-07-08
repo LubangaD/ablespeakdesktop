@@ -217,15 +217,46 @@ async function defaultContextUpdater() {
     };
 }
 
-chrome.runtime.onStartup.addListener(function () {
-    console.log('open');
-    chrome.storage.local.get("enabled", (data) => {
+// ── Reliable wake-up after MV3 service-worker suspension ──
+// Chrome suspends this service worker after ~30s of idle time, which wipes
+// webSocket, every setTimeout/setInterval, and all other in-memory state.
+// Previously, reconnection only re-armed on a full browser restart
+// (onStartup) or the user manually clicking the extension icon — so once
+// suspended mid-session, the WebSocket (and the 1s context-push loop that
+// depends on it) stayed dead for the rest of the session, freezing
+// active-tab/page-context tracking on the AI side at whatever it last saw.
+//
+// chrome.alarms is the Chrome-documented mechanism that CAN wake a
+// suspended service worker (unlike timers), so a periodic alarm here
+// guarantees we notice a dead connection and reconnect within ~1 minute
+// instead of never. The top-level storage read below — not nested inside
+// onStartup — runs on EVERY script evaluation, which happens on every wake
+// (alarm fire, incoming message, full browser startup, etc.), so
+// reconnection isn't gated behind onStartup alone anymore.
+const HEARTBEAT_ALARM = 'ablespeak-heartbeat';
+
+function ensureHeartbeatAlarm() {
+    chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== HEARTBEAT_ALARM) return;
+    chrome.storage.local.get('enabled', (data) => {
         enabled = data.enabled || false;
-        if (enabled) {
+        if (enabled && (!webSocket || webSocket.readyState !== WebSocket.OPEN)) {
+            console.log('[Heartbeat] Connection down — reconnecting');
             startReconnectionLoop();
         }
     });
-})
+});
+
+chrome.storage.local.get('enabled', (data) => {
+    enabled = data.enabled || false;
+    ensureHeartbeatAlarm();
+    if (enabled) {
+        startReconnectionLoop();
+    }
+});
 
 chrome.action.setIcon({path: 'icons/socket-disabled.png'});
 chrome.action.onClicked.addListener(async () => {
@@ -250,8 +281,14 @@ function connect() {
     const gatewayUrl = 'ws://localhost:3001/ws/extension';
     const directUrl = 'ws://localhost:22171/integration/chrome';
 
-    chrome.storage.local.get('wsUrl', (data) => {
-        const url = data.wsUrl || gatewayUrl;
+    chrome.storage.local.get(['wsUrl', 'wsToken'], (data) => {
+        let url = data.wsUrl || gatewayUrl;
+        // Append the pairing token if the user configured one. The server also
+        // origin-locks and loopback-locks, so this is extra defense on shared
+        // machines and a no-op when no token is set.
+        if (data.wsToken) {
+            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(data.wsToken);
+        }
         _doConnect(url, directUrl);
     });
 }
@@ -263,8 +300,24 @@ function _doConnect(primaryUrl, fallbackUrl) {
     webSocket.onopen = () => {
         chrome.action.setIcon({path: 'icons/socket-active.png'});
         console.log('WebSocket connection established to:', primaryUrl);
+        reconnectAttempt = 0; // Reset backoff on successful connection
         clearReconnectInterval();
         startKeepAlive();
+
+        // Tell the server which browser we are so it can focus the right window
+        const ua = navigator.userAgent || '';
+        let browserName = 'Chrome'; // default
+        if (ua.includes('Brave')) browserName = 'Brave';
+        else if (ua.includes('Edg/') || ua.includes('Edge')) browserName = 'Edge';
+        else if (ua.includes('OPR') || ua.includes('Opera')) browserName = 'Opera';
+        else if (ua.includes('Chrome')) browserName = 'Chrome';
+
+        webSocket.send(JSON.stringify({
+            type: 'browser_identify',
+            browserName,
+            userAgent: ua
+        }));
+        console.log('Identified as:', browserName);
     };
 
     webSocket.onmessage = async (event) => {
@@ -534,25 +587,49 @@ function _doConnect(primaryUrl, fallbackUrl) {
             }
             webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
         } else if (data.type === 'close_tab') {
-            const tabId = parseInt(data.payload.tab_id);
-            await chrome.tabs.remove(tabId);
-            webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+            try {
+                const tabId = data.payload?.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab())?.id;
+                if (tabId) {
+                    await chrome.tabs.remove(tabId);
+                    webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+                } else {
+                    webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No active tab found' }, replyTo: data.replyTo }));
+                }
+            } catch (err) {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: err.message }, replyTo: data.replyTo }));
+            }
         } else if (data.type === 'reload_tab') {
-            const tabId = data.payload.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab()).id;
+            const tabId = data.payload?.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab())?.id;
             await chrome.tabs.reload(tabId);
             webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
         } else if (data.type === 'duplicate_tab') {
-            const tabId = data.payload.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab()).id;
+            const tabId = data.payload?.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab())?.id;
             const newTab = await chrome.tabs.duplicate(tabId);
             webSocket.send(JSON.stringify({ result: { status: 'success', tab: newTab }, replyTo: data.replyTo }));
         } else if (data.type === 'go_back') {
-            const tabId = data.payload.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab()).id;
-            await chrome.tabs.goBack(tabId);
-            webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+            try {
+                const tabId = data.payload?.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab())?.id;
+                if (tabId) {
+                    await chrome.tabs.goBack(tabId);
+                    webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+                } else {
+                    webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No active tab found' }, replyTo: data.replyTo }));
+                }
+            } catch (err) {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: err.message }, replyTo: data.replyTo }));
+            }
         } else if (data.type === 'go_forward') {
-            const tabId = data.payload.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab()).id;
-            await chrome.tabs.goForward(tabId);
-            webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+            try {
+                const tabId = data.payload?.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab())?.id;
+                if (tabId) {
+                    await chrome.tabs.goForward(tabId);
+                    webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+                } else {
+                    webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No active tab found' }, replyTo: data.replyTo }));
+                }
+            } catch (err) {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: err.message }, replyTo: data.replyTo }));
+            }
         } else if (data.type === 'pin_tab') {
             const tabId = data.payload.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab()).id;
             await chrome.tabs.update(tabId, { pinned: true });
@@ -674,40 +751,70 @@ function _doConnect(primaryUrl, fallbackUrl) {
             webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
         } else if (data.type === 'media_control') {
             // Direct voice control of video/audio: play, pause, seek, volume, mute, speed
-            const activeTab = await getActiveTab();
-            if (!activeTab) {
-                webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No active tab' }, replyTo: data.replyTo }));
+            // IMPORTANT: Find the tab that actually has media playing, not just the active tab.
+            // The user may be on the AbleSpeak dashboard while music plays on YouTube.
+            let targetTab = null;
+
+            // 1. Try to find a tab that's currently producing audio
+            const audibleTabs = await chrome.tabs.query({ audible: true });
+            if (audibleTabs.length > 0) {
+                targetTab = audibleTabs[0];
+            }
+
+            // 2. Fall back to a tab with a known media URL (YouTube, Spotify, SoundCloud, etc.)
+            if (!targetTab) {
+                const allTabs = await chrome.tabs.query({});
+                targetTab = allTabs.find(t =>
+                    /youtube\.com\/watch|youtu\.be|spotify\.com|soundcloud\.com|twitch\.tv|vimeo\.com|music\.apple\.com/i.test(t.url || '')
+                );
+            }
+
+            // 3. Last resort: active tab
+            if (!targetTab) {
+                targetTab = await getActiveTab();
+            }
+
+            if (!targetTab) {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No tab with media found' }, replyTo: data.replyTo }));
             } else {
-                const [result] = await chrome.scripting.executeScript({
-                    target: { tabId: activeTab.id },
-                    func: (action, value, xpath) => {
-                        function getByXPath(xp) {
-                            return document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                        }
-                        const media = (xpath ? getByXPath(xpath) : null)
-                            || document.querySelector('video')
-                            || document.querySelector('audio');
-                        if (!media) return { status: 'error', message: 'No media element found on page' };
-                        if (action === 'play')        media.play();
-                        else if (action === 'pause')  media.pause();
-                        else if (action === 'toggle') { media.paused ? media.play() : media.pause(); }
-                        else if (action === 'seek')   { media.currentTime = parseFloat(value); }
-                        else if (action === 'seek_by') { media.currentTime = Math.max(0, media.currentTime + parseFloat(value)); }
-                        else if (action === 'volume') { media.volume = Math.min(1, Math.max(0, parseFloat(value) / 100)); }
-                        else if (action === 'mute')   { media.muted = true; }
-                        else if (action === 'unmute') { media.muted = false; }
-                        else if (action === 'rate')   { media.playbackRate = parseFloat(value); }
-                        return {
-                            status: 'success',
-                            paused: media.paused,
-                            currentTime: Math.round(media.currentTime),
-                            volume: Math.round(media.volume * 100),
-                            muted: media.muted
-                        };
-                    },
-                    args: [data.payload.action, data.payload.value ?? null, data.payload.xpath ?? null]
-                });
-                webSocket.send(JSON.stringify({ result: result?.result ?? result, replyTo: data.replyTo }));
+                try {
+                    console.log(`[Media] Targeting tab ${targetTab.id}: ${(targetTab.url || '').slice(0, 60)} (audible: ${targetTab.audible})`);
+                    const [result] = await chrome.scripting.executeScript({
+                        target: { tabId: targetTab.id },
+                        world: 'MAIN',
+                        func: (action, value, xpath) => {
+                            function getByXPath(xp) {
+                                return document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                            }
+                            // YouTube-specific selector first, then generic
+                            const media = (xpath ? getByXPath(xpath) : null)
+                                || document.querySelector('.html5-video-player video')
+                                || document.querySelector('video')
+                                || document.querySelector('audio');
+                            if (!media) return { status: 'error', message: 'No media element found on page' };
+                            if (action === 'play')        media.play();
+                            else if (action === 'pause')  media.pause();
+                            else if (action === 'toggle') { media.paused ? media.play() : media.pause(); }
+                            else if (action === 'seek')   { media.currentTime = parseFloat(value); }
+                            else if (action === 'seek_by') { media.currentTime = Math.max(0, media.currentTime + parseFloat(value)); }
+                            else if (action === 'volume') { media.volume = Math.min(1, Math.max(0, parseFloat(value) / 100)); }
+                            else if (action === 'mute')   { media.muted = true; }
+                            else if (action === 'unmute') { media.muted = false; }
+                            else if (action === 'rate')   { media.playbackRate = parseFloat(value); }
+                            return {
+                                status: 'success',
+                                paused: media.paused,
+                                currentTime: Math.round(media.currentTime),
+                                volume: Math.round(media.volume * 100),
+                                muted: media.muted
+                            };
+                        },
+                        args: [data.payload.action, data.payload.value ?? null, data.payload.xpath ?? null]
+                    });
+                    webSocket.send(JSON.stringify({ result: result?.result ?? result, replyTo: data.replyTo }));
+                } catch (err) {
+                    webSocket.send(JSON.stringify({ result: { status: 'error', message: err.message }, replyTo: data.replyTo }));
+                }
             }
         } else if (data.type === 'focus_next') {
             // Tab-forward through focusable elements — navigating a page without a mouse
@@ -860,30 +967,46 @@ function clearKeepAlive() {
     }
 }
 
+let reconnectAttempt = 0;
+
 function startReconnectionLoop() {
     console.log('Starting reconnection loop...');
     chrome.action.setIcon({path: 'icons/socket-inactive.png'});
     contextUpdaters = [defaultContextUpdater];
 
     connect();
-    reconnectIntervalId = setInterval(() => {
-        //console.log('Attempting to reconnect...');
-        connect();
-    }, 5000);
+    scheduleReconnect();
+}
+
+function scheduleReconnect() {
+    clearReconnectInterval();
+    // Exponential backoff: 2s, 4s, 8s, 16s, 30s (max), with random jitter
+    const baseDelay = Math.min(2000 * Math.pow(2, reconnectAttempt), 30000);
+    const jitter = Math.random() * 1000;
+    const delay = baseDelay + jitter;
+    reconnectAttempt++;
+    console.log(`Next reconnect in ${Math.round(delay)}ms (attempt ${reconnectAttempt})`);
+    reconnectIntervalId = setTimeout(() => {
+        reconnectIntervalId = null;
+        if (enabled && (!webSocket || webSocket.readyState !== WebSocket.OPEN)) {
+            connect();
+            scheduleReconnect();
+        }
+    }, delay);
 }
 
 function stopReconnectionLoop() {
     console.log('Stopping reconnection loop...');
     chrome.action.setIcon({path: 'icons/socket-disabled.png'});
-    clearInterval(reconnectIntervalId);
-    reconnectIntervalId = null;
+    clearReconnectInterval();
+    reconnectAttempt = 0;
     disconnect();
 }
 
 function clearReconnectInterval() {
     console.log('Clearing reconnect interval...');
     if (reconnectIntervalId) {
-        clearInterval(reconnectIntervalId);
+        clearTimeout(reconnectIntervalId);
         reconnectIntervalId = null;
     }
 }

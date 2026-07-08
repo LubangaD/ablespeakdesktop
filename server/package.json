@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "desktop": "electron electron-main.cjs",
+    "desktop": "node launch-electron.cjs",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
@@ -21,25 +21,38 @@
     "files": [
       "src/**/*",
       "electron-main.cjs",
+      "overlay.html",
+      "overlay-preload.cjs",
+      "overlay-wake.cjs",
+      "wake-preload.cjs",
+      "tools/**/*",
       "data/**/*",
-      ".env",
       "node_modules/**/*"
     ],
     "extraResources": [
       {
         "from": "../dashboard/dist",
         "to": "dashboard/dist"
+      },
+      {
+        "from": ".env",
+        "to": ".env"
       }
+    ],
+    "asarUnpack": [
+      "**/*.node"
     ],
     "win": {
       "target": ["nsis"],
-      "icon": "../dashboard/public/ablespeak-icon.png"
+      "icon": "../dashboard/public/ablespeak-logo.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "AbleSpeak",
+      "uninstallDisplayName": "AbleSpeak Voice Assistant"
     }
   },
   "dependencies": {
@@ -54,6 +67,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^42.1.0",
     "electron-builder": "^26.8.1"
   }

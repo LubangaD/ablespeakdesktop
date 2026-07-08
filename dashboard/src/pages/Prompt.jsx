@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState } from 'react';
-import { CheckSquare, Square, ChevronDown } from 'lucide-react';
+import { CheckSquare, Square, ChevronDown, FileText, Copy, Check } from 'lucide-react';
 
 const PROMPT_MODES = ['general', 'chrome', 'gmail', 'youtube', 'vscode'];
 
@@ -12,6 +12,7 @@ export default function Prompt() {
   const [activeMode, setActiveMode] = useState('general');
   const [showDropdown, setShowDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState('prompt');
+  const [copied, setCopied] = useState(false);
 
   // Build a representative system prompt based on the active mode
   const getPromptTemplate = () => {
@@ -130,9 +131,34 @@ You are a voice programming assistant for Visual Studio Code.
     return '# Select a mode from the dropdown above';
   };
 
+  // Resolve the document text shown for the current tab
+  const docText =
+    activeTab === 'prompt' ? getPromptTemplate()
+    : activeTab === 'tools' ? `# Available Tools for "${activeMode}" mode\n\n${getToolsList(activeMode)}`
+    : `# Context for "${activeMode}" mode\n\n${getContextList(activeMode)}`;
+
+  const docTitle =
+    activeTab === 'prompt' ? 'System Prompt'
+    : activeTab === 'tools' ? 'Available Tools'
+    : 'Active Context';
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(docText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch { /* clipboard unavailable */ }
+  };
+
   return (
     <div className="as-prompt-page">
-      {/* Top bar — matches Voqal's Prompt|Tools|Context strip */}
+      {/* Page header */}
+      <div className="pp-header">
+        <h2><FileText size={24} aria-hidden="true" /> Prompt Studio</h2>
+        <p className="pp-subtitle">The instructions AbleSpeak follows for each app. Switch modes to see what changes.</p>
+      </div>
+
+      {/* Top bar — carded */}
       <div className="as-topbar">
         <div className="as-tabs">
           {['prompt', 'tools', 'context'].map(tab => (
@@ -177,32 +203,49 @@ You are a voice programming assistant for Visual Studio Code.
         </div>
       </div>
 
-      {/* Prompt content area */}
-      {activeTab === 'prompt' && (
-        <div className="as-prompt-content">
-          <pre className="as-prompt-text">{getPromptTemplate()}</pre>
+      {/* Document card */}
+      <div className="pp-doc">
+        <div className="pp-doc-bar">
+          <div className="pp-doc-title">
+            <span className="pp-doc-dot" />
+            {docTitle}
+            <span className="pp-doc-mode">{activeMode}</span>
+          </div>
+          <button className="pp-copy-btn" onClick={handleCopy} aria-label="Copy to clipboard">
+            {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+          </button>
         </div>
-      )}
-
-      {activeTab === 'tools' && (
-        <div className="as-prompt-content">
-          <p style={{ color: 'var(--text-muted)', padding: 24 }}>
-            Tools are shown on the dedicated Tools page in the sidebar. Select a mode above to see which tools are available for that context.
-          </p>
-          <pre className="as-prompt-text">{`# Available Tools for "${activeMode}" mode\n\n${getToolsList(activeMode)}`}</pre>
+        <div className="pp-doc-body">
+          {renderMarkdown(docText)}
         </div>
-      )}
-
-      {activeTab === 'context' && (
-        <div className="as-prompt-content">
-          <p style={{ color: 'var(--text-muted)', padding: 24 }}>
-            Context data is shown on the dedicated Context page in the sidebar. The active context for the current mode is displayed below.
-          </p>
-          <pre className="as-prompt-text">{`# Context for "${activeMode}" mode\n\n${getContextList(activeMode)}`}</pre>
-        </div>
-      )}
+      </div>
     </div>
   );
+}
+
+// Lightweight markdown renderer for the prompt document
+function renderMarkdown(text) {
+  return text.split('\n').map((line, i) => {
+    if (line.startsWith('## ')) return <div key={i} className="pp-h2">{line.slice(3)}</div>;
+    if (line.startsWith('# ')) return <div key={i} className="pp-h1">{line.slice(2)}</div>;
+    if (line.startsWith('- ')) {
+      const rest = line.slice(2);
+      const idx = rest.indexOf(':');
+      if (idx > -1) {
+        return (
+          <div key={i} className="pp-li">
+            <span className="pp-dash">–</span>
+            <span className="pp-key">{rest.slice(0, idx)}</span>
+            <span className="pp-val">{rest.slice(idx)}</span>
+          </div>
+        );
+      }
+      return <div key={i} className="pp-li"><span className="pp-dash">–</span>{rest}</div>;
+    }
+    if (/^\d+\.\s/.test(line)) return <div key={i} className="pp-li pp-num">{line}</div>;
+    if (line.trim() === '') return <div key={i} className="pp-blank" />;
+    return <div key={i} className="pp-text">{line}</div>;
+  });
 }
 
 function getToolsList(mode) {

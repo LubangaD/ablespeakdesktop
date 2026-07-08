@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { readFileSync, existsSync } from 'fs';
-import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts } from '../db.js';
+import { getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts, getTeacherAnalytics, getStudents, addStudent, deleteStudent } from '../db.js';
 
 export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath }) {
   const router = Router();
@@ -105,6 +105,29 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     if (target === 'voqal') result = wsProxy.sendCommandToVoqal(data);
     else result = wsProxy.sendCommandToExtension(data);
     res.json({ sent: !!result, target });
+  });
+
+  // ── Teacher Dashboard ──
+  router.get('/teacher/analytics', (req, res) => {
+    const analytics = getTeacherAnalytics();
+    res.json(analytics);
+  });
+
+  router.get('/teacher/students', (req, res) => {
+    const students = getStudents();
+    res.json(students);
+  });
+
+  router.post('/teacher/students', (req, res) => {
+    const { name, session_prefix } = req.body;
+    if (!name) return res.status(400).json({ error: 'Student name is required' });
+    const student = addStudent({ name, session_prefix });
+    res.status(201).json(student);
+  });
+
+  router.delete('/teacher/students/:id', (req, res) => {
+    deleteStudent(req.params.id);
+    res.json({ deleted: true });
   });
 
   return router;

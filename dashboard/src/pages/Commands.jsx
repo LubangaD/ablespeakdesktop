@@ -31,39 +31,48 @@ export default function Commands() {
 
   return (
     <div className="commands-page">
-      {/* Header */}
-      <div className="commands-header">
-        <div>
-          <h2>Command History</h2>
-          <p className="commands-subtitle">
-            {commands.length > 0
-              ? `${commands.length} commands executed`
-              : 'Commands executed through AbleSpeak will appear here'}
-          </p>
+      {/* Sticky header + filters */}
+      <div className="commands-sticky-bar">
+        <div className="commands-header">
+          <div>
+            <h2>Command History</h2>
+            <p className="commands-subtitle">
+              {commands.length > 0
+                ? `${commands.length} commands executed`
+                : 'Commands executed through AbleSpeak will appear here'}
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Category pills */}
-      <div className="commands-filters">
-        {types.map(t => (
-          <button
-            key={t}
-            className={`tools-cat-pill${(t === 'All' && !filter) || filter === t ? ' active' : ''}`}
-            onClick={() => setFilter(t === 'All' ? null : t)}
-          >
-            {t === 'All' ? 'All' : t.replace(/_/g, ' ')}
-          </button>
-        ))}
+        {/* Category pills */}
+        <div className="commands-filters">
+          {types.map(t => (
+            <button
+              key={t}
+              className={`tools-cat-pill${(t === 'All' && !filter) || filter === t ? ' active' : ''}`}
+              onClick={() => setFilter(t === 'All' ? null : t)}
+            >
+              {t === 'All' ? 'All' : t.replace(/_/g, ' ')}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Command list */}
       <div className="commands-list">
         {commands.length === 0 && (
           <div className="commands-empty">
-            <Terminal size={48} />
+            <div className="commands-empty-badge">
+              <Terminal size={36} />
+            </div>
             <h3>No commands yet</h3>
-            <p>Use the Chat tab to give voice commands to AbleSpeak.<br/>
-            Try saying: "Open YouTube" or "Play Finale by Bien"</p>
+            <p>Everything you do with your voice will show up here, newest first.</p>
+            <div className="commands-empty-hint">Try saying:</div>
+            <div className="commands-empty-examples">
+              <span className="commands-empty-chip"><Mic size={13} /> “Open YouTube”</span>
+              <span className="commands-empty-chip"><Mic size={13} /> “Play Finale by Bien”</span>
+              <span className="commands-empty-chip"><Mic size={13} /> “Scroll down”</span>
+            </div>
           </div>
         )}
         {commands.map((cmd) => (

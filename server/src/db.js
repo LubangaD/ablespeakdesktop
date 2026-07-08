@@ -75,6 +75,16 @@ function migrate() {
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_log_level ON log_events(level)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_health_comp ON health_checks(component)`); } catch {}
+
+  // ── Teacher Dashboard: Students table ──
+  db.run(`CREATE TABLE IF NOT EXISTS students (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    session_prefix TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_commands_session ON commands(session_id)`); } catch {}
+
   saveToFile();
 }
 
@@ -159,4 +169,103 @@ export function getLatestHealthChecks() {
 
 export function getHealthAlerts() {
   return query(`SELECT h.* FROM health_checks h INNER JOIN (SELECT component, MAX(id) as max_id FROM health_checks GROUP BY component) latest ON h.id=latest.max_id WHERE h.status IN ('warn','error') ORDER BY h.checked_at DESC`);
+}
+
+// ── Teacher Dashboard ──
+
+export function getStudents() {
+  return query('SELECT * FROM students ORDER BY name ASC');
+}
+
+export function addStudent({ name, session_prefix }) {
+  run('INSERT INTO students (name, session_prefix) VALUES (?, ?)', [name, session_prefix || null]);
+  return queryOne('SELECT * FROM students WHERE id = last_insert_rowid()');
+}
+
+export function deleteStudent(id) {
+  run('DELETE FROM students WHERE id = ?', [id]);
+}
+
+export function getTeacherAnalytics() {
+  const students = getStudents();
+
+  // Per-student stats: join students to commands via session_prefix
+  const perStudent = students.map(s => {
+    const prefix = s.session_prefix || s.name;
+    const total = queryOne(
+      `SELECT COUNT(*) as count FROM commands WHERE session_id LIKE ?`,
+      [`${prefix}%`]
+    );
+    const successCount = queryOne(
+      `SELECT COUNT(*) as count FROM commands WHERE session_id LIKE ? AND (result NOT LIKE '%error%' AND result NOT LIKE '%Error%')`,
+      [`${prefix}%`]
+    );
+    const avgLat = queryOne(
+      `SELECT ROUND(AVG(latency_ms), 0) as avg_ms FROM commands WHERE session_id LIKE ? AND latency_ms IS NOT NULL`,
+      [`${prefix}%`]
+    );
+    const topCmd = queryOne(
+      `SELECT type, COUNT(*) as count FROM commands WHERE session_id LIKE ? GROUP BY type ORDER BY count DESC LIMIT 1`,
+      [`${prefix}%`]
+    );
+    const lastActive = queryOne(
+      `SELECT created_at FROM commands WHERE session_id LIKE ? ORDER BY created_at DESC LIMIT 1`,
+      [`${prefix}%`]
+    );
+
+    const totalCount = total?.count || 0;
+    const succCount = successCount?.count || 0;
+
+    return {
+      id: s.id,
+      name: s.name,
+      session_prefix: s.session_prefix,
+      commands: totalCount,
+      successRate: totalCount > 0 ? Math.round((succCount / totalCount) * 100) : 0,
+      avgLatency: avgLat?.avg_ms || 0,
+      topCommand: topCmd?.type || '—',
+      lastActive: lastActive?.created_at || '—',
+    };
+  });
+
+  // Class-wide summary
+  const totalCommands = queryOne('SELECT COUNT(*) as count FROM commands');
+  const todayCommands = queryOne(`SELECT COUNT(*) as count FROM commands WHERE date(created_at)=date('now','localtime')`);
+  const classAvgLatency = queryOne(`SELECT ROUND(AVG(latency_ms), 0) as avg_ms FROM commands WHERE latency_ms IS NOT NULL`);
+  const classSuccessTotal = queryOne(`SELECT COUNT(*) as count FROM commands`);
+  const classSuccessOk = queryOne(`SELECT COUNT(*) as count FROM commands WHERE result NOT LIKE '%error%' AND result NOT LIKE '%Error%'`);
+
+  // Daily trend (last 7 days)
+  const dailyTrend = query(`
+    SELECT date(created_at) as day, COUNT(*) as count
+    FROM commands
+    WHERE created_at >= datetime('now', '-7 days', 'localtime')
+    GROUP BY date(created_at)
+    ORDER BY day ASC
+  `);
+
+  // Command type breakdown (all time)
+  const commandBreakdown = query(`
+    SELECT type, COUNT(*) as count
+    FROM commands
+    GROUP BY type
+    ORDER BY count DESC
+    LIMIT 10
+  `);
+
+  const totalCount = classSuccessTotal?.count || 0;
+  const okCount = classSuccessOk?.count || 0;
+
+  return {
+    summary: {
+      totalStudents: students.length,
+      totalCommands: totalCommands?.count || 0,
+      todayCommands: todayCommands?.count || 0,
+      avgLatency: classAvgLatency?.avg_ms || 0,
+      successRate: totalCount > 0 ? Math.round((okCount / totalCount) * 100) : 0,
+    },
+    students: perStudent,
+    dailyTrend,
+    commandBreakdown,
+  };
 }

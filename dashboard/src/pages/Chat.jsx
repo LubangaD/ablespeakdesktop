@@ -300,10 +300,25 @@ export default function Chat() {
     if (lastMessage.type === 'chat_assistant_message') {
       setProcessing(false);
       setVoiceState('idle');
+      // Empty text should still tell the user what happened
+      let displayText = lastMessage.text;
+      if (!displayText?.trim()) {
+        const calls = lastMessage.toolCalls || [];
+        const failed = calls.filter(tc => tc.result?.status === 'error');
+        if (failed.length > 0) {
+          displayText = `⚠ ${failed[0].result?.message || failed[0].result?.error || 'Action failed'}`;
+        } else if (calls.length > 0) {
+          // Show the tool's actual outcome (e.g. "Spotify is now playing: ...")
+          const lastMsg = [...calls].reverse().find(tc => tc.result?.message)?.result?.message;
+          displayText = lastMsg ? `✓ ${lastMsg}` : '✓ Done';
+        } else {
+          displayText = '(no action taken)';
+        }
+      }
       setMessages(prev => [...prev, {
         id: lastMessage.id || Date.now(),
         role: 'assistant',
-        text: lastMessage.text,
+        text: displayText,
         error: lastMessage.error,
         provider: lastMessage.provider,
         model: lastMessage.model,
@@ -313,8 +328,10 @@ export default function Chat() {
         time: new Date()
       }]);
 
-      // TTS: Speak assistant responses aloud for accessibility (Fix #8)
-      if (lastMessage.text && !lastMessage.error) {
+      // TTS: Only speak responses from typed chat commands.
+      // Voice command responses are spoken by the overlay (SAPI).
+      // Speaking both causes conflicting male + female voices.
+      if (lastMessage.text && !lastMessage.error && lastMessage.source !== 'voice') {
         speak(lastMessage.text);
       }
     }
@@ -428,11 +445,11 @@ export default function Chat() {
             ref={inputRef}
             type="text"
             className="as-chat-input"
-            placeholder="Type a message..."
+            placeholder="Voice is primary — use Ctrl+Shift+A or click mic"
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            aria-label="Type a message"
+            aria-label="Type a message (voice input is primary — use the microphone button or Ctrl+Shift+A)"
           />
           <button
             type="submit"
@@ -470,9 +487,14 @@ function ChatBubble({ message }) {
         )}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="as-bubble-tools">
-            {message.toolCalls.map((tc, i) => (
-              <span key={i} className="as-tool-tag">🔧 {tc.tool}</span>
-            ))}
+            {message.toolCalls.map((tc, i) => {
+              const isError = tc.result?.status === 'error' || tc.result?.error;
+              return (
+                <span key={i} className="as-tool-tag" title={isError ? (tc.result?.message || tc.result?.error) : 'succeeded'}>
+                  {isError ? '⚠' : '🔧'} {tc.tool || tc.name}{isError ? ' failed' : ''}
+                </span>
+              );
+            })}
           </div>
         )}
         {(message.latency || message.provider) && (

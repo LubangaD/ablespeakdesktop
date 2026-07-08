@@ -1,0 +1,19 @@
+{
+  "_comment": "Sample dataset. Copy to dataset.json, put screenshots in ./images/, and replace these with real cases (use annotator.html to author them). 'box' is [x, y, width, height] in the image's own pixel space, top-left origin.",
+  "cases": [
+    {
+      "id": "wiki-link-web",
+      "image": "images/google-results.png",
+      "instruction": "click the Wikipedia link",
+      "category": "web",
+      "box": [180, 420, 360, 28]
+    },
+    {
+      "id": "spotify-play-desktop",
+      "image": "images/spotify.png",
+      "instruction": "click the play button",
+      "category": "desktop",
+      "box": [612, 690, 56, 56]
+    }
+  ]
+}

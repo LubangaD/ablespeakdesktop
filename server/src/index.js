@@ -1,5 +1,13 @@
 import 'dotenv/config';
 import express from 'express';
+
+// Keep the server alive on unhandled errors — log them, never exit.
+process.on('uncaughtException', (err) => {
+  console.error('[CRASH] Uncaught exception (server kept alive):', err?.message, err?.stack);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[CRASH] Unhandled rejection (server kept alive):', reason?.message ?? reason);
+});
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -23,7 +31,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ── Configuration ──
 const PORT = parseInt(process.env.GATEWAY_PORT || '3001');
 const VOQAL_HOME = process.env.VOQAL_HOME || join(process.env.USERPROFILE || process.env.HOME || '', '.voqal');
-const DB_PATH = process.env.DB_PATH || join(__dirname, '..', 'data', 'ablespeak.db');
+// In packaged Electron, __dirname is inside the read-only asar archive.
+// Use the app's userData directory for writable files like the database.
+const isPackaged = typeof process.resourcesPath === 'string' && !process.resourcesPath.includes('node_modules');
+const DB_PATH = process.env.DB_PATH || (isPackaged
+  ? join(process.env.APPDATA || join(process.env.USERPROFILE || '', 'AppData', 'Roaming'), 'AbleSpeak', 'data', 'ablespeak.db')
+  : join(__dirname, '..', 'data', 'ablespeak.db'));
 
 console.log('╔══════════════════════════════════════╗');
 console.log('║     AbleSpeak AI Agent v2.0.0        ║');
@@ -36,7 +49,7 @@ console.log(`  Port:        ${PORT}`);
 console.log('');
 
 // ── Initialize Database ──
-initDatabase(DB_PATH);
+await initDatabase(DB_PATH);
 console.log('[DB] SQLite initialized');
 
 // ── Express App ──
@@ -118,6 +131,17 @@ app.get('/api/ai/status', (req, res) => res.json(aiEngine.getStatus()));
 
 // GET /api/ai/providers — all available providers
 app.get('/api/ai/providers', (req, res) => res.json(aiEngine.getAvailableProviders()));
+
+// GET /api/ai/models?provider=gemini&refresh=1 — LIVE model list from the provider's API
+app.get('/api/ai/models', async (req, res) => {
+  try {
+    const provider = req.query.provider || aiEngine.provider;
+    const models = await aiEngine.listModels(provider, req.query.refresh === '1');
+    res.json({ provider, models });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/ai/switch — switch provider
 app.post('/api/ai/switch', (req, res) => {
@@ -211,8 +235,39 @@ app.post('/api/voice/transcribe', async (req, res) => {
   }
 });
 
+// ── Serve Overlay HTML (works in any browser, no Electron required) ──
+const overlayHtml = join(__dirname, '..', 'overlay.html');
+if (existsSync(overlayHtml)) {
+  app.get('/overlay', (req, res) => res.sendFile(overlayHtml));
+}
+
+// POST /api/overlay/reload — Reload the Electron overlay BrowserWindow from disk.
+// Server and Electron main share the same process, so BrowserWindow is available here.
+app.post('/api/overlay/reload', async (_req, res) => {
+  try {
+    const electron = await import('electron').catch(() => null);
+    if (!electron?.BrowserWindow) {
+      return res.status(503).json({ error: 'Not running in Electron — no BrowserWindow available' });
+    }
+    const wins = electron.BrowserWindow.getAllWindows();
+    const overlay = wins.find(w => !w.isDestroyed() && w.webContents.getURL().includes('overlay.html'));
+    if (overlay) {
+      overlay.webContents.reload();
+      res.json({ ok: true, msg: 'Overlay reloaded — fixed overlay.html loaded from disk' });
+    } else {
+      res.status(404).json({ error: 'Overlay window not found', totalWindows: wins.length });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Serve Dashboard SPA ──
-const dashboardDist = join(__dirname, '..', '..', 'dashboard', 'dist');
+// In dev: ../dashboard/dist relative to src/
+// In packaged app: process.resourcesPath/dashboard/dist (via extraResources)
+const dashboardDistDev = join(__dirname, '..', '..', 'dashboard', 'dist');
+const dashboardDistPkg = process.resourcesPath ? join(process.resourcesPath, 'dashboard', 'dist') : null;
+const dashboardDist = (dashboardDistPkg && existsSync(dashboardDistPkg)) ? dashboardDistPkg : dashboardDistDev;
 if (existsSync(dashboardDist)) {
   app.use(express.static(dashboardDist));
   app.get('*', (req, res) => {
@@ -244,6 +299,28 @@ server.listen(PORT, () => {
   console.log(`   WS Ext:    ws://localhost:${PORT}/ws/extension`);
   console.log(`   WS Dash:   ws://localhost:${PORT}/ws/dashboard`);
   console.log('');
+
+  // Pre-start the PowerShell worker (UI Automation assemblies take seconds
+  // to load — do it now, not during the user's first voice command)
+  import('./system-tools.js').then(m => m.warmupSystemTools()).catch(() => {});
+
+  // Validate the configured model against the provider's LIVE model list.
+  // If it was retired (e.g. gemini-2.0-flash), auto-pick a replacement.
+  if (aiEngine.getStatus().configured) {
+    aiEngine.autoSelectModel()
+      .then(m => { if (m) console.log(`[AIEngine] Model verified: ${aiEngine.provider}/${m}`); })
+      .catch(err => console.warn('[AIEngine] Model validation skipped:', err.message));
+
+    // ── TLS Warmup (borrowed from Clicky) ──
+    // Pre-establish TLS connection to the LLM API so the first voice command
+    // doesn't pay 1-3s for a cold TLS handshake.
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
+      fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, { method: 'GET' })
+        .then(() => console.log('[TLS] Gemini API connection warmed up'))
+        .catch(() => {}); // Ignore — this is purely an optimization
+    }
+  }
 
   // Check API keys
   const status = aiEngine.getStatus();
