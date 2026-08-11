@@ -198,7 +198,10 @@ export function evaluateRules(goal, points, todayIso) {
       if (aimSlope !== 0) {
         const slopeDiff = Math.abs(trend.slope - aimSlope);
         const threshold = 0.25 * Math.abs(aimSlope);
-        // "Wrong direction" means trend is literally heading opposite to what the goal requires
+        // "Wrong direction" means trend is literally heading opposite to what the goal requires.
+        // A flat trend (slope === 0) is NOT wrong direction and does NOT fire trend_divergence.
+        // Stagnation against a non-zero aim is intentionally handled by 4_below_aim and
+        // insufficient_data, which give more specific, actionable guidance to the teacher.
         const isWrongDirection =
           (aimSlope > 0 && trend.slope < 0) ||
           (aimSlope < 0 && trend.slope > 0);
