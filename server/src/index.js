@@ -25,6 +25,7 @@ import { WsProxy } from './ws-proxy.js';
 import { LogTailer } from './log-tailer.js';
 import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
+import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -332,4 +333,11 @@ server.listen(PORT, () => {
     console.log('   GROQ_API_KEY=...');
     console.log('');
   }
+
+  // Progress probe scheduler: computes daily KPI values for active goals
+  // (boot: yesterday + today, then hourly recompute) — recovered from eric branch.
+  startProbeScheduler();
+  console.log('[ProbeScheduler] Started — daily probes + hourly recompute active');
+  process.once('SIGTERM', () => stopProbeScheduler());
+  process.once('SIGINT', () => stopProbeScheduler());
 });

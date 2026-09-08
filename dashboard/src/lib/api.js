@@ -46,4 +46,32 @@ export const api = {
     body: JSON.stringify({ name, session_prefix }),
   }),
   deleteStudent: (id) => fetchApi(`/teacher/students/${id}`, { method: 'DELETE' }),
+
+  // ── Teacher Dashboard: Progress Monitoring (Tier 2 KPI engine) ──
+  getBaselineSuggestion: (studentId, measure) =>
+    fetchApi(`/students/${studentId}/baseline-suggestion?measure=${encodeURIComponent(measure)}`),
+  createGoal: (studentId, body) => fetchApi(`/students/${studentId}/goals`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+  getGoals: (studentId, status = 'active') =>
+    fetchApi(`/students/${studentId}/goals?status=${encodeURIComponent(status)}`),
+  patchGoal: (goalId, body) => fetchApi(`/goals/${goalId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  }),
+  getPoints: (goalId) => fetchApi(`/goals/${goalId}/points`),
+  addPoint: (goalId, body) => fetchApi(`/goals/${goalId}/points`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+  getPhases: (goalId) => fetchApi(`/goals/${goalId}/phases`),
+  addPhase: (goalId, body) => fetchApi(`/goals/${goalId}/phases`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+  getFlags: (goalId, unacknowledgedOnly = false) =>
+    fetchApi(`/goals/${goalId}/flags${unacknowledgedOnly ? '?unacknowledged=1' : ''}`),
+  acknowledgeFlag: (flagId) => fetchApi(`/flags/${flagId}/ack`, { method: 'POST' }),
+  recomputeProgress: () => fetchApi('/progress/recompute', { method: 'POST' }),
 };

@@ -588,6 +588,102 @@ function GoalActions({ goalId, status, queryClient, onDeselect }) {
   );
 }
 
+// ── Class Analytics Summary: success rate, commands, latency ──
+// Uses the existing, already-working GET /api/teacher/analytics endpoint
+// (server/src/db.js getTeacherAnalytics()) — this data has always been
+// computed correctly, it just was never rendered anywhere in the dashboard.
+const thStyle = { textAlign: 'left', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 };
+const tdStyle = { padding: '10px 14px', color: 'var(--text-primary)' };
+
+function SummaryCard({ label, value, accent }) {
+  return (
+    <div className="card" style={{ padding: '14px 16px' }}>
+      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: accent ? 'var(--accent)' : 'var(--text-primary)' }}>{value}</div>
+    </div>
+  );
+}
+
+function AnalyticsSummary() {
+  const { data: analytics, isLoading, error } = useQuery({
+    queryKey: ['teacherAnalytics'],
+    queryFn: api.getTeacherAnalytics,
+    staleTime: 15000,
+    refetchInterval: 30000,
+  });
+
+  if (isLoading) {
+    return <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading class analytics…</p>;
+  }
+  if (error) {
+    return <p style={{ fontSize: 13, color: 'var(--danger, #ef4444)' }}>Could not load class analytics: {error.message}</p>;
+  }
+
+  const { summary, students } = analytics;
+
+  return (
+    <section aria-label="Class success rate summary" style={{ marginBottom: 32 }}>
+      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>
+        SUCCESS RATE — ALL STUDENTS
+      </h3>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
+        <SummaryCard label="Success Rate" value={`${summary.successRate}%`} accent />
+        <SummaryCard label="Total Commands" value={summary.totalCommands} />
+        <SummaryCard label="Today" value={summary.todayCommands} />
+        <SummaryCard label="Avg Latency" value={`${summary.avgLatency}ms`} />
+        <SummaryCard label="Students" value={summary.totalStudents} />
+      </div>
+
+      {students.length === 0 ? (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          No students added yet — add one from the Settings page to start tracking success rate.
+        </p>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <caption className="sr-only" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
+              Per-student success rate, command count, average latency, most-used command, and last active time
+            </caption>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={thStyle} scope="col">Student</th>
+                <th style={thStyle} scope="col">Success Rate</th>
+                <th style={thStyle} scope="col">Commands</th>
+                <th style={thStyle} scope="col">Avg Latency</th>
+                <th style={thStyle} scope="col">Top Command</th>
+                <th style={thStyle} scope="col">Last Active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map(s => (
+                <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={tdStyle}>{s.name}</td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      fontWeight: 600,
+                      color: s.commands === 0 ? 'var(--text-muted)'
+                        : s.successRate >= 80 ? 'var(--success, #22c55e)'
+                        : s.successRate >= 50 ? 'var(--warning, #eab308)'
+                        : 'var(--danger, #ef4444)',
+                    }}>
+                      {s.commands === 0 ? '—' : `${s.successRate}%`}
+                    </span>
+                  </td>
+                  <td style={tdStyle}>{s.commands}</td>
+                  <td style={tdStyle}>{s.avgLatency ? `${s.avgLatency}ms` : '—'}</td>
+                  <td style={tdStyle}>{s.topCommand}</td>
+                  <td style={tdStyle}>{s.lastActive}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Usage Context Strip (secondary) ──
 function UsageStrip({ studentId }) {
   const { data: stats } = useQuery({
@@ -677,6 +773,8 @@ export default function Teacher() {
         <p>Tier 2 — goal-referenced progress monitoring for individual students</p>
       </header>
 
+      <AnalyticsSummary />
+
       {/* Student selector */}
       <section aria-label="Student selection" style={{ marginBottom: 24 }}>
         <label htmlFor="teacher-student-select" style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>
@@ -691,7 +789,7 @@ export default function Teacher() {
         >
           <option value="">— select a student —</option>
           {students.map(s => (
-            <option key={s.id} value={s.id}>{s.display_name}</option>
+            <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
         {studentsLoading && <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>Loading students…</p>}
