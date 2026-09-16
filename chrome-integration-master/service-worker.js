@@ -281,13 +281,35 @@ function connect() {
     const gatewayUrl = 'ws://localhost:3001/ws/extension';
     const directUrl = 'ws://localhost:22171/integration/chrome';
 
-    chrome.storage.local.get(['wsUrl', 'wsToken'], (data) => {
+    chrome.storage.local.get(['wsUrl', 'wsToken'], async (data) => {
         let url = data.wsUrl || gatewayUrl;
-        // Append the pairing token if the user configured one. The server also
-        // origin-locks and loopback-locks, so this is extra defense on shared
-        // machines and a no-op when no token is set.
-        if (data.wsToken) {
-            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(data.wsToken);
+        let token = data.wsToken;
+
+        // EXT-2: the gateway now requires a token by default (auto-generated on
+        // first run — no manual pairing step). Bootstrap it once from the same
+        // host the WS connection is going to, then cache it. This fetch is
+        // itself loopback-only on the server side, matching the trust model the
+        // rest of the local control plane already relies on.
+        if (!token) {
+            try {
+                const tokenUrl = url.replace(/^ws/, 'http').replace(/\/ws\/extension.*$/, '/api/ws-token');
+                const res = await fetch(tokenUrl);
+                if (res.ok) {
+                    const body = await res.json();
+                    if (body.token) {
+                        token = body.token;
+                        chrome.storage.local.set({ wsToken: token });
+                    }
+                }
+            } catch (err) {
+                // Gateway may not be up yet — connect() gets retried by the
+                // reconnect loop below, which will fetch the token again then.
+                console.warn('Could not fetch WS token yet:', err.message);
+            }
+        }
+
+        if (token) {
+            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
         }
         _doConnect(url, directUrl);
     });

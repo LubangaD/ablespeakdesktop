@@ -31,7 +31,13 @@ function AppRoutes() {
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${protocol}://${window.location.host}/ws/dashboard`;
+    // Same token the useWebSocket hook reads (EXT-2) — this is a separate,
+    // independent connection (voice navigation + settings sync), not routed
+    // through that hook, so it needs its own copy of the same logic.
+    const token = window.__ABLESPEAK_WS_TOKEN__ ||
+      document.querySelector('meta[name="ablespeak-ws-token"]')?.content || '';
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    const wsUrl = `${protocol}://${window.location.host}/ws/dashboard${qs}`;
 
     function connect() {
       const ws = new WebSocket(wsUrl);

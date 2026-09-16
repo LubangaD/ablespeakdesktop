@@ -16,7 +16,7 @@ import { isAffirmative } from './safety.js';
  */
 
 export class WsProxy {
-  constructor({ server, aiEngine, dashboardPath = '/ws/dashboard', extensionPath = '/ws/extension' }) {
+  constructor({ server, aiEngine, dashboardPath = '/ws/dashboard', extensionPath = '/ws/extension', wsToken }) {
     this.aiEngine = aiEngine;
     this.voiceHandler = new VoiceHandler();
     this.extensionClients = new Set();
@@ -55,11 +55,14 @@ export class WsProxy {
     this.dashboardWss = new WebSocketServer({ noServer: true });
     this.dashboardWss.on('connection', (ws) => this._handleDashboardConnect(ws));
 
-    // Optional shared secret. When set (recommended on shared machines),
-    // clients must connect with ?token=<value>. Origin-lock + loopback apply
-    // regardless, so the control plane is never open to the network or to
-    // arbitrary websites even without a token.
-    this._wsToken = process.env.ABLESPEAK_WS_TOKEN || null;
+    // Shared secret clients must connect with (?token=<value>). Origin-lock +
+    // loopback apply regardless, so the control plane is never open to the
+    // network or to arbitrary websites even without a token — but without one,
+    // ANY other local process could open this WS and drive the extension/system
+    // tools with zero authentication. index.js resolves (or auto-generates and
+    // persists) a token by default now, so this is only ever null if a caller
+    // explicitly opts out (EXT-2).
+    this._wsToken = wsToken !== undefined ? wsToken : (process.env.ABLESPEAK_WS_TOKEN || null);
 
     // Handle HTTP upgrade — AUTHENTICATE before accepting the socket.
     server.on('upgrade', (request, socket, head) => {

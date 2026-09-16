@@ -477,11 +477,35 @@ if (!window.electronAPI) {
 
   let ws = null;
   let wsConnected = false;
+  // EXT-2: the gateway requires a token by default now. The overlay is the
+  // student's ONLY interface — it must never be the thing a token
+  // requirement quietly breaks. Bootstrap-fetch it once (same pattern as the
+  // Chrome extension) and cache across reloads; loopback-only server-side.
+  let cachedWsToken = localStorage.getItem('ablespeak_ws_token') || '';
 
-  function connectWS() {
+  async function connectWS() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
-    ws = new WebSocket('ws://localhost:3001/ws/dashboard');
+    if (!cachedWsToken) {
+      try {
+        const res = await fetch('http://localhost:3001/api/ws-token');
+        if (res.ok) {
+          const body = await res.json();
+          if (body.token) {
+            cachedWsToken = body.token;
+            localStorage.setItem('ablespeak_ws_token', cachedWsToken);
+          }
+        }
+      } catch (err) {
+        // Gateway may not be up yet — the 2s reconnect loop below tries again.
+        console.warn('[Overlay] Could not fetch WS token yet:', err.message);
+      }
+      // Another call may have connected while we were awaiting the fetch.
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    }
+
+    const tokenQS = cachedWsToken ? ('?token=' + encodeURIComponent(cachedWsToken)) : '';
+    ws = new WebSocket('ws://localhost:3001/ws/dashboard' + tokenQS);
 
     ws.onopen = () => {
       wsConnected = true;

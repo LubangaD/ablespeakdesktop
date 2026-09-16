@@ -14,7 +14,8 @@ import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { randomBytes } from 'crypto';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 
@@ -70,8 +71,36 @@ console.log(`[Tools] ${toolRegistry.listTools().length} tools registered`);
 // AIEngine needs wsHub, but wsHub needs aiEngine — use lazy init
 const aiEngine = new AIEngine({ toolRegistry, wsHub: null });
 
+// ── WS shared-secret token (EXT-2) ──
+// ABLESPEAK_WS_TOKEN used to be unset out of the box, so ANY other local
+// process could open the extension/dashboard WebSocket and drive the browser
+// or system tools with zero authentication — the loopback+origin lock only
+// stops remote/web attackers, not a second process on the same machine.
+// Auto-generate one on first run and persist it next to the database so it
+// survives restarts (the extension caches whatever it's given — a token that
+// changed every launch would break the connection, not secure it).
+const WS_TOKEN_PATH = join(VOQAL_HOME, 'ws-token.txt');
+function resolveWsToken() {
+  if (process.env.ABLESPEAK_WS_TOKEN) return process.env.ABLESPEAK_WS_TOKEN;
+  try {
+    const existing = existsSync(WS_TOKEN_PATH) ? readFileSync(WS_TOKEN_PATH, 'utf8').trim() : '';
+    if (existing) return existing;
+  } catch (err) {
+    console.warn('[WsHub] Could not read persisted WS token:', err.message);
+  }
+  const generated = randomBytes(24).toString('hex');
+  try {
+    mkdirSync(VOQAL_HOME, { recursive: true });
+    writeFileSync(WS_TOKEN_PATH, generated);
+  } catch (err) {
+    console.error('[WsHub] Could not persist WS token — it will change on next restart:', err.message);
+  }
+  return generated;
+}
+const wsToken = resolveWsToken();
+
 // ── WebSocket Hub (standalone — no Voqal) ──
-const wsProxy = new WsProxy({ server, aiEngine });
+const wsProxy = new WsProxy({ server, aiEngine, wsToken });
 aiEngine.wsHub = wsProxy; // Back-reference
 console.log('[WsHub] Initialized (standalone mode)');
 
@@ -124,6 +153,21 @@ logTailer.start().then(() => console.log('[LogTailer] Started'));
 
 // ── API Routes ──
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
+
+// GET /api/ws-token — lets the Chrome extension bootstrap the WS token (EXT-2)
+// with no manual pairing step. This hands out the shared secret that gates the
+// WS control plane, so it must never be reachable over the network — server.listen()
+// below binds all interfaces, unlike the WS upgrade handler's own loopback
+// check, so that same check is enforced here explicitly rather than relying
+// on cors()/helmet() (which don't restrict by IP) or on SEC-2's broader /api
+// auth work landing first.
+app.get('/api/ws-token', (req, res) => {
+  const ra = (req.socket.remoteAddress || '').replace('::ffff:', '');
+  if (ra !== '127.0.0.1' && ra !== '::1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json({ token: wsProxy._wsToken });
+});
 
 // ── Additional AI-specific API routes ──
 
@@ -270,10 +314,28 @@ const dashboardDistDev = join(__dirname, '..', '..', 'dashboard', 'dist');
 const dashboardDistPkg = process.resourcesPath ? join(process.resourcesPath, 'dashboard', 'dist') : null;
 const dashboardDist = (dashboardDistPkg && existsSync(dashboardDistPkg)) ? dashboardDistPkg : dashboardDistDev;
 if (existsSync(dashboardDist)) {
+  // Serve index.html with the WS token injected as a meta tag (EXT-2).
+  // useWebSocket.js already reads <meta name="ablespeak-ws-token"> — that
+  // plumbing pre-dates this change but nothing ever set it, so the dashboard
+  // connected with no token, same gap the overlay and extension had. Must
+  // run BEFORE express.static, which would otherwise serve the raw file for
+  // "/" itself; static still handles the JS/CSS assets that file references.
+  const indexHtmlPath = join(dashboardDist, 'index.html');
+  const serveIndexWithToken = (req, res) => {
+    try {
+      const escapedToken = String(wsProxy._wsToken || '').replace(/"/g, '&quot;');
+      const html = readFileSync(indexHtmlPath, 'utf8')
+        .replace('</head>', `<meta name="ablespeak-ws-token" content="${escapedToken}"></head>`);
+      res.type('html').send(html);
+    } catch (err) {
+      res.status(500).send('Failed to load dashboard: ' + err.message);
+    }
+  };
+  app.get('/', serveIndexWithToken);
   app.use(express.static(dashboardDist));
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
-      res.sendFile(join(dashboardDist, 'index.html'));
+      serveIndexWithToken(req, res);
     }
   });
   console.log('[Static] Serving dashboard from', dashboardDist);
