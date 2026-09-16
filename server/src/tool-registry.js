@@ -1036,7 +1036,7 @@ export class ToolRegistry {
     // "yes") bypasses the gate. This is the single chokepoint for BOTH the
     // fast path and the AI tool-calling loop.
     if (!opts.confirmed) {
-      const consequence = classifyConsequential(name, args);
+      const consequence = classifyConsequential(name, this._resolveGateArgs(name, args, wsHub));
       if (consequence) {
         if (wsHub) {
           wsHub._pendingConfirmation = { tool: name, args, prompt: consequence.prompt, id: consequence.id };
@@ -1058,6 +1058,20 @@ export class ToolRegistry {
       console.error(`[ToolRegistry] Error executing ${name}:`, err.message);
       return { status: 'error', error: err.message };
     }
+  }
+
+  /**
+   * click_element is often called with only an xpath (no label) — the AI reads
+   * it straight off the viewport-elements list. Resolve the element's visible
+   * text the same way click_element's own execute() resolves label → xpath, but
+   * in reverse, so the safety gate can see what's actually about to be clicked
+   * instead of gating on the tool name alone (CVA-1).
+   */
+  _resolveGateArgs(name, args, wsHub) {
+    if (name !== 'click_element' || args?.label || !args?.xpath || !wsHub) return args;
+    const elements = wsHub.browserContext?.pageContext?.viewportElements || [];
+    const match = elements.find(el => el.xpath === args.xpath);
+    return match?.label ? { ...args, resolvedLabel: match.label } : args;
   }
 
   /**

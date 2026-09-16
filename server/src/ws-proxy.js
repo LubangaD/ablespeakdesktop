@@ -631,16 +631,16 @@ export class WsProxy {
             const navCmd = this._matchDictationCommand(tLower);
             if (navCmd) {
               console.log(`[Voice] ✏️ Dictation command: ${navCmd}`);
+              let cmdError = null;
               try {
                 const { executeDictationCommand } = await import('./system-tools.js');
-                await executeDictationCommand(navCmd);
+                const cmdResult = await executeDictationCommand(navCmd);
+                if (cmdResult?.status === 'error') cmdError = cmdResult.message || 'Command failed';
               } catch (err) {
                 console.error('[Voice] Dictation command error:', err.message);
+                cmdError = err.message;
               }
-              this._broadcastDashboard({
-                type: 'dictation_typed', text: `[${navCmd.replace(/_/g, ' ')}]`,
-                timestamp: new Date().toISOString(),
-              });
+              this._broadcastDictationTyped(`[${navCmd.replace(/_/g, ' ')}]`, cmdError);
               return;
             }
 
@@ -649,18 +649,11 @@ export class WsProxy {
             if (!typedText.trim()) return;
 
             console.log(`[Voice] ✏️ Dictating: "${typedText}"`);
-            try {
-              const { dictateText } = await import('./system-tools.js');
-              await dictateText(typedText);
-            } catch (err) {
-              console.error('[Voice] Dictation type error:', err.message);
-            }
+            const dictateError = await this._dictateAndReport(typedText);
 
-            // Broadcast to overlay so it shows the typed text
-            this._broadcastDashboard({
-              type: 'dictation_typed', text: typedText,
-              timestamp: new Date().toISOString(),
-            });
+            // Broadcast to overlay so it shows the typed text — and speaks it
+            // if it silently failed to type (CVA-3).
+            this._broadcastDictationTyped(typedText, dictateError);
             return;
           }
 
@@ -718,16 +711,8 @@ export class WsProxy {
                 const typedText = this._processDictationText(fastMatch.args.initialText);
                 if (typedText.trim()) {
                   console.log(`[Voice] ✏️ Initial dictation: "${typedText}"`);
-                  try {
-                    const { dictateText } = await import('./system-tools.js');
-                    await dictateText(typedText);
-                  } catch (err) {
-                    console.error('[Voice] Dictation type error:', err.message);
-                  }
-                  this._broadcastDashboard({
-                    type: 'dictation_typed', text: typedText,
-                    timestamp: new Date().toISOString(),
-                  });
+                  const dictateError = await this._dictateAndReport(typedText);
+                  this._broadcastDictationTyped(typedText, dictateError);
                 }
               }
               return;
@@ -934,11 +919,11 @@ export class WsProxy {
   sendToolToExtension(type, payload) {
     return new Promise((resolve, reject) => {
       if (this.extensionClients.size === 0) {
-        // No extension — execute what we can locally
-        if (type === 'create_tab' || type === 'navigate_to') {
-          resolve({ status: 'success', message: `Would open: ${payload.url}`, simulated: true });
-          return;
-        }
+        // No extension connected — every browser tool must fail loudly here.
+        // create_tab/navigate_to used to resolve as {status:'success', simulated:true}
+        // with nothing having actually happened; simulated was read nowhere else,
+        // and both are in SILENT_COMMANDS, so the student got silence and the
+        // browser never opened (CVA-4).
         reject(new Error('No Chrome extension connected. Please install and enable the AbleSpeak extension.'));
         return;
       }
@@ -1332,6 +1317,38 @@ export class WsProxy {
     }
 
     return text;
+  }
+
+  /**
+   * Type dictated text via system-tools and report failure instead of
+   * swallowing it. dictateText()/executeDictationCommand() can either throw
+   * (e.g. a PowerShell/COM error) or resolve with {status:'error', ...} — both
+   * must be treated as failure. Returns an error message string, or null on
+   * success (CVA-3: a dictation failure must never be silent — the student is
+   * mid-sentence and has no way to proofread a word that never got typed).
+   */
+  async _dictateAndReport(typedText) {
+    try {
+      const { dictateText } = await import('./system-tools.js');
+      const result = await dictateText(typedText);
+      if (result?.status === 'error') return result.message || 'Typing failed';
+      return null;
+    } catch (err) {
+      console.error('[Voice] Dictation type error:', err.message);
+      return err.message;
+    }
+  }
+
+  /** Broadcast what got typed — and audibly if it silently failed (CVA-3). */
+  _broadcastDictationTyped(text, error) {
+    this._broadcastDashboard(error ? {
+      type: 'dictation_typed', text,
+      error: true, message: `That didn't type: ${error}`,
+      timestamp: new Date().toISOString(),
+    } : {
+      type: 'dictation_typed', text,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // ── Public API ──

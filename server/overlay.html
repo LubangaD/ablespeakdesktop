@@ -1173,10 +1173,18 @@ if (!window.electronAPI) {
       return;
     }
 
-    // Dictation text was typed — show brief feedback, restart mic immediately
+    // Dictation text was typed — show brief feedback, restart mic immediately.
+    // A typing failure must be audible, not just logged server-side — the
+    // student is mid-sentence and has no way to proofread a word that never
+    // actually got typed (CVA-3).
     if (data.type === 'dictation_typed') {
-      setTranscript('✏️ ' + (data.text || '').trim().slice(0, 60), 'listening-label');
       clearWatchdog();
+      if (data.error) {
+        setTranscript('⚠️ ' + (data.message || "That didn't type"), 'error');
+        speak(data.message || "That didn't type. Please try again."); // 'done' event re-opens the mic
+        return;
+      }
+      setTranscript('✏️ ' + (data.text || '').trim().slice(0, 60), 'listening-label');
       // state may still be 'processing' — must reset before startListening() or it bails
       setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
       return;

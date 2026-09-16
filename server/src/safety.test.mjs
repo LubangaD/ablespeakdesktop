@@ -44,6 +44,72 @@ test('reversible / benign actions are NOT gated', () => {
   assert.equal(classifyConsequential(null), null);
 });
 
+// ── CVA-1: element-targeting tools gated by what they actually click, not just
+// the tool name (a voice-driven click is the product's core interaction, and
+// its tool name is always click_element/select_option/click_desktop_element —
+// never "delete") ────────────────────────────────────────────────────────────
+
+test('click_element on a "Delete account" label is consequential', () => {
+  const r = classifyConsequential('click_element', { label: 'Delete account' });
+  assert.ok(r, 'should be flagged');
+  assert.equal(r.id, 'delete');
+});
+
+test('click_element on a "Submit" label is consequential', () => {
+  assert.equal(classifyConsequential('click_element', { label: 'Submit' }).id, 'send');
+});
+
+test('click_element resolved from xpath-only (resolvedLabel) is gated the same way', () => {
+  // tool-registry.js resolves xpath → resolvedLabel before the gate sees it,
+  // since the AI often calls click_element with only an xpath and no label.
+  const r = classifyConsequential('click_element', { xpath: '//button[3]', resolvedLabel: 'Remove item' });
+  assert.ok(r);
+  assert.equal(r.id, 'delete');
+});
+
+test('click_desktop_element on a "Delete" name is consequential', () => {
+  assert.equal(classifyConsequential('click_desktop_element', { name: 'Delete', app_name: 'Explorer' }).id, 'delete');
+});
+
+test('select_option on a "Purchase" label is consequential', () => {
+  assert.equal(classifyConsequential('select_option', { label: 'Purchase' }).id, 'send');
+});
+
+test('reversible clicks (nav links, toggles, unresolved xpath) are NOT falsely gated', () => {
+  assert.equal(classifyConsequential('click_element', { label: 'Home' }), null);
+  assert.equal(classifyConsequential('click_element', { label: 'Next' }), null);
+  assert.equal(classifyConsequential('click_element', { label: 'Dark mode' }), null);
+  assert.equal(classifyConsequential('click_element', { xpath: '//button[3]' }), null); // no label resolved
+  assert.equal(classifyConsequential('click_desktop_element', { x: 100, y: 200 }), null); // coordinate click, no name
+});
+
+test('a label merely containing a flagged word as a substring is not falsely gated', () => {
+  // "Sending" and "Senders" must not match the whole-word "send" rule.
+  assert.equal(classifyConsequential('click_element', { label: 'Sending preferences' }), null);
+  assert.equal(classifyConsequential('click_element', { label: 'Manage senders' }), null);
+});
+
+test('execute_javascript calling .submit() is consequential, even with no flagged wording', () => {
+  const r = classifyConsequential('execute_javascript', { code: 'document.forms[0].submit();' });
+  assert.ok(r);
+  assert.equal(r.id, 'send');
+});
+
+test('execute_javascript clicking a delete-labeled element is consequential', () => {
+  const code = `document.querySelector('[aria-label="Delete post"]').click();`;
+  assert.equal(classifyConsequential('execute_javascript', { code }).id, 'delete');
+});
+
+test('execute_javascript with an ordinary, unflagged .click() is NOT gated', () => {
+  const code = `document.querySelector('#next-page').click();`;
+  assert.equal(classifyConsequential('execute_javascript', { code }), null);
+});
+
+test('execute_javascript that only reads the page (no click/submit) is NOT gated', () => {
+  const code = `return document.body.innerText.includes('delete');`;
+  assert.equal(classifyConsequential('execute_javascript', { code }), null);
+});
+
 // ── isAffirmative ─────────────────────────────────────────────────────────
 
 test('affirmatives confirm, everything else cancels', () => {

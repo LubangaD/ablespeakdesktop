@@ -20,6 +20,43 @@ function toolTokens(tool) {
   return new Set(String(tool || '').toLowerCase().split(/[_\s-]+/).filter(Boolean));
 }
 
+const DELETE_WORDS = ['delete', 'remove', 'trash', 'destroy'];
+const SEND_WORDS = ['send', 'submit', 'post', 'publish', 'email', 'share', 'purchase', 'buy', 'pay', 'order'];
+
+// Tools whose real target is a labeled element, not the tool name itself — a
+// misheard "click delete" must be gated the same way close_application already
+// is (CVA-1). click_element may be called with only an xpath; tool-registry.js
+// resolves that to args.resolvedLabel before the gate sees it.
+const ELEMENT_TARGET_TOOLS = new Set(['click_element', 'click_desktop_element', 'select_option']);
+
+/** Best available human-readable text for what an element-targeting tool is about to act on. */
+function targetLabel(args) {
+  return String(args?.resolvedLabel || args?.label || args?.name || args?.text || '').toLowerCase();
+}
+
+/** True if the tool's target label is entirely made of / contains one of `words` as a whole word. */
+function labelMatches(tool, args, words) {
+  if (!ELEMENT_TARGET_TOOLS.has(tool)) return false;
+  const label = targetLabel(args);
+  if (!label) return false;
+  const tokens = label.split(/[^a-z0-9]+/).filter(Boolean);
+  return words.some(w => tokens.includes(w));
+}
+
+/** True if execute_javascript's code calls .submit() — form submission IS the "send" action. */
+function jsSubmitCall(tool, args) {
+  if (tool !== 'execute_javascript') return false;
+  return /\.submit\s*\(/.test(String(args?.code || '').toLowerCase());
+}
+
+/** True if execute_javascript's code clicks something AND mentions one of `words` (CVA-1). */
+function jsClickMatches(tool, args, words) {
+  if (tool !== 'execute_javascript') return false;
+  const code = String(args?.code || '').toLowerCase();
+  if (!code || !/\.click\s*\(/.test(code)) return false;
+  return words.some(w => code.includes(w));
+}
+
 const CONSEQUENTIAL_RULES = [
   {
     id: 'close-app',
@@ -34,18 +71,25 @@ const CONSEQUENTIAL_RULES = [
     id: 'delete',
     test: (tool, args) => {
       const tk = toolTokens(tool);
-      if (['delete', 'remove', 'trash', 'destroy'].some(w => tk.has(w))) return true;
+      if (DELETE_WORDS.some(w => tk.has(w))) return true;
       const keys = String(args?.keys || args?.key || '').toLowerCase().replace(/\s+/g, '');
-      return tool === 'send_system_keys' && keys.includes('shift+del');
+      if (tool === 'send_system_keys' && keys.includes('shift+del')) return true;
+      if (labelMatches(tool, args, DELETE_WORDS)) return true;
+      if (jsClickMatches(tool, args, DELETE_WORDS)) return true;
+      return false;
     },
     prompt: 'Delete this? This may not be reversible. Say "yes" to confirm, or anything else to cancel.',
   },
   {
     id: 'send',
-    test: (tool) => {
+    test: (tool, args) => {
       if (tool === 'send_system_keys' || tool === 'send_keys' || tool === 'press_key_combination') return false;
       const tk = toolTokens(tool);
-      return ['send', 'submit', 'post', 'publish', 'email', 'share', 'purchase', 'buy', 'pay', 'order'].some(w => tk.has(w));
+      if (SEND_WORDS.some(w => tk.has(w))) return true;
+      if (labelMatches(tool, args, SEND_WORDS)) return true;
+      if (jsSubmitCall(tool, args)) return true;
+      if (jsClickMatches(tool, args, SEND_WORDS)) return true;
+      return false;
     },
     prompt: 'Send this? It will go out and cannot be unsent. Say "yes" to confirm, or anything else to cancel.',
   },

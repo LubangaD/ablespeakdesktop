@@ -18,9 +18,25 @@ const execAsync = promisify(exec);
  * Prevents command injection via voice input.
  * Allows only alphanumeric, spaces, hyphens, underscores, and dots.
  */
-function sanitizeForPS(input) {
+export function sanitizeForPS(input) {
   if (typeof input !== 'string') return '';
   return input.replace(/[^a-zA-Z0-9\s\-_\.]/g, '').trim().slice(0, 200);
+}
+
+/**
+ * Escape free-form text for safe embedding inside a PowerShell *double-quoted*
+ * string (used when the literal text — punctuation, unicode, etc. — must
+ * survive, unlike sanitizeForPS()'s alnum-only whitelist).
+ *
+ * Order matters: backtick is PowerShell's escape character, so it MUST be
+ * escaped first. Escaping it after quote/dollar would double-escape the
+ * backticks those steps just inserted; skipping it entirely (as one caller
+ * used to) lets a literal backtick in the input neutralize the very next
+ * escape sequence and break out of the string (CVA-2) — e.g. input `` `" ``
+ * becomes an escaped backtick followed by a bare, string-terminating quote.
+ */
+export function escapeForPSString(text) {
+  return String(text ?? '').replace(/`/g, '``').replace(/"/g, '`"').replace(/\$/g, '`$');
 }
 
 /**
@@ -553,7 +569,13 @@ export async function sendKeys(keys) {
     } else if (keyMap[part]) {
       regularKeys.push(keyMap[part]);
     } else {
-      regularKeys.push(part);
+      // Unrecognized token — e.g. a misheard word the AI passed through as a
+      // literal key. Route through the same whitelist used everywhere else in
+      // this file rather than embedding it verbatim: it sits inside a
+      // PowerShell double-quoted SendKeys(...) string, and an unescaped
+      // backtick/quote/dollar here is a command-injection path (CVA-2).
+      const safe = sanitizeForPS(part);
+      if (safe) regularKeys.push(safe);
     }
   }
 
@@ -607,7 +629,7 @@ Write-Output "OK"
 // ── Type Text into Active App ──
 
 export async function typeTextSystem(text) {
-  const escaped = text.replace(/"/g, '`"').replace(/\$/g, '`$');
+  const escaped = escapeForPSString(text);
 
   // Clipboard-paste is far more reliable than SendKeys in apps like Word:
   // it handles special characters, respects autocorrect, and doesn't drop
@@ -675,7 +697,7 @@ export function clearDictationTarget() {
  *   3. Clipboard paste — universal fallback for Notepad, browsers, etc.
  */
 export async function dictateText(text) {
-  const escaped = text.replace(/`/g, '``').replace(/"/g, '`"').replace(/\$/g, '`$');
+  const escaped = escapeForPSString(text);
 
   // ── Path 1: Microsoft Word (COM) ──
   // GetActiveObject finds the already-open Word instance without stealing focus.
