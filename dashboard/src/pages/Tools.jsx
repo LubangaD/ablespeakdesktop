@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { Wrench, ChevronRight, Search, Filter } from 'lucide-react';
 
 export default function Tools() {
-  const { data: library } = useQuery({ queryKey: ['library'], queryFn: api.getLibrary, staleTime: 30000 });
+  const { data: catalog, isLoading, isError } = useQuery({ queryKey: ['tools'], queryFn: api.getTools, staleTime: 30000 });
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedTool, setSelectedTool] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const categories = library?.categories || [];
+  const categories = catalog?.categories || [];
 
   // Flatten all tools with their category info
   const allTools = [];
@@ -109,7 +109,12 @@ export default function Tools() {
               </div>
             ))}
             {displayedTools.length === 0 && (
-              <div className="tools-empty">No tools match your filter</div>
+              <div className="tools-empty">
+                {isLoading ? 'Loading tools…'
+                  : isError ? "Couldn't load the tools. Check the AbleSpeak server is running, then reload."
+                  : allTools.length === 0 ? 'No tools are registered.'
+                  : 'No tools match your filter'}
+              </div>
             )}
           </div>
         </div>
@@ -126,6 +131,9 @@ export default function Tools() {
                 <div>
                   <h3 className="tools-detail-name">{activeTool.name}</h3>
                   <span className="tools-detail-cat">{activeTool.category}</span>
+                  <span className="tools-detail-runs">
+                    {activeTool.needsExtension ? 'Needs the Chrome extension' : 'Works without the Chrome extension'}
+                  </span>
                 </div>
               </div>
 

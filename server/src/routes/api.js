@@ -10,8 +10,9 @@ import {
 } from '../db.js';
 import { computeProbeValue, computeProbesForDate, evaluateAndFlag } from '../probe-computer.js';
 import { MEASURE_REGISTRY } from '../progress-rules.js';
+import { buildToolCatalog } from '../tool-catalog.js';
 
-export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath }) {
+export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath, aiEngine }) {
   const router = Router();
 
   // ── Health ──
@@ -52,6 +53,13 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     const { limit = 20 } = req.query;
     const sessions = getSessions({ limit: parseInt(limit) });
     res.json(sessions);
+  });
+
+  // ── Tools ──
+  // What the AI can actually call, read from the live registry and grouped
+  // for the dashboard's Tools page.
+  router.get('/tools', (req, res) => {
+    res.json(buildToolCatalog(aiEngine.toolRegistry.listTools()));
   });
 
   // ── Library ──

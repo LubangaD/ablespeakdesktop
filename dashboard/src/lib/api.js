@@ -18,6 +18,7 @@ export const api = {
   },
   getCommandStats: () => fetchApi('/commands/stats'),
   getSessions: () => fetchApi('/sessions'),
+  getTools: () => fetchApi('/tools'),
   getLibrary: () => fetchApi('/library'),
   getToolDetail: (cat, tool) => fetchApi(`/library/${cat}/${tool}`),
   getContext: () => fetchApi('/context'),
