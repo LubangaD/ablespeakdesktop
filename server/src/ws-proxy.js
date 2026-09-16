@@ -26,10 +26,22 @@ export class WsProxy {
     this.lastContextUpdate = null;
     this.browserContext = { tabs: [], activeTab: null };
     this.extensionBrowserName = null; // Set by extension's browser_identify message
+    // Session identity for command attribution (TCH-1). Every insertCommand()
+    // call is tagged with this so getTeacherAnalytics()'s `session_id LIKE
+    // '<student.session_prefix>%'` join can ever match — before this, every
+    // call site omitted session_id, it was always NULL, and NULL LIKE 'x%' is
+    // never true in SQLite, so 0 commands attributed to any student regardless
+    // of real usage. Real per-student identity/on-device select is TCH-3;
+    // until then, an operator can set a student's session_prefix to this ID
+    // (logged below, and returned from getStatus()) to attribute this device's
+    // commands to them.
+    this._sessionId = `session-${uuidv4()}`;
+    console.log(`[WsHub] Session ID: ${this._sessionId} — set a student's session_prefix to (a prefix of) this to attribute this device's commands to them`);
     this._lastTTSText = '';    // Last text spoken by TTS — for echo detection
     this._lastTTSTime = 0;     // When the last TTS was spoken
     this._voiceProcessing = false; // Mutex: prevents concurrent voice command processing
     this._sleeping = false; // Sleep mode: ignore commands until a wake phrase (Gap 5)
+    this._dismissed = false; // Overlay voice-hidden: ignore commands until a wake phrase (HFI-1)
     this._dictationMode = false; // Dictation mode: type speech directly, no AI
     this._pendingConfirmation = null; // { tool, args, prompt } awaiting a spoken yes/no
     this._actionHistory = [];   // recent executed actions, for "undo that" / "no, I meant X"
@@ -219,6 +231,7 @@ export class WsProxy {
       extensionCount: this.extensionClients.size,
       activePrompt: this.activePrompt,
       aiEngine: this.aiEngine?.getStatus() || {},
+      sessionId: this._sessionId, // TCH-1 — set a student's session_prefix to this to attribute commands
       timestamp: new Date().toISOString()
     }));
 
@@ -264,6 +277,7 @@ export class WsProxy {
               payload: JSON.stringify({ text: msg.text }),
               result: JSON.stringify(result),
               latency_ms: result.latency || 0,
+              session_id: this._sessionId,
             });
           } catch (err) {
             console.error('[WsHub] DB insert error:', err.message);
@@ -341,7 +355,8 @@ export class WsProxy {
               try {
                 insertCommand({ id: commandId, type: 'voice_fast', direction: 'user_to_ai',
                   payload: JSON.stringify({ text, fastTool: fastMatch.tool }),
-                  result: JSON.stringify(toolResult), latency_ms: latency });
+                  result: JSON.stringify(toolResult), latency_ms: latency,
+                  session_id: this._sessionId });
               } catch (err) { console.error('[WsHub] DB insert error:', err.message); }
 
               // A failure must NEVER be silent — the student has to know it failed.
@@ -416,7 +431,8 @@ export class WsProxy {
             try {
               insertCommand({ id: commandId, type: 'voice', direction: 'user_to_ai',
                 payload: JSON.stringify({ text, source: 'speech_api' }),
-                result: JSON.stringify(result), latency_ms: result.latency || 0 });
+                result: JSON.stringify(result), latency_ms: result.latency || 0,
+                session_id: this._sessionId });
             } catch (err) { console.error('[WsHub] DB insert error:', err.message); }
 
             this._broadcastDashboard({
@@ -726,6 +742,7 @@ export class WsProxy {
                 payload: JSON.stringify({ text, fastTool: fastMatch.tool }),
                 result: JSON.stringify(toolResult),
                 latency_ms: latency,
+                session_id: this._sessionId,
               });
             } catch (err) {
               console.error('[WsHub] DB insert error:', err.message);
@@ -814,6 +831,7 @@ export class WsProxy {
               payload: JSON.stringify({ text, source: 'microphone' }),
               result: JSON.stringify(result),
               latency_ms: result.latency || 0,
+              session_id: this._sessionId,
             });
           } catch (err) {
             console.error('[WsHub] DB insert error:', err.message);
@@ -1283,6 +1301,7 @@ export class WsProxy {
       pendingCommands: this.pendingToolCalls.size,
       lastContextUpdate: this.lastContextUpdate ? new Date().toISOString() : null,
       aiEngine: this.aiEngine?.getStatus() || {},
+      sessionId: this._sessionId, // TCH-1 — set a student's session_prefix to this to attribute commands
     };
   }
 
