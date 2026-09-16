@@ -249,7 +249,7 @@ export function matchFastCommand(text) {
   if (selectMatch) {
     const label = selectMatch[1].trim();
     // Don't match if it's "select all" (that's Ctrl+A) or app focus patterns
-    if (label && label !== 'all' && !/^(dashboard|home|chat|voice|tools|context|commands|history|logs|settings|preferences|options|prompt)$/.test(label) && !/\b(tab|window|app|field)\b/i.test(label)) {
+    if (label && label !== 'all' && !/^(dashboard|home|chat|voice|tools|context|logs|settings|preferences|options|prompt)$/.test(label) && !/\b(tab|window|app|field)\b/i.test(label)) {
       return { tool: 'select_option', args: { label }, silent: true };
     }
   }
@@ -287,7 +287,6 @@ export function matchFastCommand(text) {
     chat: 'chat', voice: 'chat',
     tools: 'tools',
     context: 'context',
-    commands: 'commands', history: 'commands',
     logs: 'logs',
     settings: 'settings', preferences: 'settings', options: 'settings',
     prompt: 'prompt', 'prompt editor': 'prompt',

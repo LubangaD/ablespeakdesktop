@@ -1,8 +1,7 @@
-import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import { useEffect, useRef } from 'react';
-import { LayoutDashboard, MessageCircle, History, Wrench, GitBranch, ScrollText, Settings, FileText, Mic, Sun, GraduationCap } from 'lucide-react';
+import { LayoutDashboard, MessageCircle, Wrench, GitBranch, ScrollText, Settings, FileText, Mic, Sun, GraduationCap } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
-import Commands from './pages/Commands';
 import Tools from './pages/Tools';
 import Context from './pages/Context';
 import Logs from './pages/Logs';
@@ -17,7 +16,6 @@ const navItems = [
   { path: '/chat', label: 'Chat', icon: MessageCircle, ariaLabel: 'Navigate to Voice Chat' },
   { path: '/tools', label: 'Tools', icon: Wrench, ariaLabel: 'Navigate to Tools' },
   { path: '/context', label: 'Context', icon: GitBranch, ariaLabel: 'Navigate to Context' },
-  { path: '/commands', label: 'Commands', icon: History, ariaLabel: 'Navigate to Commands' },
   { path: '/teacher', label: 'Teacher', icon: GraduationCap, ariaLabel: 'Navigate to Teacher Analytics' },
   { path: '/logs', label: 'Logs', icon: ScrollText, ariaLabel: 'Navigate to Logs' },
   { path: '/settings', label: 'Settings', icon: Settings, ariaLabel: 'Navigate to Settings' },
@@ -78,12 +76,13 @@ function AppRoutes() {
       <Route path="/" element={<Dashboard />} />
       <Route path="/prompt" element={<Prompt />} />
       <Route path="/chat" element={<Chat />} />
-      <Route path="/commands" element={<Commands />} />
       <Route path="/teacher" element={<Teacher />} />
       <Route path="/tools" element={<Tools />} />
       <Route path="/context" element={<Context />} />
       <Route path="/logs" element={<Logs />} />
       <Route path="/settings" element={<SettingsPage />} />
+      {/* Unknown or retired addresses (such as the removed /commands page) go to the Dashboard */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

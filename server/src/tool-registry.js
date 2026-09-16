@@ -864,13 +864,13 @@ const TOOLS = [
   // ── AbleSpeak Dashboard Control (Accessibility — voice-navigable UI) ──
   {
     name: 'navigate_dashboard',
-    description: 'Navigate the AbleSpeak dashboard to a specific page. Use when the user says "go to settings", "open chat", "show tools", "show logs", "show commands", "go to context", "show dashboard", or "open prompt editor".',
+    description: 'Navigate the AbleSpeak dashboard to a specific page. Use when the user says "go to settings", "open chat", "show tools", "show logs", "go to context", "show dashboard", or "open prompt editor".',
     parameters: {
       type: 'object',
       properties: {
         page: {
           type: 'string',
-          enum: ['dashboard', 'chat', 'tools', 'context', 'commands', 'logs', 'settings', 'prompt'],
+          enum: ['dashboard', 'chat', 'tools', 'context', 'logs', 'settings', 'prompt'],
           description: 'The dashboard page to navigate to.',
         },
       },
@@ -883,7 +883,6 @@ const TOOLS = [
         chat: '/chat',
         tools: '/tools',
         context: '/context',
-        commands: '/commands',
         logs: '/logs',
         settings: '/settings',
         prompt: '/prompt',

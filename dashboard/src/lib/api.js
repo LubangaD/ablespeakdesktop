@@ -12,10 +12,6 @@ async function fetchApi(path, options = {}) {
 export const api = {
   getHealth: () => fetchApi('/health'),
   getStatus: () => fetchApi('/status'),
-  getCommands: (params = {}) => {
-    const q = new URLSearchParams(params).toString();
-    return fetchApi(`/commands${q ? '?' + q : ''}`);
-  },
   getCommandStats: () => fetchApi('/commands/stats'),
   getSessions: () => fetchApi('/sessions'),
   getTools: () => fetchApi('/tools'),
