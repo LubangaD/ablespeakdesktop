@@ -33,10 +33,6 @@
       {
         "from": "../dashboard/dist",
         "to": "dashboard/dist"
-      },
-      {
-        "from": ".env",
-        "to": ".env"
       }
     ],
     "asarUnpack": [

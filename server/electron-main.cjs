@@ -12,7 +12,7 @@
  * while the server code is ESM. We dynamically import() the server.
  */
 
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session, globalShortcut, ipcMain, screen, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { WakeDetector } = require('./overlay-wake.cjs');
@@ -174,13 +174,57 @@ app.on('second-instance', () => {
   }
 });
 
+// First-run template for a packaged install's OWN .env — never the developer's.
+// GEMINI_API_KEY is called out as required regardless of chat provider because
+// voice transcription always uses Gemini (see voice-handler.js).
+const ENV_TEMPLATE = `# AbleSpeak — API keys for this device (SEC-1: each install brings its own).
+#
+# GEMINI_API_KEY is REQUIRED no matter which provider you pick below — voice
+# transcription always uses Gemini. Get a free key: https://aistudio.google.com/apikey
+GEMINI_API_KEY=
+
+# Pick ONE chat provider. Only its matching key below is needed; Gemini needs
+# no second key, so leave LLM_PROVIDER=gemini for the simplest one-key setup.
+LLM_PROVIDER=gemini
+# OPENAI_API_KEY=
+# ANTHROPIC_API_KEY=
+# GROQ_API_KEY=
+
+# Restart AbleSpeak after editing this file for changes to take effect.
+`;
+
 // ── Boot Server ──
 async function startServer() {
-  // In packaged app: .env is in resources/ (extraResources), not inside the asar.
-  // In dev: .env is in the same directory as electron-main.cjs.
+  // In packaged app: .env lives in the user's own writable AppData directory —
+  // the same place the database already lives — NOT in resources/ (which used
+  // to be populated by copying the developer's real .env, with live API keys,
+  // into every distributed installer). In dev: .env is next to electron-main.cjs.
   const envPath = app.isPackaged
-    ? path.join(process.resourcesPath, '.env')
+    ? path.join(app.getPath('userData'), '.env')
     : path.join(__dirname, '.env');
+
+  // First launch of a packaged install with no keys yet — seed a template and
+  // tell the adult doing setup where to fill it in, rather than the app just
+  // silently having no voice.
+  if (app.isPackaged && !fs.existsSync(envPath)) {
+    try {
+      fs.mkdirSync(path.dirname(envPath), { recursive: true });
+      fs.writeFileSync(envPath, ENV_TEMPLATE);
+      console.warn(`[Electron] No API keys configured — created a template at: ${envPath}`);
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'AbleSpeak needs an API key',
+        message: 'AbleSpeak needs an API key before it can listen or speak.',
+        detail: `A template has been created at:\n${envPath}\n\nOpen it, add at least GEMINI_API_KEY, then restart AbleSpeak.`,
+        buttons: ['Open Folder', 'Later'],
+        defaultId: 0,
+      }).then(({ response }) => {
+        if (response === 0) shell.showItemInFolder(envPath);
+      }).catch(() => {});
+    } catch (err) {
+      console.error('[Electron] Could not create .env template:', err.message);
+    }
+  }
 
   // Load .env BEFORE importing the server (which uses dotenv/config)
   if (fs.existsSync(envPath)) {
