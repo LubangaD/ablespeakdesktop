@@ -123,6 +123,12 @@
     font-size: 12px;
   }
 
+  /* HFI-2: distinct from .error — nothing broke, the mic just didn't catch it */
+  .transcript-text.not-heard {
+    color: rgba(251, 191, 36, 0.9);
+    font-size: 12px;
+  }
+
   .transcript-text.listening-label {
     color: rgba(110, 231, 183, 0.9);
     font-size: 12px;
@@ -444,6 +450,17 @@ if (!window.electronAPI) {
     clearWatchdog();
   }
 
+  // HFI-2: distinct from plain idle — tells the student AbleSpeak noticed
+  // *something* but it wasn't loud enough to make out, instead of the total
+  // silence they'd otherwise get with no way to tell "not heard" from "nothing
+  // happened". Speaking it matters as much as showing it: the overlay is easy
+  // to not be looking at, and this is the one state where knowing matters most.
+  function setNotHeardUI() {
+    setIdleUI();
+    setTranscript("Didn't catch that — try again a little louder", 'not-heard');
+    speak("I didn't catch that. Try again a little louder."); // 'done' event re-opens the mic
+  }
+
   // ── Processing Watchdog ──
   // In command mode: wait 60s (page summaries take time) then just show a hint.
   // In dictation mode: 8s is more than enough (transcribe + COM type). If the
@@ -691,6 +708,11 @@ if (!window.electronAPI) {
 
       audioChunks = [];
       let hasSpeechDetected = false;
+      // Anything above SILENCE_THRESHOLD but below SPEECH_THRESHOLD — a real
+      // sound was made, just not loud enough to count as speech. Distinguishes
+      // "tried to speak but too quietly" from ordinary room silence, so the
+      // HFI-2 "not heard" cue below only fires when someone actually spoke.
+      let hasAnySound = false;
 
       // Record directly from the raw mic stream — matches the dashboard
       // Chat page's proven-working capture path. (An earlier attempt routed
@@ -770,6 +792,14 @@ if (!window.electronAPI) {
             connectWS();
             setTimeout(() => { if (active) startListening(); }, 800);
           }
+        } else if (hasAnySound) {
+          // Real sound was made but never crossed SPEECH_THRESHOLD — the concrete
+          // engineering surface of the product's #1 documented adoption risk:
+          // quiet/atypical speech being silently dropped with zero feedback
+          // (HFI-2). Gated on hasAnySound so ordinary room silence — no sound
+          // at all — still returns to plain idle instead of narrating itself
+          // every ~2 seconds.
+          setNotHeardUI();
         } else {
           setIdleUI();
           setTimeout(() => { if (active) startListening(); }, 300);
@@ -790,7 +820,7 @@ if (!window.electronAPI) {
         if (elapsed > MAX_RECORD_MS) { mediaRecorder.stop(); return; }
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
-        if (avg >= SPEECH_THRESHOLD) { hasSpeechDetected = true; silenceStart = null; }
+        if (avg >= SPEECH_THRESHOLD) { hasSpeechDetected = true; hasAnySound = true; silenceStart = null; }
         if (elapsed < MIN_RECORD_MS) { requestAnimationFrame(checkSilence); return; }
         if (avg < SILENCE_THRESHOLD) {
           if (!silenceStart) silenceStart = Date.now();
@@ -798,7 +828,10 @@ if (!window.electronAPI) {
           // Command mode: wait the full SILENCE_DURATION (1.5s) for deliberate pauses
           const silenceNeeded = hasSpeechDetected ? (dictationMode ? 900 : SILENCE_DURATION) : 2000;
           if (Date.now() - silenceStart > silenceNeeded) { mediaRecorder.stop(); return; }
-        } else { silenceStart = null; }
+        } else {
+          hasAnySound = true; // between SILENCE_THRESHOLD and SPEECH_THRESHOLD — quiet, not silent
+          silenceStart = null;
+        }
         requestAnimationFrame(checkSilence);
       }
       requestAnimationFrame(checkSilence);
