@@ -6,6 +6,10 @@ import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
 import { isAffirmative } from './safety.js';
 
+// Phrases that resume normal operation from sleep OR bring the overlay back
+// from a voice "dismiss" (HFI-1) — shared so the two recovery paths never drift.
+const WAKE_PHRASES_RE = /^(wake up|wake|i'?m back|ablespeak|hey ablespeak|listen|start listening|resume|come back|show yourself)$/;
+
 /**
  * AbleSpeak WebSocket Hub
  * 
@@ -241,6 +245,14 @@ export class WsProxy {
     ws.on('message', async (data) => {
       try {
         const msg = JSON.parse(data.toString());
+
+        // ── Overlay became visible again (wake phrase, shortcut, or tray) ──
+        // Clear the dismissed gate so a stale flag doesn't keep swallowing
+        // commands after the overlay is back on screen by some other path (HFI-1).
+        if (msg.type === 'overlay_shown') {
+          this._dismissed = false;
+          return;
+        }
 
         // ── Chat Command → AI Engine ──
         if (msg.type === 'chat_command' && msg.text) {
@@ -996,9 +1008,31 @@ export class WsProxy {
     const t = (rawText || '').trim().toLowerCase().replace(/[.!?,]+$/, '');
     if (!t) return false;
 
+    // ── While voice-dismissed: only a wake phrase restores the overlay; everything
+    // else is ignored. This is the ONLY way back for a student who cannot use the
+    // keyboard shortcut, tray icon, or an app relaunch (HFI-1). Checked before sleep
+    // so a dismissed-and-somehow-also-asleep overlay still responds to the same phrase.
+    if (this._dismissed) {
+      if (WAKE_PHRASES_RE.test(t)) {
+        this._dismissed = false;
+        this._sleeping = false;
+        console.log('[Voice] 👋 Restored overlay from dismiss');
+        this._broadcastDashboard({
+          type: 'voice_restored',
+          say: "I'm here.",
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        // Stay hidden, quietly — tell the overlay to keep listening, no error shown.
+        console.log(`[Voice] 🙈 Ignored while dismissed: "${t.slice(0, 40)}"`);
+        this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+      }
+      return true;
+    }
+
     // ── While asleep: only a wake phrase resumes; everything else is ignored. ──
     if (this._sleeping) {
-      if (/^(wake up|wake|i'?m back|ablespeak|hey ablespeak|listen|start listening|resume)$/.test(t)) {
+      if (WAKE_PHRASES_RE.test(t)) {
         this._sleeping = false;
         console.log('[Voice] 👋 Woke up');
         this._broadcastDashboard({
@@ -1033,6 +1067,20 @@ export class WsProxy {
       this._broadcastDashboard({
         type: 'voice_sleeping',
         say: 'Going to sleep. Say wake up when you need me.',
+        timestamp: new Date().toISOString(),
+      });
+      return true;
+    }
+
+    // ── Dismiss: hide the overlay, but the mic stays hot — say "AbleSpeak" or
+    // "come back" to bring it back. A student who cannot type or click must never
+    // lose voice control just because the overlay is out of sight (HFI-1). ──
+    if (/^(close|dismiss|hide|go away)$/.test(t)) {
+      this._dismissed = true;
+      console.log('[Voice] 🙈 Dismissed — say "AbleSpeak" or "come back" to bring it back');
+      this._broadcastDashboard({
+        type: 'voice_dismissed',
+        say: 'Okay. Say AbleSpeak, or come back, any time.',
         timestamp: new Date().toISOString(),
       });
       return true;

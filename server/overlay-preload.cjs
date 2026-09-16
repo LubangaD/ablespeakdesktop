@@ -78,6 +78,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('overlay-hide');
   },
 
+  // Show the overlay window again (voice-only recovery after "dismiss" — HFI-1)
+  showOverlay: () => {
+    ipcRenderer.send('overlay-show');
+  },
+
   // Show the main dashboard window
   showDashboard: () => {
     ipcRenderer.send('show-dashboard');

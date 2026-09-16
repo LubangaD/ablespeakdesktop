@@ -299,6 +299,7 @@ if (!window.electronAPI) {
     captureScreen: null,
     showDashboard: () => window.open('http://localhost:3001', '_blank'),
     hideOverlay: () => {},
+    showOverlay: () => {},
     onToggleListen: () => {},
     onShown: () => {},
     onStop: () => {},
@@ -916,7 +917,7 @@ if (!window.electronAPI) {
     toggleListening();
   });
 
-  // ── IPC: Overlay shown via shortcut — always start fresh ──
+  // ── IPC: Overlay shown via shortcut/tray/wake phrase — always start fresh ──
   if (window.electronAPI.onShown) {
     window.electronAPI.onShown(() => {
       // Reset any stale state from a previous session
@@ -927,6 +928,11 @@ if (!window.electronAPI) {
         consecutiveErrors = 0;
       }
       if (state !== 'listening') startListening();
+      // Tell the server we're visible — clears its "dismissed" gate even if
+      // shown via the shortcut/tray instead of the wake phrase (HFI-1).
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'overlay_shown' }));
+      }
     });
   }
 
@@ -1045,22 +1051,14 @@ if (!window.electronAPI) {
   }
 
   // ── Voice control routing ──
-  // "Dismiss" words hide the overlay (handled locally). Interrupt ("stop"/"cancel"),
-  // sleep, and wake are owned by the server (ws-proxy) so they never reach the LLM;
-  // the server replies with voice_cancelled / voice_sleeping / voice_awake, which we
-  // react to below. We keep DISMISS narrow to avoid colliding with those phrases.
-  const DISMISS_PHRASES = /^(close|dismiss|hide|go away)\.?$/i;
+  // Interrupt ("stop"/"cancel"), dismiss/restore, and sleep/wake are all owned by
+  // the server (ws-proxy) so they never reach the LLM and the mic never actually
+  // stops listening — a student with no keyboard/mouse must always have a voice
+  // path back. The server replies with voice_cancelled / voice_dismissed /
+  // voice_restored / voice_sleeping / voice_awake, which we react to below.
   const INTERRUPT_PHRASES = /^(stop|cancel|abort|shut up|be quiet|quiet)[\s.,!]?/i;
   const _origHandleWSMessage = handleWSMessage;
   handleWSMessage = function(data) {
-    // Local fast-path: hide overlay on dismiss words.
-    if (data.type === 'voice_transcription' && DISMISS_PHRASES.test((data.text || '').trim())) {
-      stopRecording();
-      setTranscript('', '');
-      window.electronAPI.hideOverlay();
-      return;
-    }
-
     // Local fast-path: stop TTS immediately on interrupt words (the server also
     // cancels server-side so the utterance never reaches the LLM).
     if (data.type === 'voice_transcription' && INTERRUPT_PHRASES.test((data.text || '').trim())) {
@@ -1081,6 +1079,28 @@ if (!window.electronAPI) {
       setTranscript('Stopped', '');
       clearWatchdog();
       setTimeout(() => { if (active && !ttsActive) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+
+    // Server dismissed us (voice "close"/"dismiss"/"hide"/"go away") — hide the
+    // overlay but keep the mic hot and listening. Say "AbleSpeak" or "come back"
+    // is the ONLY way back for a student with no keyboard or mouse (HFI-1).
+    if (data.type === 'voice_dismissed') {
+      stopRecording();
+      setTranscript('', '');
+      window.electronAPI.hideOverlay();
+      clearWatchdog();
+      if (data.say) speak(data.say); // 'done' event will re-open the mic
+      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      return;
+    }
+
+    // Server restored us from dismiss — show the overlay again.
+    if (data.type === 'voice_restored') {
+      window.electronAPI.showOverlay();
+      clearWatchdog();
+      if (data.say) speak(data.say);
+      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
       return;
     }
 

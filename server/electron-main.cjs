@@ -462,6 +462,32 @@ function createOverlay() {
   console.log('[Electron] Overlay window created');
 }
 
+// Re-position (display may have changed) and show the overlay, then tell it
+// to start listening. Shared by the shortcut toggle, the voice-restore path
+// (HFI-1), the auto-show-on-boot timer, and second-instance relaunch, so all
+// four ways the overlay can come back behave identically.
+function showOverlayWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenW, height: screenH } = primaryDisplay.workAreaSize;
+  const bounds = overlayWindow.getBounds();
+  const x = Math.round((screenW - bounds.width) / 2);
+  const y = screenH - bounds.height - 20;
+  overlayWindow.setPosition(x, y);
+
+  // showInactive: don't steal focus from the app the user is voice-controlling.
+  // Keystroke tools (send_system_keys, type) must land in THEIR app, not the overlay.
+  overlayWindow.showInactive();
+
+  // Pause wake detection while overlay is active
+  if (wakeDetector) wakeDetector.pause();
+
+  // Tell overlay to START listening (always start on show — never toggle,
+  // toggling inverts state if the overlay was hidden while still active)
+  overlayWindow.webContents.send('overlay-shown');
+}
+
 function toggleOverlay() {
   if (!overlayWindow) return;
 
@@ -471,24 +497,7 @@ function toggleOverlay() {
     overlayWindow.webContents.send('overlay-stop');
     overlayWindow.hide();
   } else {
-    // Re-position at bottom-center in case display changed
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width: screenW, height: screenH } = primaryDisplay.workAreaSize;
-    const bounds = overlayWindow.getBounds();
-    const x = Math.round((screenW - bounds.width) / 2);
-    const y = screenH - bounds.height - 20;
-    overlayWindow.setPosition(x, y);
-
-    // showInactive: don't steal focus from the app the user is voice-controlling.
-    // Keystroke tools (send_system_keys, type) must land in THEIR app, not the overlay.
-    overlayWindow.showInactive();
-
-    // Pause wake detection while overlay is active
-    if (wakeDetector) wakeDetector.pause();
-
-    // Tell overlay to START listening (always start on show — never toggle,
-    // toggling inverts state if the overlay was hidden while still active)
-    overlayWindow.webContents.send('overlay-shown');
+    showOverlayWindow();
   }
 }
 
@@ -687,6 +696,15 @@ function setupOverlayIPC() {
     }
   });
 
+  // Show overlay again — the voice-only recovery path after "dismiss" (HFI-1).
+  // The renderer keeps listening while hidden and calls this once it hears the
+  // wake phrase back from the server.
+  ipcMain.on('overlay-show', () => {
+    if (overlayWindow && !overlayWindow.isVisible()) {
+      showOverlayWindow();
+    }
+  });
+
   // Configure overlay settings (silence timeout, continuous mode, etc.)
   ipcMain.on('overlay-set-config', (event, config) => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -845,14 +863,7 @@ app.whenReady().then(async () => {
   // Ctrl+Shift+A still works as a manual toggle for dismiss/restore.
   setTimeout(() => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const { width: screenW, height: screenH } = primaryDisplay.workAreaSize;
-      const bounds = overlayWindow.getBounds();
-      const x = Math.round((screenW - bounds.width) / 2);
-      const y = screenH - bounds.height - 20;
-      overlayWindow.setPosition(x, y);
-      overlayWindow.showInactive();
-      overlayWindow.webContents.send('overlay-shown');
+      showOverlayWindow();
       console.log('[Electron] Overlay auto-shown — always-listening mode');
     }
   }, 3000); // Give the server + dashboard time to boot
