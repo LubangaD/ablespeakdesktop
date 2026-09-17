@@ -6,6 +6,13 @@ import { Button, Checkbox } from '../components/ui';
 
 const PROMPT_MODES = ['general', 'chrome', 'gmail', 'youtube', 'vscode'];
 
+// Named so they don't repeat the Developer hub's own Tools and Context tabs
+const DOC_TABS = [
+  { id: 'prompt', label: 'Instructions' },
+  { id: 'tools', label: 'Tool list' },
+  { id: 'context', label: 'Context keys' },
+];
+
 export default function Prompt({ embedded = false }) {
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: api.getConfig, refetchInterval: 10000 });
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 3000 });
@@ -165,7 +172,7 @@ You are a voice programming assistant for Visual Studio Code.
       {/* Top bar */}
       <div className="as-topbar">
         <div className="as-tabs" role="tablist" aria-label="What to show">
-          {['prompt', 'tools', 'context'].map(tab => (
+          {DOC_TABS.map(({ id: tab, label }) => (
             <button
               key={tab}
               type="button"
@@ -176,7 +183,7 @@ You are a voice programming assistant for Visual Studio Code.
               className={`as-tab ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {label}
             </button>
           ))}
         </div>

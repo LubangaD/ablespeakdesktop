@@ -590,7 +590,8 @@ function AnalyticsSummary() {
       <h3 id="class-summary-heading" className="section-title">Success rate, all students</h3>
 
       <div className="stat-grid">
-        <StatTile label="Success rate" value={`${summary.successRate}%`} tone="accent" />
+        <StatTile label="Success rate" value={summary.totalCommands ? `${summary.successRate}%` : '—'}
+          detail={summary.totalCommands ? null : 'No commands yet'} tone="accent" />
         <StatTile label="Total commands" value={summary.totalCommands} />
         <StatTile label="Today" value={summary.todayCommands} />
         <StatTile label="Average latency" value={`${summary.avgLatency} ms`} />
