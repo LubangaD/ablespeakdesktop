@@ -272,8 +272,8 @@ select.field-input option { background: var(--surface-1); color: var(--text-titl
   width: 12px;
   height: 7px;
   margin-top: -3px;
-  border-left: 3px solid #fff;
-  border-bottom: 3px solid #fff;
+  border-left: 3px solid var(--text-title);
+  border-bottom: 3px solid var(--text-title);
   transform: rotate(-45deg);
   opacity: 0;
 }
@@ -371,7 +371,7 @@ select.field-input option { background: var(--surface-1); color: var(--text-titl
   box-shadow: 0 0 0 3px var(--teal-glow);
 }
 .voice-processing { color: var(--warning); border-color: var(--warning); }
-.voice-processing .voice-state-icon { animation: voice-spin 2.4s linear infinite; }
+.voice-processing .voice-state-icon { animation: spin 2.4s linear infinite; }
 .voice-speaking { color: var(--accent); border-color: var(--accent); background: var(--accent-glow); }
 .voice-dictating { color: var(--warning); border-color: var(--warning); }
 .voice-sleeping,
@@ -401,6 +401,6 @@ select.field-input option { background: var(--surface-1); color: var(--text-titl
   0%, 100% { transform: scaleY(0.35); }
   50% { transform: scaleY(1); }
 }
-@keyframes voice-spin {
+@keyframes spin {
   to { transform: rotate(360deg); }
 }
