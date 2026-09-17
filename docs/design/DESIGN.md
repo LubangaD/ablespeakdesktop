@@ -273,6 +273,7 @@ Decisions made when applying this file to `dashboard/` and `server/overlay.html`
 - **Primary button font.** Buttons use Inter, as the `label-lg` style says. Space Grotesk is kept for headings, numbers and status badges.
 - **Smallest text.** Text is never smaller than 14px, except `status-badge` (13px, uppercase, at most two words).
 - **Processing label.** The voice state bar says "PROCESSING", not "TRANSCRIBING…". The same state also covers the time the AI spends acting on the command, so "transcribing" would be wrong for most of it.
+- **Selected chips.** Text on a selected (teal) chip is navy `#050D19`, not white. White on `#1D9E8A` is only 3.3:1, below WCAG AA for normal text; navy is 5.9:1.
 - **Dictation and sleep.** The overlay has two states this file does not list. Dictating uses Warning Gold with the label "DICTATING". Sleeping (mic on, waiting for "wake up") uses slate with the label "SLEEPING".
 
 ### Where each rule lives

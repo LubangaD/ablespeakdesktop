@@ -5,6 +5,7 @@ import App from './App';
 // Bundled so the app looks right with no internet connection (DESIGN.md)
 import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
+import './components/ui/ui.css';
 import './index.css';
 
 const queryClient = new QueryClient({
