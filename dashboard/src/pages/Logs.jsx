@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Pause, Play, ScrollText } from 'lucide-react';
 import { Button, Chip } from '../components/ui';
 
-export default function Logs() {
+export default function Logs({ embedded = false }) {
   const [level, setLevel] = useState(null);
   const [logs, setLogs] = useState([]);
   const [paused, setPaused] = useState(false);
@@ -42,10 +42,14 @@ export default function Logs() {
 
   return (
     <div>
-      <header className="page-header">
-        <h2><ScrollText size={28} aria-hidden="true" /> Logs</h2>
-        <p>What the AbleSpeak engine is doing, as it happens.</p>
-      </header>
+      {embedded ? (
+        <p className="hub-lead">What the AbleSpeak engine is doing, as it happens.</p>
+      ) : (
+        <header className="page-header">
+          <h2><ScrollText size={28} aria-hidden="true" /> Logs</h2>
+          <p>What the AbleSpeak engine is doing, as it happens.</p>
+        </header>
+      )}
 
       <div className="logs-toolbar">
         <div className="chip-row" role="group" aria-label="Filter by log level">

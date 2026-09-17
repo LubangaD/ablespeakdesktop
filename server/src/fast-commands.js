@@ -15,7 +15,10 @@ import { resolveAppName } from './app-names.js';
 // AbleSpeak dashboard pages a student can open by voice ("go to settings")
 const NAV_MAP = {
   dashboard: 'dashboard', home: 'dashboard',
-  chat: 'chat', voice: 'chat',
+  students: 'students', teacher: 'students', progress: 'students',
+  'speech profile': 'speech', 'speech settings': 'speech',
+  'test console': 'test', chat: 'chat', voice: 'chat',
+  'developer hub': 'developer', developer: 'developer',
   tools: 'tools',
   context: 'context',
   logs: 'logs',

@@ -2,8 +2,15 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Send, Info, TriangleAlert, Wrench, Bot, Timer, AudioLines, MessageCircle } from 'lucide-react';
+import { Mic, Send, Info, TriangleAlert, Wrench, Bot, Timer, AudioLines, MessageSquareText } from 'lucide-react';
 import { Button, TextField, VoiceStateBar } from '../components/ui';
+
+// Phrases the server handles directly (fast-commands.js and the voice
+// controls in ws-proxy.js), so each one does something real.
+const TRY_PHRASES = [
+  'scroll down', 'go back', 'open a new tab', 'start dictation', 'stop dictating',
+  'undo that', 'go to sleep', 'wake up', 'privacy mode',
+];
 
 const SHOWN_EVENTS = [
   'voice_transcription', 'voice_no_speech', 'voice_error', 'command_complete',
@@ -40,7 +47,7 @@ function eventNote(msg) {
   }
 }
 
-export default function Chat() {
+export default function TestConsole() {
   const { on, wsRef } = useWebSocket();
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 3000 });
   const [messages, setMessages] = useState([
@@ -418,20 +425,38 @@ export default function Chat() {
   const barDetail = voiceState === 'listening' ? 'Speak now. It stops when you pause.'
     : voiceState === 'processing' ? 'Turning your speech into text…'
     : processing ? 'AbleSpeak is working on it…'
-    : 'Press Ctrl + Shift + A, or use the microphone button.';
+    : 'Use the Speak button, or type a command below.';
 
   return (
-    <div className="as-chat-page">
+    <div className="as-chat-page workspace">
       <header className="chat-header">
-        <h2><MessageCircle size={28} aria-hidden="true" /> Chat</h2>
+        <div>
+          <h2><MessageSquareText size={28} aria-hidden="true" /> Test console</h2>
+          <p className="chat-subtitle">Try voice and typed commands exactly as a student would.</p>
+        </div>
         <VoiceStateBar state={barState} detail={barDetail} />
       </header>
 
-      {/* Chat container */}
-      <div className="as-chat-container" ref={feedRef} role="log" aria-label="Voice conversation" aria-live="polite">
-        {messages.map(msg => (
-          <ChatBubble key={msg.id} message={msg} />
-        ))}
+      <div className="console-body">
+        {/* Chat container */}
+        <div className="as-chat-container" ref={feedRef} role="log" aria-label="Voice conversation" aria-live="polite">
+          {messages.map(msg => (
+            <ChatBubble key={msg.id} message={msg} />
+          ))}
+        </div>
+
+        {/* Real phrases, sent as if the student said them */}
+        <aside className="try-panel" aria-labelledby="try-heading">
+          <h3 id="try-heading" className="try-title">Try a command</h3>
+          <div className="try-list">
+            {TRY_PHRASES.map(phrase => (
+              <Button key={phrase} variant="ghost" className="try-chip" onClick={() => sendCommand(phrase)}>
+                “{phrase}”
+              </Button>
+            ))}
+          </div>
+          <p className="muted-note">These are sent exactly as if the student said them.</p>
+        </aside>
       </div>
 
       {/* Bottom input bar — mic + text + send */}
@@ -454,7 +479,7 @@ export default function Chat() {
             id="chat-input"
             className="grow"
             inputRef={inputRef}
-            placeholder="Type a command, or speak with Ctrl + Shift + A"
+            placeholder="Type a command, or use the Speak button"
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onClear={() => setInputText('')}

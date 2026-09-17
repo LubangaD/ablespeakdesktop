@@ -2002,6 +2002,13 @@ export class WsProxy {
       lastContextUpdate: this.lastContextUpdate ? new Date().toISOString() : null,
       aiEngine: this.aiEngine?.getStatus() || {},
       sessionId: this._attribution().session_id,
+      // Voice control state, so the dashboard can show it without waiting for an event
+      voice: {
+        sleeping: !!this._sleeping,
+        dismissed: !!this._dismissed,
+        privacyMode: !!this._privacyMode,
+        dictationMode: !!this._dictationMode,
+      },
     };
   }
 

@@ -1,33 +1,36 @@
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, MessageCircle, Wrench, GitBranch, ScrollText, Settings, FileText, GraduationCap, Plug, Unplug } from 'lucide-react';
-import Dashboard from './pages/Dashboard';
-import Tools from './pages/Tools';
-import Context from './pages/Context';
-import Logs from './pages/Logs';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { House, Users, AudioLines, MessageSquareText, TerminalSquare, Settings, Plug, Unplug, UserRound, Moon, EyeOff, Mic } from 'lucide-react';
+import Home from './pages/Home';
+import Students from './pages/Students';
+import SpeechProfile from './pages/SpeechProfile';
+import TestConsole from './pages/TestConsole';
+import DeveloperHub from './pages/DeveloperHub';
 import SettingsPage from './pages/Settings';
-import Chat from './pages/Chat';
-import Prompt from './pages/Prompt';
-import Teacher from './pages/Teacher';
 import { StatusPill } from './components/ui';
+import { api } from './lib/api';
 
+// The dashboard's six sections (Stitch "AbleSpeak Redesign System")
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard, ariaLabel: 'Navigate to Dashboard' },
-  { path: '/prompt', label: 'Prompt', icon: FileText, ariaLabel: 'Navigate to Prompt Editor' },
-  { path: '/chat', label: 'Chat', icon: MessageCircle, ariaLabel: 'Navigate to Voice Chat' },
-  { path: '/tools', label: 'Tools', icon: Wrench, ariaLabel: 'Navigate to Tools' },
-  { path: '/context', label: 'Context', icon: GitBranch, ariaLabel: 'Navigate to Context' },
-  { path: '/teacher', label: 'Teacher', icon: GraduationCap, ariaLabel: 'Navigate to Teacher Analytics' },
-  { path: '/logs', label: 'Logs', icon: ScrollText, ariaLabel: 'Navigate to Logs' },
-  { path: '/settings', label: 'Settings', icon: Settings, ariaLabel: 'Navigate to Settings' },
+  { path: '/', label: 'Home', icon: House },
+  { path: '/students', label: 'Students', icon: Users },
+  { path: '/speech', label: 'Speech profile', icon: AudioLines },
+  { path: '/test', label: 'Test console', icon: MessageSquareText },
+  { path: '/developer', label: 'Developer hub', icon: TerminalSquare },
+  { path: '/settings', label: 'Settings', icon: Settings },
 ];
+
+// Server events that change what the top bar and Home show
+const STATUS_EVENTS = ['voice_sleeping', 'voice_awake', 'voice_dismissed', 'voice_restored', 'privacy_mode', 'dictation_mode', 'extension_status'];
 
 /**
  * Inner component that can use useNavigate() (must be inside BrowserRouter).
- * Listens for voice navigation and settings WebSocket messages.
+ * Listens for voice navigation, settings and state WebSocket messages.
  */
 function AppRoutes({ onConnectionChange }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -50,7 +53,7 @@ function AppRoutes({ onConnectionChange }) {
         try {
           const msg = JSON.parse(event.data);
 
-          // Voice navigation: "go to settings", "open chat", etc.
+          // Voice navigation: "go to settings", "open the test console", etc.
           if (msg.type === 'dashboard_navigate' && msg.path) {
             navigate(msg.path);
             // Announce navigation to screen readers
@@ -65,6 +68,9 @@ function AppRoutes({ onConnectionChange }) {
               detail: { setting: msg.setting, value: msg.value },
             }));
           }
+
+          if (STATUS_EVENTS.includes(msg.type)) queryClient.invalidateQueries({ queryKey: ['status'] });
+          if (msg.type === 'active_student') queryClient.invalidateQueries({ queryKey: ['activeStudent'] });
         } catch { /* ignore parse errors */ }
       };
 
@@ -79,21 +85,55 @@ function AppRoutes({ onConnectionChange }) {
 
     connect();
     return () => { if (wsRef.current) wsRef.current.close(); };
-  }, [navigate, onConnectionChange]);
+  }, [navigate, onConnectionChange, queryClient]);
 
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/prompt" element={<Prompt />} />
-      <Route path="/chat" element={<Chat />} />
-      <Route path="/teacher" element={<Teacher />} />
-      <Route path="/tools" element={<Tools />} />
-      <Route path="/context" element={<Context />} />
-      <Route path="/logs" element={<Logs />} />
+      <Route path="/" element={<Home />} />
+      <Route path="/students" element={<Students />} />
+      <Route path="/speech" element={<SpeechProfile />} />
+      <Route path="/test" element={<TestConsole />} />
+      <Route path="/developer" element={<Navigate to="/developer/prompt" replace />} />
+      <Route path="/developer/:tab" element={<DeveloperHub />} />
       <Route path="/settings" element={<SettingsPage />} />
-      {/* Unknown or retired addresses (such as the removed /commands page) go to the Dashboard */}
+      {/* Older addresses still work (voice commands and bookmarks) */}
+      <Route path="/teacher" element={<Navigate to="/students" replace />} />
+      <Route path="/chat" element={<Navigate to="/test" replace />} />
+      <Route path="/prompt" element={<Navigate to="/developer/prompt" replace />} />
+      <Route path="/tools" element={<Navigate to="/developer/tools" replace />} />
+      <Route path="/context" element={<Navigate to="/developer/context" replace />} />
+      <Route path="/logs" element={<Navigate to="/developer/logs" replace />} />
+      {/* Unknown or retired addresses (such as the removed /commands page) go Home */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+  );
+}
+
+// Who is at this computer, and whether voice is acting on what it hears
+function SessionBar() {
+  const { data: active } = useQuery({ queryKey: ['activeStudent'], queryFn: api.getActiveStudent, refetchInterval: 15000 });
+  const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 5000 });
+  const student = active?.student;
+  const since = active?.startedAt ? active.startedAt.slice(11, 16) : null;
+  const voice = status?.voice;
+
+  return (
+    <header className="session-bar" aria-label="Session">
+      <Link to="/students" className="session-chip">
+        <UserRound size={20} aria-hidden="true" />
+        {student
+          ? <span><strong>{student.name}</strong>{since ? <> · in session since <span className="tabular">{since}</span></> : ' · in session'}</span>
+          : <span>No student chosen</span>}
+      </Link>
+      <div className="session-bar-right">
+        <span className="session-bar-label" id="voice-state-label">Voice</span>
+        {!voice ? null
+          : voice.sleeping ? <StatusPill tone="warning" icon={Moon} label="Asleep" aria-describedby="voice-state-label" />
+          : voice.dismissed ? <StatusPill tone="neutral" icon={EyeOff} label="Hidden" aria-describedby="voice-state-label" />
+          : <StatusPill tone="success" icon={Mic} label="Listening" aria-describedby="voice-state-label" />}
+        {voice?.privacyMode && <StatusPill tone="info" icon={EyeOff} label="Privacy mode" />}
+      </div>
+    </header>
   );
 }
 
@@ -107,18 +147,21 @@ export default function App() {
         <nav className="sidebar" role="navigation" aria-label="Main navigation">
           {/* Brand header */}
           <div className="sidebar-brand">
-            <img src="/ablespeak-logo.png" alt="AbleSpeak" className="sidebar-logo" />
+            <img src="/ablespeak-logo.png" alt="" className="sidebar-logo" />
+            <div className="sidebar-brand-text">
+              <span className="sidebar-name">AbleSpeak</span>
+              <span className="sidebar-tag">Tier 2 assistive</span>
+            </div>
           </div>
 
           {/* Navigation links */}
           <div className="sidebar-nav">
-            {navItems.map(({ path, label, icon: Icon, ariaLabel }) => (
+            {navItems.map(({ path, label, icon: Icon }) => (
               <NavLink
                 key={path}
                 to={path}
                 end={path === '/'}
                 className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-                aria-label={ariaLabel}
               >
                 <Icon aria-hidden="true" />
                 <span>{label}</span>
@@ -135,6 +178,7 @@ export default function App() {
           </div>
         </nav>
         <main id="main-content" className="main-content" role="main">
+          <SessionBar />
           <AppRoutes onConnectionChange={setConnected} />
           <footer className="app-footer">
             <span>Built with <span className="heart" role="img" aria-label="love">❤</span> for people</span>

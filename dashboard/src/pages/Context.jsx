@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Folder, FileText, GitBranch } from 'lucide-react';
 import { Checkbox } from '../components/ui';
 
-export default function Context() {
+export default function Context({ embedded = false }) {
   const { data: context } = useQuery({ queryKey: ['context'], queryFn: api.getContext, refetchInterval: 1000 });
   // The desktop window, read through Windows accessibility (Stage 2)
   const { data: screen } = useQuery({ queryKey: ['screen'], queryFn: api.getScreen, refetchInterval: 5000, retry: false });
@@ -27,10 +27,14 @@ export default function Context() {
     <div className="as-context-page">
       {/* Header strip */}
       <header className="as-context-header">
-        <div className="page-header compact">
-          <h2><GitBranch size={28} aria-hidden="true" /> Context</h2>
-          <p>What AbleSpeak knows about this computer and the open browser. Choose an item to see its value.</p>
-        </div>
+        {embedded ? (
+          <p className="hub-lead">What AbleSpeak knows about this computer and the open browser. Choose an item to see its value.</p>
+        ) : (
+          <div className="page-header compact">
+            <h2><GitBranch size={28} aria-hidden="true" /> Context</h2>
+            <p>What AbleSpeak knows about this computer and the open browser. Choose an item to see its value.</p>
+          </div>
+        )}
         <Checkbox label="Show debug info" checked={showDebug} onChange={e => setShowDebug(e.target.checked)} />
       </header>
 

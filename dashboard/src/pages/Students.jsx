@@ -1,5 +1,5 @@
 /**
- * Teacher.jsx — Tier 2 Progress Monitoring page.
+ * Students.jsx — who is using this computer, and Tier 2 progress monitoring.
  *
  * Layout (per-student):
  *   1. Flag banner (role="alert") — unacknowledged decision flags + Acknowledge button
@@ -7,15 +7,18 @@
  *   3. Goal setup / edit panel — create goal, suggest baseline, add phase changes
  *   4. Usage context strip — sessions this week, command count (secondary, visually muted)
  *
+ * How well a student is heard, and their speech settings, are on the Speech
+ * profile page (SpeechProfile.jsx).
+ *
  * No new npm dependencies. SVG is hand-rolled.
  * WCAG AA+: aria-labels, ≥48px targets, focus rings, 7:1 contrast for text, reduced-motion.
  */
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { RecognitionReadout, SpeechSettings } from '../components/StudentSpeech';
 import { Button, Field, Notice, Panel, StatTile, StatusPill, TextField } from '../components/ui';
-import { CheckCircle2, TrendingUp, Target, PlusCircle, ChevronDown, ChevronUp, Users, Flag, LineChart } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CheckCircle2, Target, PlusCircle, ChevronDown, ChevronUp, Users, Flag, LineChart, AudioLines } from 'lucide-react';
 
 // Today in this computer's time zone — the server counts days the same way.
 function localToday() {
@@ -788,8 +791,8 @@ function UsageStrip() {
   );
 }
 
-// ── Teacher Page ──
-export default function Teacher() {
+// ── Students Page ──
+export default function Students() {
   const queryClient = useQueryClient();
   const [studentId, setStudentId] = useState(null);
   const [goalId, setGoalId] = useState(null);
@@ -844,8 +847,8 @@ export default function Teacher() {
   return (
     <div className="teacher-page">
       <header className="page-header">
-        <h2><TrendingUp size={28} aria-hidden="true" /> Progress monitoring</h2>
-        <p>Tier 2 goal-based progress monitoring for individual students.</p>
+        <h2><Users size={28} aria-hidden="true" /> Students</h2>
+        <p>Who is using this computer, and how each student is progressing toward their goals.</p>
       </header>
 
       <WhoIsHerePanel students={students} />
@@ -914,12 +917,12 @@ export default function Teacher() {
             queryClient={queryClient}
           />
 
-          {/* 4. How well they are heard, and the settings that help */}
-          <RecognitionReadout studentId={studentId} />
-          <SpeechSettings
-            studentId={studentId}
-            studentName={students.find(s => String(s.id) === String(studentId))?.name || 'this student'}
-          />
+          {/* 4. How well they are heard lives on the Speech profile page */}
+          <p className="muted-note section">
+            <Link className="text-link" to={`/speech?student=${studentId}`}>
+              <AudioLines size={18} aria-hidden="true" /> How well AbleSpeak hears this student, and their speech settings
+            </Link>
+          </p>
 
           {/* 5. Secondary usage strip */}
           <UsageStrip />

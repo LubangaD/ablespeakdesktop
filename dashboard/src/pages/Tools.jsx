@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Wrench, ChevronRight } from 'lucide-react';
 import { Chip, TextField } from '../components/ui';
 
-export default function Tools() {
+export default function Tools({ embedded = false }) {
   const { data: catalog, isLoading, isError } = useQuery({ queryKey: ['tools'], queryFn: api.getTools, staleTime: 30000 });
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedTool, setSelectedTool] = useState(null);
@@ -50,7 +50,7 @@ export default function Tools() {
       {/* Header */}
       <header className="tools-header">
         <div className="tools-header-left">
-          <h2><Wrench size={28} aria-hidden="true" /> Tools</h2>
+          {!embedded && <h2><Wrench size={28} aria-hidden="true" /> Tools</h2>}
           <span className="tools-count"><span className="tabular">{allTools.length}</span> available</span>
         </div>
         {/* Category chips */}

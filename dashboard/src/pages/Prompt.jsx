@@ -6,7 +6,7 @@ import { Button, Checkbox } from '../components/ui';
 
 const PROMPT_MODES = ['general', 'chrome', 'gmail', 'youtube', 'vscode'];
 
-export default function Prompt() {
+export default function Prompt({ embedded = false }) {
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: api.getConfig, refetchInterval: 10000 });
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 3000 });
   const [autoUpdate, setAutoUpdate] = useState(true);
@@ -152,11 +152,15 @@ You are a voice programming assistant for Visual Studio Code.
 
   return (
     <div className="as-prompt-page">
-      {/* Page header */}
-      <header className="page-header compact">
-        <h2><FileText size={28} aria-hidden="true" /> Prompt studio</h2>
-        <p>The instructions AbleSpeak follows for each app. Switch modes to see what changes.</p>
-      </header>
+      {/* Page header (the Developer hub supplies its own) */}
+      {embedded ? (
+        <p className="hub-lead">The instructions AbleSpeak follows for each app. Switch modes to see what changes.</p>
+      ) : (
+        <header className="page-header compact">
+          <h2><FileText size={28} aria-hidden="true" /> Prompt studio</h2>
+          <p>The instructions AbleSpeak follows for each app. Switch modes to see what changes.</p>
+        </header>
+      )}
 
       {/* Top bar */}
       <div className="as-topbar">
