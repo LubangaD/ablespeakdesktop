@@ -44,3 +44,5 @@ jobs:
       - run: npm install
       # `npm run build` is `tsc && vite build` — typecheck and build in one step.
       - run: npm run build
+      # Text and surface colours still meet WCAG contrast (docs/design/DESIGN.md)
+      - run: npm run check:contrast

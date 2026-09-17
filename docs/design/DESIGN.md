@@ -280,6 +280,8 @@ Decisions made when applying this file to `dashboard/` and `server/overlay.html`
 - Tokens: `:root` in `dashboard/src/index.css`. The overlay repeats the few it needs at the top of its `<style>`.
 - Fonts: Inter and Space Grotesk are bundled with the app (`@fontsource-variable/*` in the dashboard, `server/fonts/` for the overlay), so both work with no internet connection. Code and log text use the system monospace font (Cascadia Mono, Consolas).
 - Shared controls: `dashboard/src/components/ui/`.
+- Contrast: `npm run check:contrast` in `dashboard/` checks every text colour against every surface; CI runs it after the build.
+- Screenshots: `docs/design/screenshots/` show the app after this pass (window titles, process names, computer name, key ending and `.env` path are hidden). The earlier "before" set is in git at commit `ecd15be`.
 
 ### Not applied
 - **Phone and tablet layouts.** The app runs in a desktop window. The layout is checked down to 800px wide.
