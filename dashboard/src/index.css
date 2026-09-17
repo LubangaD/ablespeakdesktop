@@ -1445,6 +1445,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .as-context-header .page-header { margin-bottom: 0; }
+.as-context-header .hub-lead { flex: 1 1 320px; min-width: 0; margin-bottom: 0; }
 
 .as-context-split {
   display: flex;
