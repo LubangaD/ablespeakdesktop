@@ -5,7 +5,11 @@ async function fetchApi(path, options = {}) {
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options
   });
-  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
+  if (!res.ok) {
+    // Prefer the server's own explanation when it sends one.
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `API ${path}: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -18,6 +22,8 @@ export const api = {
   getLibrary: () => fetchApi('/library'),
   getToolDetail: (cat, tool) => fetchApi(`/library/${cat}/${tool}`),
   getContext: () => fetchApi('/context'),
+  getScreen: () => fetchApi('/screen'),
+  getResolution: (days = 30) => fetchApi(`/screen/resolution?days=${days}`),
   getLogs: (params = {}) => {
     const q = new URLSearchParams(params).toString();
     return fetchApi(`/logs${q ? '?' + q : ''}`);
@@ -34,6 +40,19 @@ export const api = {
   }),
   getSystem: () => fetchApi('/system'),
   getAiStatus: () => fetchApi('/ai/status'),
+  getAiProviders: () => fetchApi('/ai/providers'),
+
+  // ── Settings: API keys and provider choice (saved to this device's .env) ──
+  getApiKeys: () => fetchApi('/settings/keys'),
+  saveApiKey: (provider, body) => fetchApi(`/settings/keys/${encodeURIComponent(provider)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }),
+  removeApiKey: (provider) => fetchApi(`/settings/keys/${encodeURIComponent(provider)}`, { method: 'DELETE' }),
+  useProvider: (provider, model) => fetchApi('/settings/provider', {
+    method: 'POST',
+    body: JSON.stringify({ provider, model }),
+  }),
 
   // ── Teacher Dashboard ──
   getTeacherAnalytics: () => fetchApi('/teacher/analytics'),
@@ -43,6 +62,22 @@ export const api = {
     body: JSON.stringify({ name, session_prefix }),
   }),
   deleteStudent: (id) => fetchApi(`/teacher/students/${id}`, { method: 'DELETE' }),
+  getProfile: (studentId) => fetchApi(`/students/${studentId}/profile`),
+  saveProfile: (studentId, changes) => fetchApi(`/students/${studentId}/profile`, {
+    method: 'PUT',
+    body: JSON.stringify(changes),
+  }),
+  exportProfile: (studentId) => fetchApi(`/students/${studentId}/profile/export`),
+  importProfile: (file) => fetchApi('/students/profile/import', {
+    method: 'POST',
+    body: JSON.stringify(file),
+  }),
+  getRecognition: (studentId, days = 7) => fetchApi(`/students/${studentId}/recognition?days=${days}`),
+  getActiveStudent: () => fetchApi('/students/active'),
+  setActiveStudent: (studentId) => fetchApi('/students/active', {
+    method: 'PUT',
+    body: JSON.stringify({ student_id: studentId }),
+  }),
 
   // ── Teacher Dashboard: Progress Monitoring (Tier 2 KPI engine) ──
   getBaselineSuggestion: (studentId, measure) =>

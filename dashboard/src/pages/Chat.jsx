@@ -4,8 +4,43 @@ import { api } from '../lib/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, Send, AlertCircle } from 'lucide-react';
 
+const SHOWN_EVENTS = [
+  'voice_transcription', 'voice_no_speech', 'voice_error', 'command_complete',
+  'chat_assistant_message', 'voice_busy', 'prompt_switch',
+  'dictation_typed', 'dictation_mode', 'voice_cancelled', 'voice_awake', 'voice_sleeping',
+  'voice_restored', 'voice_dismissed', 'privacy_mode', 'agent_progress',
+];
+
+let messageCount = 0;
+const nextId = () => `m${Date.now()}-${++messageCount}`;
+
+/** A one-line note for server events that aren't replies. */
+function eventNote(msg) {
+  switch (msg.type) {
+    case 'dictation_typed':
+      return msg.error ? `⚠ ${msg.message}` : `✏️ Typed: ${msg.text}`;
+    case 'voice_cancelled':
+      return 'Stopped.';
+    case 'dictation_mode':
+    case 'voice_awake':
+    case 'voice_sleeping':
+    case 'voice_restored':
+    case 'voice_dismissed':
+    case 'privacy_mode':
+      return msg.say || null;
+    case 'agent_progress':
+      if (msg.phase === 'plan') return `Plan: ${(msg.steps || []).map((step, i) => `${i + 1}. ${step.do}`).join('  ')}`;
+      if (msg.phase === 'step') return `Step ${msg.index + 1} of ${msg.total}: ${msg.step?.do || ''}`;
+      if (msg.phase === 'check' && !msg.ok) return `Step ${msg.index + 1} didn't work: ${msg.why || ''}`;
+      if (msg.phase === 'replan') return `Trying another way: ${msg.why || ''}`;
+      return null;
+    default:
+      return null;
+  }
+}
+
 export default function Chat() {
-  const { lastMessage, wsRef } = useWebSocket();
+  const { on, wsRef } = useWebSocket();
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 3000 });
   const [messages, setMessages] = useState([
     { id: 'welcome', role: 'assistant', text: 'Hi, I am AbleSpeak. How can I help you today?', time: new Date() }
@@ -22,31 +57,17 @@ export default function Chat() {
   const silenceTimerRef = useRef(null);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
-  const hasGreetedRef = useRef(false);
   const audioCtxRef = useRef(null); // Reuse single AudioContext (Fix #7)
 
-  // ── TTS: Speak text aloud ──
-  const speak = useCallback((text) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    // Try to pick a good English voice
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.name.includes('Microsoft Zira') || v.name.includes('Google') || v.lang.startsWith('en'));
-    if (preferred) utterance.voice = preferred;
-    window.speechSynthesis.speak(utterance);
-    return utterance;
-  }, []);
+  // Nothing is spoken from this page. The overlay speaks every reply, in the
+  // same voice, so two voices never talk at once.
 
   // ── Send command via WebSocket ──
   const sendCommand = useCallback((text) => {
     if (!text) return;
 
     setMessages(prev => [...prev, {
-      id: Date.now(),
+      id: nextId(),
       role: 'user',
       text,
       time: new Date()
@@ -82,6 +103,7 @@ export default function Chat() {
       const base64 = reader.result.split(',')[1]; // Remove data:audio/webm;base64, prefix
       wsRef.current.send(JSON.stringify({
         type: 'voice_audio',
+        source: 'dashboard',
         audio: base64,
         mimeType: audioBlob.type || 'audio/webm',
       }));
@@ -135,20 +157,6 @@ export default function Chat() {
   // ── Start Listening ──
   const startListening = useCallback(async () => {
     try {
-      // Greet on first mic activation
-      if (!hasGreetedRef.current) {
-        hasGreetedRef.current = true;
-        const utterance = speak('Hi, I am AbleSpeak. How may I assist you today?');
-        if (utterance) {
-          // Wait for greeting to finish before starting recording
-          await new Promise(resolve => {
-            utterance.onend = resolve;
-            // Safety timeout in case onend doesn't fire
-            setTimeout(resolve, 4000);
-          });
-        }
-      }
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -209,7 +217,7 @@ export default function Chat() {
     } catch (err) {
       console.error('[Voice] Mic access error:', err);
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: nextId(),
         role: 'system',
         text: err.name === 'NotAllowedError'
           ? 'Microphone access denied. Please allow microphone access in your system settings.'
@@ -238,41 +246,41 @@ export default function Chat() {
   };
 
   // ── Handle incoming WebSocket messages ──
-  useEffect(() => {
-    if (!lastMessage) return;
+  // Subscribed per event, so two events arriving together are both handled.
+  const handleServerMessage = useCallback((msg) => {
 
-    if (lastMessage.type === 'voice_transcription') {
+    if (msg.type === 'voice_transcription') {
       // Show what was heard
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: nextId(),
         role: 'user',
-        text: lastMessage.text,
+        text: msg.text,
         source: 'voice',
         time: new Date()
       }]);
       setProcessing(true);
     }
 
-    if (lastMessage.type === 'voice_no_speech') {
+    if (msg.type === 'voice_no_speech') {
       setVoiceState('idle');
       setProcessing(false);
     }
 
-    if (lastMessage.type === 'voice_error') {
+    if (msg.type === 'voice_error') {
       setVoiceState('idle');
       setProcessing(false);
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: nextId(),
         role: 'system',
-        text: `Voice error: ${lastMessage.error}`,
+        text: `Voice error: ${msg.error}`,
         time: new Date()
       }]);
     }
 
-    if (lastMessage.type === 'command_complete') {
+    if (msg.type === 'command_complete') {
       setProcessing(false);
       setVoiceState('idle');
-      const result = lastMessage.result;
+      const result = msg.result;
       let responseText = '';
 
       if (typeof result === 'string') {
@@ -287,23 +295,23 @@ export default function Chat() {
 
       if (responseText) {
         setMessages(prev => [...prev, {
-          id: Date.now(),
+          id: nextId(),
           role: 'assistant',
           text: responseText,
-          tool: lastMessage.tool,
-          latency: lastMessage.latency_ms,
+          tool: msg.tool,
+          latency: msg.latency_ms,
           time: new Date()
         }]);
       }
     }
 
-    if (lastMessage.type === 'chat_assistant_message') {
+    if (msg.type === 'chat_assistant_message') {
       setProcessing(false);
       setVoiceState('idle');
       // Empty text should still tell the user what happened
-      let displayText = lastMessage.text;
+      let displayText = msg.text;
       if (!displayText?.trim()) {
-        const calls = lastMessage.toolCalls || [];
+        const calls = msg.toolCalls || [];
         const failed = calls.filter(tc => tc.result?.status === 'error');
         if (failed.length > 0) {
           displayText = `⚠ ${failed[0].result?.message || failed[0].result?.error || 'Action failed'}`;
@@ -316,46 +324,54 @@ export default function Chat() {
         }
       }
       setMessages(prev => [...prev, {
-        id: lastMessage.id || Date.now(),
+        id: msg.id || nextId(),
         role: 'assistant',
         text: displayText,
-        error: lastMessage.error,
-        provider: lastMessage.provider,
-        model: lastMessage.model,
-        latency: lastMessage.latency,
-        toolCalls: lastMessage.toolCalls,
-        source: lastMessage.source,
+        error: msg.error,
+        provider: msg.provider,
+        model: msg.model,
+        latency: msg.latency,
+        toolCalls: msg.toolCalls,
+        source: msg.source,
         time: new Date()
       }]);
+    }
 
-      // TTS: Only speak responses from typed chat commands.
-      // Voice command responses are spoken by the overlay (SAPI).
-      // Speaking both causes conflicting male + female voices.
-      if (lastMessage.text && !lastMessage.error && lastMessage.source !== 'voice') {
-        speak(lastMessage.text);
+    // What the overlay says or shows for these, so a typed test shows it too.
+    const note = eventNote(msg);
+    if (note) {
+      if (msg.type !== 'agent_progress') {
+        setProcessing(false);
+        setVoiceState('idle');
       }
+      setMessages(prev => [...prev, { id: nextId(), role: 'system', text: note, time: new Date() }]);
     }
 
     // Handle voice pipeline busy (concurrent command guard)
-    if (lastMessage.type === 'voice_busy') {
+    if (msg.type === 'voice_busy') {
       setVoiceState('idle');
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: nextId(),
         role: 'system',
         text: 'Still processing your previous command. Please wait a moment.',
         time: new Date()
       }]);
     }
 
-    if (lastMessage.type === 'prompt_switch') {
+    if (msg.type === 'prompt_switch') {
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: nextId(),
         role: 'system',
-        text: `Switched to ${lastMessage.prompt} mode`,
+        text: `Switched to ${msg.prompt} mode`,
         time: new Date()
       }]);
     }
-  }, [lastMessage]);
+  }, []);
+
+  useEffect(() => {
+    const offs = SHOWN_EVENTS.map(type => on(type, handleServerMessage));
+    return () => offs.forEach(off => off());
+  }, [on, handleServerMessage]);
 
   // Auto-scroll to bottom
   useEffect(() => {

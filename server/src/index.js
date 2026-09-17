@@ -19,13 +19,18 @@ import { randomBytes } from 'crypto';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 
-import { initDatabase } from './db.js';
+import { initDatabase, closeDatabase } from './db.js';
+import { startDeviceSession, endDeviceSession, commandAttribution, getActiveStudent } from './student-session.js';
+import { getProfile, learnAlias, LEARN_AFTER } from './student-profile.js';
+import { recordCorrection } from './db.js';
+import { screenContextForAgent, getScreenModel } from './screen-model.js';
 import { AIEngine } from './ai-engine.js';
 import { ToolRegistry } from './tool-registry.js';
 import { WsProxy } from './ws-proxy.js';
 import { LogTailer } from './log-tailer.js';
 import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
+import { createSettingsRouter } from './routes/settings.js';
 import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +58,14 @@ console.log('');
 // ── Initialize Database ──
 await initDatabase(DB_PATH);
 console.log('[DB] SQLite initialized');
+
+// ── Who is using this computer (AT-50) ──
+const { student: activeStudent } = startDeviceSession();
+console.log(`[Students] ${activeStudent ? `Recording for ${activeStudent.name}` : 'No student chosen — pick one on the Teacher page'}`);
+process.once('exit', () => {
+  endDeviceSession();
+  closeDatabase(); // writes the file; the 2 s auto-save may not have run yet
+});
 
 // ── Express App ──
 const app = express();
@@ -100,7 +113,25 @@ function resolveWsToken() {
 const wsToken = resolveWsToken();
 
 // ── WebSocket Hub (standalone — no Voqal) ──
-const wsProxy = new WsProxy({ server, aiEngine, wsToken });
+const wsProxy = new WsProxy({
+  server, aiEngine, wsToken,
+  attribution: commandAttribution,
+  activeStudent: () => getActiveStudent().student,
+  profile: () => getProfile(commandAttribution().student_id),
+  readScreen: screenContextForAgent,
+  // Stage 4: the same correction twice becomes the student's shortcut.
+  onCorrection: (heard, meant) => {
+    const { student_id } = commandAttribution();
+    if (student_id == null) return null;
+    const normal = text => String(text).toLowerCase().replace(/[.,!?;:]+$/g, '').replace(/\s+/g, ' ').trim();
+    const count = recordCorrection({ student_id, heard: normal(heard), meant: normal(meant) });
+    return { count, learned: count >= LEARN_AFTER && learnAlias(student_id, normal(heard), normal(meant)) };
+  },
+  readScreenModel: async () => {
+    const model = await getScreenModel({ fresh: true, maxElements: 150 });
+    return model.status === 'success' ? model : null;
+  },
+});
 aiEngine.wsHub = wsProxy; // Back-reference
 console.log('[WsHub] Initialized (standalone mode)');
 
@@ -168,6 +199,9 @@ app.get('/api/ws-token', (req, res) => {
   }
   res.json({ token: wsProxy._wsToken });
 });
+
+// ── Settings: API keys and provider choice, saved to this device's .env ──
+app.use('/api/settings', createSettingsRouter({ aiEngine }));
 
 // ── Additional AI-specific API routes ──
 

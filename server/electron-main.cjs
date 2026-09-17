@@ -54,25 +54,40 @@ let appIcon = null;
 let currentTTSProcess = null; // PowerShell playback child — killable on "stop"/"cancel"
 
 // ── TTS helpers ──
-// Play a WAV file synchronously via PowerShell's Media.SoundPlayer. Resolves when
-// playback finishes (so the caller can re-enable the mic). The child process is
-// tracked in `currentTTSProcess` so a voice "stop"/"cancel" can kill it mid-sentence.
-function playWavFile(file) {
+// Play an audio file (MP3 or WAV) through Windows' media player and resolve
+// when it has finished, so the caller can re-enable the mic. The child process
+// is tracked in `currentTTSProcess` so a voice "stop"/"cancel" can kill it
+// mid-sentence.
+function playAudioFile(file) {
   return new Promise((resolve, reject) => {
     const { exec } = require('child_process');
     const esc = file.replace(/'/g, "''");
-    const psScript =
-      `$p = New-Object System.Media.SoundPlayer '${esc}'; ` +
-      `$p.PlaySync(); ` +
-      `Remove-Item -LiteralPath '${esc}' -ErrorAction SilentlyContinue`;
+    const psScript = `
+Add-Type -AssemblyName PresentationCore
+$p = New-Object System.Windows.Media.MediaPlayer
+$p.Open([uri]'${esc}')
+$n = 0
+while (-not $p.NaturalDuration.HasTimeSpan -and $n -lt 50) { Start-Sleep -Milliseconds 100; $n++ }
+$loaded = $p.NaturalDuration.HasTimeSpan
+if ($loaded) {
+  $p.Play()
+  Start-Sleep -Milliseconds ([int]$p.NaturalDuration.TimeSpan.TotalMilliseconds + 150)
+}
+$p.Close()
+Remove-Item -LiteralPath '${esc}' -ErrorAction SilentlyContinue
+if (-not $loaded) { exit 3 }
+`;
     const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
     currentTTSProcess = exec(
       `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
-      { timeout: 30000, windowsHide: true },
+      { timeout: 60000, windowsHide: true },
       (err) => {
         currentTTSProcess = null;
         // A kill (voice interrupt) surfaces as an error — treat it as a clean stop.
-        if (err && !err.killed) return reject(err);
+        if (err && !err.killed) {
+          try { fs.unlinkSync(file); } catch {}
+          return reject(err.code === 3 ? new Error('the audio would not load') : err);
+        }
         resolve();
       }
     );
@@ -81,6 +96,8 @@ function playWavFile(file) {
 
 // Speak text via Windows SAPI (offline fallback). Writes the text to a temp file
 // to sidestep all PowerShell quoting issues, then speaks via EncodedCommand.
+// Picks an English female voice (Zira on most computers) so the fallback
+// sounds like Aria rather than switching to a man's voice.
 function speakViaSapi(text) {
   return new Promise((resolve, reject) => {
     const { exec } = require('child_process');
@@ -95,6 +112,13 @@ function speakViaSapi(text) {
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $synth.Rate = 1
+$wanted = $env:ABLESPEAK_SAPI_VOICE
+$voices = @($synth.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo })
+$voice = $null
+if ($wanted) { $voice = $voices | Where-Object { $_.Name -like "*$wanted*" } | Select-Object -First 1 }
+if (-not $voice) { $voice = $voices | Where-Object { $_.Gender -eq 'Female' -and $_.Culture.Name -eq 'en-US' } | Select-Object -First 1 }
+if (-not $voice) { $voice = $voices | Where-Object { $_.Gender -eq 'Female' -and $_.Culture.Name -like 'en*' } | Select-Object -First 1 }
+if ($voice) { $synth.SelectVoice($voice.Name) }
 $text = [IO.File]::ReadAllText('${tmpFile.replace(/\\/g, '\\\\')}')
 $synth.Speak($text)
 Remove-Item '${tmpFile.replace(/\\/g, '\\\\')}' -ErrorAction SilentlyContinue
@@ -116,26 +140,27 @@ let activeShortcut = OVERLAY_SHORTCUT; // actual registered shortcut (may be a f
 let wakeDetector = null;
 
 // ── Load AbleSpeak Logo ──
+// A PNG: Electron's nativeImage cannot read SVG, which left the tray icon
+// blank — and the install guide sends teachers to that icon.
 function loadAppIcon() {
-  const svgPath = path.join(__dirname, '..', 'dashboard', 'public', 'favicon.svg');
-  try {
-    if (fs.existsSync(svgPath)) {
-      const svgContent = fs.readFileSync(svgPath, 'utf8');
-      // Scale SVG to 256×256 for crisp icon
-      const scaledSvg = svgContent
-        .replace(/width="48"/, 'width="256"')
-        .replace(/height="46"/, 'height="256"');
-      const dataUrl = `data:image/svg+xml;base64,${Buffer.from(scaledSvg).toString('base64')}`;
-      const img = nativeImage.createFromDataURL(dataUrl);
+  const candidates = [
+    path.join(__dirname, '..', 'dashboard', 'public', 'ablespeak-logo.png'),       // running from source
+    path.join(process.resourcesPath || '', 'dashboard', 'dist', 'ablespeak-logo.png'), // installed
+  ];
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const img = nativeImage.createFromPath(file);
       if (!img.isEmpty()) {
         appIcon = img;
-        console.log('[Electron] Loaded AbleSpeak logo from favicon.svg');
+        console.log('[Electron] Loaded AbleSpeak logo from', file);
         return;
       }
+    } catch (err) {
+      console.warn('[Electron] Could not load icon:', err.message);
     }
-  } catch (err) {
-    console.warn('[Electron] Could not load SVG icon:', err.message);
   }
+  console.warn('[Electron] No AbleSpeak logo found — the tray icon will be blank');
   appIcon = nativeImage.createEmpty();
 }
 
@@ -202,6 +227,8 @@ async function startServer() {
   const envPath = app.isPackaged
     ? path.join(app.getPath('userData'), '.env')
     : path.join(__dirname, '.env');
+  // The dashboard's Settings page saves API keys to this same file.
+  process.env.ABLESPEAK_ENV_PATH = envPath;
 
   // First launch of a packaged install with no keys yet — seed a template and
   // tell the adult doing setup where to fill it in, rather than the app just
@@ -215,7 +242,7 @@ async function startServer() {
         type: 'info',
         title: 'AbleSpeak needs an API key',
         message: 'AbleSpeak needs an API key before it can listen or speak.',
-        detail: `A template has been created at:\n${envPath}\n\nOpen it, add at least GEMINI_API_KEY, then restart AbleSpeak.`,
+        detail: `Add a Google Gemini key in the AbleSpeak dashboard under Settings → API keys. It works straight away.\n\nThe key is saved on this computer in:\n${envPath}`,
         buttons: ['Open Folder', 'Later'],
         defaultId: 0,
       }).then(({ response }) => {
@@ -380,7 +407,7 @@ function createOverlay() {
 
   // Position at bottom-center of screen
   const overlayW = 420;
-  const overlayH = 180;
+  const overlayH = 250; // room for the last-command lines above the live text
   const x = Math.round((screenW - overlayW) / 2);
   const y = screenH - overlayH - 20;
 
@@ -402,6 +429,11 @@ function createOverlay() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'overlay-preload.cjs'),
+      // The overlay keeps listening while hidden ("dismiss", Ctrl+Shift+A).
+      // With throttling on, Chromium pauses its speech-detection loop in a
+      // hidden window, so a recording never ends until the overlay is shown
+      // again — minutes of audio that Gemini turns into invented sentences.
+      backgroundThrottling: false,
     },
   });
 
@@ -523,10 +555,9 @@ function setupOverlayIPC() {
   //
   // Emits 'tts-state' IPC events ('speaking' | 'done') so the overlay can mute the
   // mic while audio is playing (breaks the mic↔speaker feedback loop — Gap 3).
-  ipcMain.handle('speak-text', async (_event, text) => {
-    if (!text || typeof text !== 'string') return false;
-    const safeText = text.slice(0, 500);
-
+  // One voice at a time: each request waits for the one before it, and
+  // "stop" drops everything still waiting.
+  const speakNow = async (safeText) => {
     const sendTtsState = (state) => {
       if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayWindow.webContents.send('tts-state', state);
@@ -537,13 +568,16 @@ function setupOverlayIPC() {
     try {
       const { join } = require('path');
       const { tmpdir } = require('os');
-      const audioFile = join(tmpdir(), `ablespeak_tts_${Date.now()}.wav`);
+      const audioFile = join(tmpdir(), `ablespeak_tts_${Date.now()}.mp3`);
 
       await synthesizeToFile(safeText, audioFile, { voice: TTS_VOICE, timeoutMs: 10000 });
 
       sendTtsState('speaking');
-      await playWavFile(audioFile);
-      sendTtsState('done');
+      try {
+        await playAudioFile(audioFile);
+      } finally {
+        sendTtsState('done');
+      }
 
       console.log(`[TTS] Edge neural (${TTS_VOICE}): "${safeText.slice(0, 50)}..."`);
       return true;
@@ -563,12 +597,23 @@ function setupOverlayIPC() {
       sendTtsState('done'); // never leave the overlay's mic muted
       return false;
     }
+  };
+
+  let ttsQueue = Promise.resolve();
+  let ttsGeneration = 0;
+  ipcMain.handle('speak-text', (_event, text) => {
+    if (!text || typeof text !== 'string') return false;
+    const generation = ttsGeneration;
+    const turn = ttsQueue.then(() => (generation === ttsGeneration ? speakNow(text.slice(0, 500)) : false));
+    ttsQueue = turn.catch(() => false);
+    return turn;
   });
 
   // ── Stop any in-progress TTS playback (voice "stop"/"cancel" interrupt — Gap 4) ──
   ipcMain.handle('stop-tts', async () => {
+    ttsGeneration++;
     if (currentTTSProcess) {
-      // Killing the PowerShell playback child stops SoundPlayer.PlaySync immediately.
+      // Killing the PowerShell playback child stops the audio immediately.
       try { currentTTSProcess.kill(); } catch {}
       currentTTSProcess = null;
     }
@@ -799,6 +844,16 @@ function createTray() {
     {
       label: 'Open in Browser',
       click: () => shell.openExternal(DASHBOARD_URL),
+    },
+    {
+      // Setup step: Chrome's "Load unpacked" needs this folder (docs/INSTALL-FOR-TEACHERS.md).
+      label: 'Show Chrome Extension Folder',
+      click: () => {
+        const folder = app.isPackaged
+          ? path.join(process.resourcesPath, 'chrome-extension')
+          : path.join(__dirname, '..', 'chrome-integration-master');
+        shell.openPath(folder);
+      },
     },
     { type: 'separator' },
     {

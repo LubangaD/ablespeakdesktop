@@ -10,8 +10,18 @@ import { promisify } from 'util';
 import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { resolveAppName, pickWindow } from './app-names.js';
+import { SCREEN_MODEL_CS } from './uia/screen-model-cs.js';
 
 const execAsync = promisify(exec);
+
+// Windows PowerShell 5.1 reads a .ps1 file without a byte-order mark in the
+// ANSI code page. Text from speech or the screen (names, typed words) would
+// then be misread — and some misread bytes are quotes, which can end a string
+// early and run the rest as code. Every script file is written with a BOM.
+function writeScript(path, script) {
+  writeFileSync(path, '\uFEFF' + script, 'utf8');
+}
 
 /**
  * Sanitize a string for safe embedding in PowerShell commands.
@@ -86,14 +96,20 @@ while ($true) {
     Write-Output ("<<<DONE_" + $parts[0] + ">>>")
 }
 `;
-    writeFileSync(this.workerFile, UIA_PRELUDE + '\n' + workerLoop, 'utf8');
-    this.proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', this.workerFile], {
+    writeScript(this.workerFile, UIA_PRELUDE + '\n' + workerLoop);
+    this.ready = false;
+    this.buffer = '';
+    const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', this.workerFile], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    this.proc.stdout.on('data', (d) => this._onData(d.toString()));
-    this.proc.stderr.on('data', () => {}); // PS writes non-fatal noise to stderr
-    this.proc.on('exit', () => {
+    this.proc = proc;
+    // A worker killed after a timeout still fires its events later; they must
+    // not touch the worker that replaced it.
+    proc.stdout.on('data', (d) => { if (this.proc === proc) this._onData(d.toString()); });
+    proc.stderr.on('data', () => {}); // PS writes non-fatal noise to stderr
+    proc.on('exit', () => {
+      if (this.proc !== proc) return;
       this.proc = null;
       if (this.pending) {
         const p = this.pending;
@@ -102,12 +118,20 @@ while ($true) {
         p.reject(new Error('PowerShell worker exited'));
       }
     });
-    this.proc.on('error', () => { this.proc = null; });
+    proc.on('error', () => { if (this.proc === proc) this.proc = null; });
     console.log('[PSWorker] PowerShell worker started (UIA pre-loaded)');
   }
 
   _onData(chunk) {
     this.buffer += chunk;
+    // Drop everything up to the start-up marker, so it never ends up in the
+    // first command's output (including the first one after a restart).
+    if (!this.ready) {
+      const at = this.buffer.indexOf('PSWORKER_READY');
+      if (at === -1) return;
+      this.ready = true;
+      this.buffer = this.buffer.slice(at + 'PSWORKER_READY'.length).replace(/^\r?\n/, '');
+    }
     if (!this.pending) return;
     const idx = this.buffer.indexOf(this.pending.sentinel);
     if (idx !== -1) {
@@ -132,12 +156,12 @@ while ($true) {
       // them ends only that script, never the worker.)
       const scriptFile = join(tmpdir(), `ablespeak_cmd_${id}.ps1`);
       try {
-        writeFileSync(scriptFile, script, 'utf8');
+        writeScript(scriptFile, script);
       } catch (err) {
         return reject(err);
       }
       const cleanup = () => { try { unlinkSync(scriptFile); } catch {} };
-      this.buffer = '';
+      if (this.ready) this.buffer = '';
       this.pending = {
         sentinel,
         resolve: (out) => { cleanup(); resolve(out); },
@@ -191,7 +215,7 @@ export async function warmupSystemTools() {
 async function psScriptFile(script, timeoutMs = 8000) {
   const tmpFile = join(tmpdir(), `ablespeak_${Date.now()}.ps1`);
   try {
-    writeFileSync(tmpFile, UIA_PRELUDE + '\n' + script, 'utf8');
+    writeScript(tmpFile, UIA_PRELUDE + '\n' + script);
     const { stdout } = await execAsync(
       `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmpFile}"`,
       { timeout: timeoutMs }
@@ -213,6 +237,18 @@ async function psScript(script, timeoutMs = 8000) {
     console.warn('[PSWorker] Worker failed (' + err.message + ') — using temp-file fallback');
     return psScriptFile(script, timeoutMs + 5000);
   }
+}
+
+/** Run a script in the UI Automation worker (used by screen-model.js). */
+export const runPowerShell = psScript;
+
+/** End the PowerShell worker so a script or test process can exit. */
+export function stopSystemTools() {
+  const proc = _psWorker.proc;
+  if (!proc) return;
+  try { proc.stdin.write('EXIT\n'); } catch {}
+  try { proc.kill(); } catch {}
+  _psWorker.proc = null;
 }
 
 // ── System Media Control ──
@@ -424,38 +460,137 @@ Start-Sleep -Milliseconds 100
 
 // ── Focus / Switch Application ──
 
+/**
+ * Every window a student could switch to, front to back:
+ * [{ hwnd, process, title }]. Unlike Get-Process, this sees each open Word
+ * document, not just one window per program.
+ */
+export async function listVisibleWindows() {
+  const script = `
+$names = @{}
+Get-Process | ForEach-Object { $names[[string]$_.Id] = $_.ProcessName }
+foreach ($line in [WindowList]::Visible()) {
+    $parts = $line -split "\`t", 3
+    Write-Output ($parts[0] + "\`t" + $names[$parts[1]] + "\`t" + $parts[2])
+}
+`;
+  const output = await psScript(script);
+  return output.split(/\r?\n/)
+    .map(line => line.split('\t'))
+    .filter(parts => parts.length === 3 && /^\d+$/.test(parts[0]))
+    .map(([hwnd, process, title]) => ({ hwnd, process, title: title.trim() }));
+}
+
+// ── The student's app, never AbleSpeak's own windows ──
+
+const OWN_TITLE = /^AbleSpeak(?: Overlay$| — )/;
+const NOT_AN_APP = /^(?:Program Manager|Windows Input Experience)$/i;
+
+/** The dashboard, the overlay and their dialogs (this process), or the dashboard in a browser. */
+export function isOwnWindow(win, pid = process.pid) {
+  return String(win.pid) === String(pid) || OWN_TITLE.test(String(win.title || '').trim());
+}
+
+/** The window in front of all but AbleSpeak's: the app used last. */
+export function pickUserWindow(windows, pid = process.pid) {
+  return windows.find(w => !isOwnWindow(w, pid) && !NOT_AN_APP.test(String(w.title || '').trim())) || null;
+}
+
+/** The window in front, and every app window front to back. */
+async function readWindows() {
+  const out = await psScript(`
+$fg = [Win32Input]::GetForegroundWindow()
+$fgPid = [uint32]0
+[Win32Input]::GetWindowThreadProcessId($fg, [ref]$fgPid) | Out-Null
+Write-Output ("FG\`t" + $fg.ToInt64() + "\`t" + $fgPid)
+foreach ($line in [WindowList]::Visible()) { Write-Output $line }
+`);
+  const lines = String(out).split(/\r?\n/);
+  const [, fgHwnd = '0', fgPid = '0'] = (lines.find(l => l.startsWith('FG\t')) || '').split('\t');
+  const windows = lines
+    .map(line => line.split('\t'))
+    .filter(parts => parts.length === 3 && /^\d+$/.test(parts[0]))
+    .map(([hwnd, pid, title]) => ({ hwnd, pid, title: title.trim() }));
+  const front = fgHwnd === '0' ? null : (windows.find(w => w.hwnd === fgHwnd) || { hwnd: fgHwnd, pid: fgPid, title: '' });
+  return { front, windows };
+}
+
+/** The app the student is using, without changing what is in front. */
+async function userWindow() {
+  const { front, windows } = await readWindows();
+  return front && !isOwnWindow(front) ? front : pickUserWindow(windows);
+}
+
+/** "winword", "excel", "notepad"… for a window. */
+async function processNameOf(win) {
+  if (!win || !/^\d+$/.test(String(win.pid))) return '';
+  const out = await psScript(`(Get-Process -Id ${Number(win.pid)} -ErrorAction SilentlyContinue).ProcessName`);
+  return String(out).trim().toLowerCase();
+}
+
+/**
+ * Typing, keys and clicks go to the window in front. When that is AbleSpeak
+ * itself (a command sent from the Chat page, or the overlay was clicked),
+ * bring back the app that was in use before it.
+ *
+ * Returns { status, hwnd, title, switched } or { status: 'error', message }.
+ */
+export async function ensureUserAppInFront() {
+  const { front, windows } = await readWindows();
+  if (front && !isOwnWindow(front)) {
+    return { status: 'success', hwnd: front.hwnd, title: front.title, switched: false };
+  }
+
+  const target = pickUserWindow(windows);
+  if (!target) return { status: 'error', message: 'There is no app open to use. Open one first.' };
+  const result = await psScript(`
+$h = [IntPtr]${Number(target.hwnd)}
+[Win32Input]::ForceFocus($h) | Out-Null
+Start-Sleep -Milliseconds 200
+if ([Win32Input]::GetForegroundWindow() -ne $h) { [Win32Input]::ForceFocus($h) | Out-Null; Start-Sleep -Milliseconds 150 }
+if ([Win32Input]::GetForegroundWindow() -eq $h) { 'FOCUSED' } else { 'FOCUS_FAILED' }
+`);
+  if (String(result).trim() !== 'FOCUSED') {
+    return { status: 'error', message: `I couldn't bring "${target.title}" to the front.` };
+  }
+  console.log(`[SystemTools] AbleSpeak was in front; switched back to "${target.title}"`);
+  return { status: 'success', hwnd: target.hwnd, title: target.title, switched: true };
+}
+
 export async function focusApplication(appName) {
-  const safe = sanitizeForPS(appName);
-  if (!safe) return { status: 'error', message: 'Invalid application name' };
+  const { query, app } = resolveAppName(appName);
+  if (!query) return { status: 'error', message: 'Invalid application name' };
+
+  const target = pickWindow(await listVisibleWindows(), appName);
+  if (!target) {
+    return {
+      status: 'error',
+      message: app
+        ? `${app} isn't open. Say "open ${app}" to start it.`
+        : `I couldn't find an open window called "${appName}".`,
+    };
+  }
 
   // Uses Win32Input.ForceFocus (pre-compiled in UIA_PRELUDE) which calls
   // SetForegroundWindow with the Alt-key trick to bypass Windows'
-  // focus-stealing prevention.
+  // focus-stealing prevention. hwnd is digits only (checked when listed).
   const script = `
-$proc = Get-Process | Where-Object { $_.MainWindowTitle -like "*${safe}*" -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if (-not $proc) {
-    $proc = Get-Process -Name "*${safe}*" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-}
-if (-not $proc) { Write-Output "NOT_FOUND"; return }
-[Win32Input]::ForceFocus($proc.MainWindowHandle) | Out-Null
+$hWnd = [IntPtr]${target.hwnd}
+[Win32Input]::ForceFocus($hWnd) | Out-Null
 Start-Sleep -Milliseconds 200
 # Verify focus landed; retry once if Windows denied it
-$fg = [Win32Input]::GetForegroundWindow()
-if ($fg -ne $proc.MainWindowHandle) {
-    [Win32Input]::ForceFocus($proc.MainWindowHandle) | Out-Null
+if ([Win32Input]::GetForegroundWindow() -ne $hWnd) {
+    [Win32Input]::ForceFocus($hWnd) | Out-Null
     Start-Sleep -Milliseconds 150
 }
-Write-Output "Focused: $($proc.MainWindowTitle)"
+if ([Win32Input]::GetForegroundWindow() -eq $hWnd) { Write-Output "FOCUSED" } else { Write-Output "FOCUS_FAILED" }
 `;
 
   const result = await psScript(script);
-  if (result === 'NOT_FOUND') {
-    return { status: 'error', message: `Application "${appName}" not found or has no visible window` };
+  if (result !== 'FOCUSED') {
+    return { status: 'error', message: `Could not bring "${target.title}" to the front` };
   }
-  if (result === 'FOCUS_FAILED') {
-    return { status: 'error', message: `Could not bring "${appName}" to the foreground` };
-  }
-  return { status: 'success', message: result };
+  return { status: 'success', message: `Focused: ${target.title}` };
 }
 
 // ── Open Application ──
@@ -489,7 +624,8 @@ export async function openApplication(appName) {
   };
 
   const lower = appName.toLowerCase().trim();
-  const command = appMap[lower];
+  // "open my Word document" launches Word, like "open Word"
+  const command = appMap[lower] || resolveAppName(appName).launch;
 
   // Only allow whitelisted apps or sanitized names — never raw user input in shell
   if (!command) {
@@ -581,6 +717,9 @@ export async function sendKeys(keys) {
 
   sendKeysStr += regularKeys.join('');
 
+  const front = await ensureUserAppInFront();
+  if (front.status !== 'success') return { status: 'error', keys, message: front.message };
+
   const script = `
 $wshell = New-Object -ComObject wscript.shell
 Start-Sleep -Milliseconds 100
@@ -596,6 +735,8 @@ $wshell.SendKeys("${sendKeysStr}")
 // A student can't drag a title bar, so these matter for a usable desktop.
 export async function windowControl(action) {
   const A = String(action || '').toLowerCase().replace(/\s+/g, '_');
+  const front = await ensureUserAppInFront();
+  if (front.status !== 'success') return { status: 'error', error: front.message };
   const SHOW = { minimize: 6, maximize: 3, restore: 9 }; // SW_MINIMIZE / SW_MAXIMIZE / SW_RESTORE
 
   if (SHOW[A] !== undefined) {
@@ -630,6 +771,8 @@ Write-Output "OK"
 
 export async function typeTextSystem(text) {
   const escaped = escapeForPSString(text);
+  const front = await ensureUserAppInFront();
+  if (front.status !== 'success') return { status: 'error', text, message: front.message };
 
   // Clipboard-paste is far more reliable than SendKeys in apps like Word:
   // it handles special characters, respects autocorrect, and doesn't drop
@@ -647,57 +790,47 @@ Write-Output "OK"
 `;
 
   await psScript(script);
-  return { status: 'success', text, message: `Typed: ${text.substring(0, 50)}...` };
+  const where = front.title ? ` into ${front.title}` : '';
+  return { status: 'success', text, window: front.title, message: `Typed${where}: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}` };
 }
 
 // ── Dictation Text — insert into a specific window ──
 
 /**
- * Cache of the last non-AbleSpeak foreground HWND, set by captureDictationTarget().
- * Used by dictateText() to paste into the correct window.
+ * The window dictation types into, captured when dictation starts, so the
+ * text still lands there after the overlay or dashboard takes focus.
  */
-let _dictationTargetHwnd = null;
+let _dictationTarget = null; // { hwnd, pid, title }
 
 /**
- * Capture the current foreground window as the dictation target.
- * Call this the moment dictation mode is activated (before any TTS/overlay interaction).
+ * Capture the app in use as the dictation target: the window in front, or,
+ * when that is AbleSpeak, the app in front of the rest.
  */
 export async function captureDictationTarget() {
-  const script = `
-$fg = [Win32Input]::GetForegroundWindow()
-$proc = Get-Process | Where-Object { $_.MainWindowHandle -eq $fg } | Select-Object -First 1
-if ($proc -and $proc.MainWindowTitle -notlike '*AbleSpeak*' -and $proc.ProcessName -ne 'electron') {
-  Write-Output "$fg"
-} else {
-  # Foreground is AbleSpeak — find the most recently used non-AbleSpeak window
-  $alt = Get-Process | Where-Object {
-    $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and
-    $_.MainWindowTitle -notlike '*AbleSpeak*' -and $_.ProcessName -ne 'electron'
-  } | Select-Object -First 1
-  if ($alt) { Write-Output "$($alt.MainWindowHandle)" }
-  else { Write-Output "0" }
-}
-`;
-  const result = await psScript(script);
-  const hwnd = parseInt(result, 10);
-  _dictationTargetHwnd = isNaN(hwnd) || hwnd === 0 ? null : hwnd;
-  console.log(`[Dictation] Captured target HWND: ${_dictationTargetHwnd}`);
-  return _dictationTargetHwnd;
+  _dictationTarget = await userWindow();
+  console.log(`[Dictation] Target: ${_dictationTarget ? `"${_dictationTarget.title}" (${_dictationTarget.hwnd})` : 'none'}`);
+  return _dictationTarget ? Number(_dictationTarget.hwnd) : null;
 }
 
 export function clearDictationTarget() {
-  _dictationTargetHwnd = null;
+  _dictationTarget = null;
+}
+
+async function dictationWindow() {
+  return _dictationTarget || userWindow();
 }
 
 /**
  * Type text into the dictation target window.
- * Priority order:
- *   1. Word COM automation — types directly at the cursor, no focus tricks needed
- *   2. Excel COM automation — same idea for spreadsheets
- *   3. Clipboard paste — universal fallback for Notepad, browsers, etc.
+ *   1. Word, when the target is Word: COM automation types at the cursor, no focus tricks needed
+ *   2. Excel, when the target is Excel: the same for the active cell
+ *   3. Clipboard paste — everything else (Notepad, browsers…), and if COM fails
  */
 export async function dictateText(text) {
   const escaped = escapeForPSString(text);
+  const target = await dictationWindow();
+  if (!target) return { status: 'error', text, message: 'There is no app open to type into.' };
+  const app = await processNameOf(target);
 
   // ── Path 1: Microsoft Word (COM) ──
   // GetActiveObject finds the already-open Word instance without stealing focus.
@@ -713,7 +846,7 @@ try {
   Write-Output "OK_WORD"
 } catch { Write-Output "SKIP" }
 `;
-  const wordResult = (await psScript(wordScript, 6000)).trim();
+  const wordResult = app === 'winword' ? (await psScript(wordScript, 6000)).trim() : 'SKIP';
   if (wordResult === 'OK_WORD') {
     return { status: 'success', text, message: `Dictated to Word: ${text.substring(0, 50)}` };
   }
@@ -726,18 +859,14 @@ try {
   Write-Output "OK_EXCEL"
 } catch { Write-Output "SKIP" }
 `;
-  const excelResult = (await psScript(excelScript, 6000)).trim();
+  const excelResult = app === 'excel' ? (await psScript(excelScript, 6000)).trim() : 'SKIP';
   if (excelResult === 'OK_EXCEL') {
     return { status: 'success', text, message: `Dictated to Excel: ${text.substring(0, 50)}` };
   }
 
   // ── Path 3: Universal clipboard paste ──
-  const hwndExpr = _dictationTargetHwnd
-    ? `[IntPtr]${_dictationTargetHwnd}`
-    : `([Win32Input]::GetForegroundWindow())`;
-
   const script = `
-$hWnd = ${hwndExpr}
+$hWnd = [IntPtr]${Number(target.hwnd)}
 [Win32Input]::ForceFocus($hWnd) | Out-Null
 Start-Sleep -Milliseconds 250
 $savedClip = $null
@@ -801,8 +930,11 @@ export async function executeDictationCommand(command) {
   const keyCombo = SEND_KEYS[command];
   if (!wordAction && !keyCombo) return { status: 'error', message: `Unknown command: ${command}` };
 
+  const target = await dictationWindow();
+  if (!target) return { status: 'error', message: 'There is no app open to use.' };
+
   // Try Word COM (no focus change needed)
-  if (wordAction) {
+  if (wordAction && await processNameOf(target) === 'winword') {
     const wordScript = `
 try {
   $word = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application')
@@ -817,12 +949,9 @@ try {
   // SendKeys fallback — focus the saved dictation target first
   // Win32Input is already loaded by PSWorker via UIA_PRELUDE, so no Add-Type needed.
   if (keyCombo) {
-    const hwndExpr = _dictationTargetHwnd
-      ? `[IntPtr]${_dictationTargetHwnd}`
-      : `([Win32Input]::GetForegroundWindow())`;
     const script = `
-$hWnd = ${hwndExpr}
-[Win32Input]::SetForegroundWindow($hWnd) | Out-Null
+$hWnd = [IntPtr]${Number(target.hwnd)}
+[Win32Input]::ForceFocus($hWnd) | Out-Null
 Start-Sleep -Milliseconds 200
 $wsh = New-Object -ComObject wscript.shell
 $wsh.SendKeys("${keyCombo}")
@@ -841,6 +970,7 @@ Write-Output "OK"
 // ══════════════════════════════════════════════════════════════
 
 const UIA_PRELUDE = `
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @"
@@ -876,7 +1006,46 @@ public class Win32Input {
         return ok;
     }
 }
+public class WindowList {
+    public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
+    // Visible, titled top-level windows, front to back, as "hwnd<TAB>pid<TAB>title".
+    // Skips owned windows (dialogs, tool palettes) and cloaked ones (suspended
+    // Store apps, other virtual desktops), which Windows reports as visible.
+    public static string[] Visible() {
+        var found = new System.Collections.Generic.List<string>();
+        EnumWindows(delegate (IntPtr h, IntPtr l) {
+            if (!IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true;
+            int cloaked;
+            if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
+            var text = new System.Text.StringBuilder(512);
+            if (GetWindowText(h, text, 512) == 0) return true;
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            found.Add(h.ToInt64() + "\\t" + pid + "\\t" + text.ToString().Replace("\\t", " "));
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
+}
 "@
+Add-Type -AssemblyName WindowsBase
+$screenModelSource = @'
+${SCREEN_MODEL_CS}
+'@
+try {
+    Add-Type -TypeDefinition $screenModelSource -ErrorAction Stop -ReferencedAssemblies @(
+        [System.Windows.Automation.AutomationElement].Assembly.Location,
+        [System.Windows.Automation.ControlType].Assembly.Location,
+        [System.Windows.Rect].Assembly.Location)
+} catch {
+    [Console]::Error.WriteLine("ScreenModel did not compile: " + $_.Exception.Message)
+}
 function Get-TargetWindow([string]$app) {
     if ($app) {
         $proc = Get-Process -Name "*$app*" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
@@ -887,11 +1056,14 @@ function Get-TargetWindow([string]$app) {
     $hwnd = [Win32Input]::GetForegroundWindow()
     if ($hwnd -ne [IntPtr]::Zero) {
         $el = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-        if ($el -and $el.Current.Name -notlike '*AbleSpeak*') { return $el }
+        if ($el -and $el.Current.Name -notlike 'AbleSpeak*') { return $el }
     }
-    # Foreground is AbleSpeak itself (or nothing) — pick the first other visible app
-    $proc = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.MainWindowTitle -notlike '*AbleSpeak*' } | Select-Object -First 1
-    if ($proc) { return [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle) }
+    # Foreground is AbleSpeak itself (or nothing) — the app in front of the rest
+    foreach ($line in [WindowList]::Visible()) {
+        $parts = $line -split "\`t", 3
+        if ($parts[2] -like 'AbleSpeak*' -or $parts[2] -eq 'Program Manager' -or $parts[2] -eq 'Windows Input Experience') { continue }
+        return [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$parts[0])
+    }
     return $null
 }
 `;
@@ -1043,6 +1215,8 @@ export async function mouseClick(x, y, button = 'left', double_click = false) {
   const py = Math.max(0, parseInt(y, 10) || 0);
   const downFlag = button === 'right' ? '0x0008' : '0x0002';
   const upFlag = button === 'right' ? '0x0010' : '0x0004';
+  const front = await ensureUserAppInFront();
+  if (front.status !== 'success') return { status: 'error', message: front.message };
 
   const script = `
 [Win32Input]::SetCursorPos(${px}, ${py}) | Out-Null

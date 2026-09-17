@@ -10,6 +10,9 @@ import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { classifyConsequential } from './safety.js';
 
+/** The student whose session a tool runs in, for the resolution log. */
+const studentOf = wsHub => (wsHub?._evaluating ? null : wsHub?._attribution?.().student_id ?? null);
+
 // ── Tool Definitions ──
 
 const TOOLS = [
@@ -711,7 +714,7 @@ const TOOLS = [
   },
   {
     name: 'focus_application',
-    description: 'Bring a desktop application window to the foreground. Use this when the user wants to switch to an app like Spotify, Notepad, Chrome, VS Code, etc.',
+    description: 'Bring a desktop application window to the foreground. Use this when the user wants to switch to an app like Spotify, Notepad, Chrome, VS Code, etc. Everyday names work ("Word document", "my spreadsheet"), and so does the title of an open document ("bring my essay to the front").',
     parameters: {
       type: 'object',
       properties: {
@@ -780,6 +783,63 @@ const TOOLS = [
   },
   // ── Desktop UI Automation — see and click anything in ANY desktop app ──
   {
+    name: 'uia_query',
+    description: "Read the controls in a desktop app window through Windows accessibility — fast, no screenshot needed. Returns each control's ref, type, name, position, state (focused, toggled, expanded, selected, current value) and the actions it supports: invoke, set_value, toggle, expand_collapse, select, scroll, scroll_into_view, read_text. Use this first to understand any desktop app, then act with uia_act using a ref. Omit app_name for the window the student is using.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_name: { type: 'string', description: 'The app or document to read (e.g. "word", "spotify", "my essay"). Omit for the window the student is using.' },
+        name: { type: 'string', description: 'Only list controls whose name contains this text.' },
+        limit: { type: 'number', description: 'Most controls to return (default 80, up to 200).' },
+      },
+    },
+    selector: {},
+    execute: async (args) => {
+      const { getScreenModel, describeElements } = await import('./screen-model.js');
+      const model = await getScreenModel({ app: args.app_name, fresh: true, maxElements: 400, restore: true });
+      if (model.status !== 'success') return model;
+      const filter = String(args.name || '').toLowerCase().trim();
+      const matching = filter ? model.elements.filter(e => e.name.toLowerCase().includes(filter)) : model.elements;
+      const limit = Math.max(1, Math.min(200, Number(args.limit) || 80));
+      const shown = matching.slice(0, limit);
+      return {
+        status: 'success',
+        window: model.window,
+        app: model.app,
+        count: matching.length,
+        total: model.total,
+        ms: model.ms,
+        elements: shown,
+        message: `${model.window} — ${matching.length} control${matching.length === 1 ? '' : 's'}${matching.length > shown.length ? ` (first ${shown.length})` : ''}:\n${describeElements({ elements: shown }, limit)}`,
+      };
+    },
+  },
+  {
+    name: 'uia_act',
+    description: "Act on a control in a desktop app through its own accessibility action — press a button (invoke), switch a checkbox (toggle), pick a list or tab item (select), open or close a menu or tree item (expand / collapse), replace a field's text (set_value, with value), scroll a pane (scroll_up / scroll_down / scroll_left / scroll_right), bring a control into view (scroll_into_view), read a document's text (read_text) or move focus (focus). Give the ref from uia_query, or the control's name. Leave action out to press it. Prefer this to clicking screen coordinates.",
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: "The control's ref from uia_query." },
+        name: { type: 'string', description: "The control's visible name, if you have no ref." },
+        app_name: { type: 'string', description: 'The app containing it. Omit for the window the student is using.' },
+        action: {
+          type: 'string',
+          enum: ['invoke', 'toggle', 'select', 'expand', 'collapse', 'set_value', 'focus', 'scroll_into_view', 'scroll_up', 'scroll_down', 'scroll_left', 'scroll_right', 'read_text'],
+          description: 'What to do. Omit to press the control.',
+        },
+        value: { type: 'string', description: 'Text for set_value.' },
+        type: { type: 'string', description: 'Only match controls of this type (e.g. "Button", "Edit") when using name.' },
+      },
+    },
+    selector: {},
+    execute: async (args, wsHub) => {
+      if (!args.ref && !args.name) return { status: 'error', message: "Give a ref from uia_query or the control's name." };
+      const { actOnElement } = await import('./screen-model.js');
+      return actOnElement({ ...args, app: args.app_name, studentId: studentOf(wsHub) });
+    },
+  },
+  {
     name: 'list_desktop_elements',
     description: 'Scan a desktop application window and list ALL its clickable elements (buttons, menus, inputs, list items) with their names. This is your EYES on desktop apps — use it when you need to know what can be clicked, or when click_desktop_element could not find an element. Omit app_name to scan the window the user is currently using.',
     parameters: {
@@ -790,8 +850,28 @@ const TOOLS = [
     },
     selector: {},
     execute: async (args) => {
-      const { listDesktopElements } = await import('./system-tools.js');
-      return listDesktopElements(args.app_name);
+      // Same answer as before, read through the faster screen model.
+      const { getScreenModel } = await import('./screen-model.js');
+      const model = await getScreenModel({ app: args.app_name, fresh: true, maxElements: 200, restore: true });
+      if (model.status !== 'success') {
+        const { listDesktopElements } = await import('./system-tools.js');
+        return model.code === 'MINIMIZED' ? model : listDesktopElements(args.app_name);
+      }
+      const elements = model.elements
+        .filter(e => e.actions.length && e.name)
+        .slice(0, 60)
+        .map(e => ({
+          name: e.name, type: e.type, enabled: e.enabled !== false, ref: e.ref,
+          x: Math.round(e.rect[0] + e.rect[2] / 2), y: Math.round(e.rect[1] + e.rect[3] / 2),
+        }));
+      return {
+        status: 'success',
+        window: model.window,
+        count: elements.length,
+        elements,
+        message: `Found ${elements.length} interactive elements in "${model.window}": ` +
+          elements.slice(0, 25).map(e => `"${e.name}" (${e.type})`).join(', '),
+      };
     },
   },
   {
@@ -809,8 +889,31 @@ const TOOLS = [
       },
     },
     selector: {},
-    execute: async (args) => {
-      const { clickDesktopElement } = await import('./system-tools.js');
+    execute: async (args, wsHub) => {
+      const { clickDesktopElement, mouseClick } = await import('./system-tools.js');
+      const { actOnElement, recordResolution, resolveTargetWindow } = await import('./screen-model.js');
+      const studentId = studentOf(wsHub);
+      const plainClick = !args.double_click && (args.button || 'left') === 'left';
+
+      // By name: act through the control's accessibility action first.
+      if (args.name && plainClick) {
+        const result = await actOnElement({ app: args.app_name, name: args.name, studentId });
+        if (result.status === 'success' || result.notFound || result.code === 'MINIMIZED') return result;
+        // Found, but it would not take the action: click where it is.
+        if (result.element?.rect && ['NOT_SUPPORTED', 'FAILED'].includes(result.code)) {
+          const [x, y, w, h] = result.element.rect;
+          const clicked = await mouseClick(x + w / 2, y + h / 2);
+          return { ...clicked, message: `Clicked "${result.element.name}"` };
+        }
+        // The screen model could not read the window: use the older scan.
+      }
+
+      // A bare screen position (usually read off the screenshot) is a pixel,
+      // not a control — counted separately for the UIA resolution rate.
+      if (typeof args.x === 'number' && typeof args.y === 'number' && !args.name) {
+        const win = await resolveTargetWindow(args.app_name).catch(() => null);
+        recordResolution({ app: win?.process || args.app_name, method: 'coordinates', action: 'click', started: Date.now(), studentId });
+      }
       return clickDesktopElement(args);
     },
   },
@@ -1000,6 +1103,16 @@ export class ToolRegistry {
     this.pendingToolCalls = new Map();
   }
 
+  /** The desktop control a uia_act / click_desktop_element call will press, or null. */
+  async findDesktopControl(args) {
+    const { getScreenModel, findElement } = await import('./screen-model.js');
+    const model = await getScreenModel({ app: args.app_name, maxElements: 400 });
+    if (model.status !== 'success') return null;
+    return args.ref
+      ? model.elements.find(e => e.ref === args.ref) || null
+      : findElement(model, args.name, { type: args.type });
+  }
+
   /**
    * Get tools available for the current context
    */
@@ -1036,7 +1149,7 @@ export class ToolRegistry {
     // "yes") bypasses the gate. This is the single chokepoint for BOTH the
     // fast path and the AI tool-calling loop.
     if (!opts.confirmed) {
-      const consequence = classifyConsequential(name, this._resolveGateArgs(name, args, wsHub));
+      const consequence = classifyConsequential(name, await this._resolveGateArgs(name, args, wsHub));
       if (consequence) {
         if (wsHub) {
           wsHub._pendingConfirmation = { tool: name, args, prompt: consequence.prompt, id: consequence.id };
@@ -1067,7 +1180,19 @@ export class ToolRegistry {
    * in reverse, so the safety gate can see what's actually about to be clicked
    * instead of gating on the tool name alone (CVA-1).
    */
-  _resolveGateArgs(name, args, wsHub) {
+  async _resolveGateArgs(name, args, wsHub) {
+    // Desktop controls: gate on the control that will actually be pressed —
+    // a ref carries no name, and a spoken name may match a longer one
+    // ("receive" → "Send/Receive").
+    if ((name === 'uia_act' || name === 'click_desktop_element') && (args?.ref || args?.name)) {
+      try {
+        const element = await this.findDesktopControl(args);
+        if (element?.name) return { ...args, resolvedLabel: element.name };
+      } catch {
+        // The screen could not be read; gate on the words given.
+      }
+      return args;
+    }
     if (name !== 'click_element' || args?.label || !args?.xpath || !wsHub) return args;
     const elements = wsHub.browserContext?.pageContext?.viewportElements || [];
     const match = elements.find(el => el.xpath === args.xpath);

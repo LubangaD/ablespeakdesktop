@@ -5,6 +5,9 @@ import { ChevronDown, ChevronRight, Folder, FileText, Search } from 'lucide-reac
 
 export default function Context() {
   const { data: context } = useQuery({ queryKey: ['context'], queryFn: api.getContext, refetchInterval: 1000 });
+  // The desktop window, read through Windows accessibility (Stage 2)
+  const { data: screen } = useQuery({ queryKey: ['screen'], queryFn: api.getScreen, refetchInterval: 5000, retry: false });
+  const { data: resolution } = useQuery({ queryKey: ['resolution'], queryFn: () => api.getResolution(30), refetchInterval: 30000 });
   const [selectedKey, setSelectedKey] = useState('');
   const [selectedValue, setSelectedValue] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
@@ -15,7 +18,9 @@ export default function Context() {
   }, []);
 
   // Build the context tree structure that mirrors Voqal's tree
-  const contextTree = context && !context.message ? buildContextTree(context) : null;
+  const browserTree = context && !context.message ? buildContextTree(context) : null;
+  const desktopTree = buildDesktopTree(screen, resolution);
+  const contextTree = browserTree || desktopTree ? { ...(desktopTree || {}), ...(browserTree || {}) } : null;
 
   return (
     <div className="as-context-page">
@@ -46,7 +51,7 @@ export default function Context() {
                   depth={0}
                   onSelect={handleNodeSelect}
                   selectedKey={selectedKey}
-                  defaultOpen={key === 'assistant' || key === 'computer'}
+                  defaultOpen={key === 'assistant' || key === 'computer' || key === 'desktop'}
                   showDebug={showDebug}
                 />
               ))}
@@ -77,6 +82,34 @@ export default function Context() {
       </div>
     </div>
   );
+}
+
+// What AbleSpeak reads from the desktop window, and how often it found
+// controls through the accessibility tree rather than by screen position.
+function buildDesktopTree(screen, resolution) {
+  const tree = {};
+  if (screen?.status === 'success') {
+    tree.desktop = {
+      window: screen.window,
+      app: screen.app,
+      controls: screen.total,
+      withActions: screen.actionable,
+      readMs: screen.ms,
+      elements: screen.elements.map(e => `${e.type} "${e.name}"${e.actions.length ? ` [${e.actions.join(', ')}]` : ''}`),
+    };
+  }
+  if (resolution?.apps?.length) {
+    tree.screenResolution = Object.fromEntries(resolution.apps.map(app => [app.app, {
+      resolutionRate: app.resolutionRate == null ? '—' : `${Math.round(app.resolutionRate * 100)}%`,
+      throughControls: app.uia,
+      byScreenPosition: app.coordinates,
+      notFound: app.not_found,
+      failedActions: app.failed_actions,
+      attempts: app.attempts,
+      since: resolution.since,
+    }]));
+  }
+  return Object.keys(tree).length ? tree : null;
 }
 
 function buildContextTree(data) {

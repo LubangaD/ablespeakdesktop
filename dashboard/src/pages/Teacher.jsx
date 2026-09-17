@@ -13,7 +13,14 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { RecognitionReadout, SpeechSettings } from '../components/StudentSpeech';
 import { AlertTriangle, CheckCircle2, Flag, TrendingUp, Target, PlusCircle, ChevronDown, ChevronUp } from 'lucide-react';
+
+// Today in this computer's time zone — the server counts days the same way.
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // ── Inline math (mirrors server/src/progress-rules.js — no shared import) ──
 
@@ -80,7 +87,7 @@ const CW = W - ML - MR, CH = H - MT - MB;
 // ── Progress Chart ──
 function ProgressChart({ goal, points, phases }) {
   const sorted = useMemo(() => [...points].sort((a, b) => a.measured_at.localeCompare(b.measured_at)), [points]);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
 
   const baseMs = useMemo(() => new Date(goal.baseline_date).getTime(), [goal]);
   const targetMs = useMemo(() => new Date(goal.target_date).getTime(), [goal]);
@@ -342,7 +349,7 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
   const [showForm, setShowForm] = useState(false);
   const [measure, setMeasure] = useState('independence_rate');
   const [baselineValue, setBaselineValue] = useState('');
-  const [baselineDate, setBaselineDate] = useState(new Date().toISOString().slice(0, 10));
+  const [baselineDate, setBaselineDate] = useState(localToday());
   const [targetValue, setTargetValue] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [suggestionLoading, setSuggestionLoading] = useState(false);
@@ -356,7 +363,7 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
       const result = await api.getBaselineSuggestion(studentId, measure);
       if (result.value !== null) {
         setBaselineValue(result.value.toFixed(3));
-        setBaselineDate(new Date().toISOString().slice(0, 10));
+        setBaselineDate(localToday());
       } else {
         setFormError('No data in the last 14 days for this measure.');
       }
@@ -379,7 +386,7 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
         target_value: Number(targetValue),
         target_date: targetDate,
       });
-      queryClient.invalidateQueries(['goals', studentId]);
+      queryClient.invalidateQueries({ queryKey: ['goals', studentId] });
       setShowForm(false);
       setBaselineValue(''); setTargetValue(''); setTargetDate('');
       if (onGoalCreated) onGoalCreated();
@@ -509,7 +516,7 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
 // ── Phase Change Quick-Add ──
 function PhasePanel({ goalId, queryClient }) {
   const [label, setLabel] = useState('');
-  const [changedAt, setChangedAt] = useState(new Date().toISOString().slice(0, 10));
+  const [changedAt, setChangedAt] = useState(localToday());
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
 
@@ -518,7 +525,7 @@ function PhasePanel({ goalId, queryClient }) {
     setErr('');
     try {
       await api.addPhase(goalId, { changed_at: changedAt, label: label.trim(), note: note.trim() || undefined });
-      queryClient.invalidateQueries(['phases', goalId]);
+      queryClient.invalidateQueries({ queryKey: ['phases', goalId] });
       setLabel(''); setNote('');
     } catch (ex) {
       setErr(ex.message);
@@ -565,7 +572,7 @@ function GoalActions({ goalId, status, queryClient, onDeselect }) {
     setLoading(newStatus);
     try {
       await api.patchGoal(goalId, { status: newStatus });
-      queryClient.invalidateQueries(['goals']);
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
       if (onDeselect) onDeselect();
     } catch {}
     setLoading('');
@@ -637,13 +644,13 @@ function AnalyticsSummary() {
 
       {students.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          No students added yet — add one from the Settings page to start tracking success rate.
+          No students added yet — add one above to start tracking success rate.
         </p>
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <caption className="sr-only" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
-              Per-student success rate, command count, average latency, most-used command, and last active time
+              Per-student success rate, command count, average latency, sessions in the last 7 days, most-used command, and last active time
             </caption>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -651,6 +658,7 @@ function AnalyticsSummary() {
                 <th style={thStyle} scope="col">Success Rate</th>
                 <th style={thStyle} scope="col">Commands</th>
                 <th style={thStyle} scope="col">Avg Latency</th>
+                <th style={thStyle} scope="col">Sessions (7 days)</th>
                 <th style={thStyle} scope="col">Top Command</th>
                 <th style={thStyle} scope="col">Last Active</th>
               </tr>
@@ -672,6 +680,7 @@ function AnalyticsSummary() {
                   </td>
                   <td style={tdStyle}>{s.commands}</td>
                   <td style={tdStyle}>{s.avgLatency ? `${s.avgLatency}ms` : '—'}</td>
+                  <td style={tdStyle}>{s.sessionsThisWeek ?? 0}</td>
                   <td style={tdStyle}>{s.topCommand}</td>
                   <td style={tdStyle}>{s.lastActive}</td>
                 </tr>
@@ -680,6 +689,142 @@ function AnalyticsSummary() {
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+// ── Who is using this computer (AT-50) ──
+// Every voice command is saved against the student chosen here, and the
+// choice stays after the app restarts. Picking again starts a new session.
+function WhoIsHerePanel({ students }) {
+  const queryClient = useQueryClient();
+  const [choice, setChoice] = useState('');
+  const [newName, setNewName] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const { data: active } = useQuery({
+    queryKey: ['activeStudent'],
+    queryFn: api.getActiveStudent,
+    refetchInterval: 15000,
+  });
+  const current = active?.student || null;
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['activeStudent'] });
+    queryClient.invalidateQueries({ queryKey: ['students'] });
+    queryClient.invalidateQueries({ queryKey: ['teacherAnalytics'] });
+  };
+  const report = (tone, text) => setResult({ tone, text });
+
+  const choose = useMutation({
+    mutationFn: (studentId) => api.setActiveStudent(studentId),
+    onSuccess: (data) => {
+      refresh();
+      setChoice('');
+      report('success', data.student
+        ? `Recording for ${data.student.name} from now on.`
+        : 'No student chosen. Commands are not added to anyone\'s progress.');
+    },
+    onError: (err) => report('error', err.message),
+  });
+
+  const add = useMutation({
+    mutationFn: (name) => api.addStudent(name),
+    onSuccess: (student) => {
+      refresh();
+      setNewName('');
+      setChoice(String(student.id));
+      report('success', `${student.name} added. Choose them above to start recording their progress.`);
+    },
+    onError: (err) => report('error', err.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id) => api.deleteStudent(id),
+    onSuccess: () => { refresh(); setConfirmRemove(null); report('success', 'Student removed.'); },
+    onError: (err) => report('error', err.message),
+  });
+
+  const since = active?.startedAt ? active.startedAt.slice(11, 16) : null;
+  const selected = choice === '' ? null : choice;
+
+  return (
+    <section aria-labelledby="who-heading" className="card" style={{ marginBottom: 32 }}>
+      <h3 id="who-heading" className="settings-heading">Who is using this computer</h3>
+      <p className="settings-lead" aria-live="polite">
+        {current
+          ? <>Recording for <strong>{current.name}</strong>{since ? ` since ${since}` : ''}. Their voice commands count toward their progress.</>
+          : 'No student chosen. Voice commands are not added to anyone\'s progress until you choose one.'}
+      </p>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
+        <div style={{ flex: '1 1 220px' }}>
+          <label htmlFor="who-select" className="settings-label">Student at this computer</label>
+          <select id="who-select" className="settings-input" value={choice} onChange={e => setChoice(e.target.value)}>
+            <option value="">— choose a student —</option>
+            {students.map(s => (
+              <option key={s.id} value={s.id}>{s.name}{current?.id === s.id ? ' (now)' : ''}</option>
+            ))}
+          </select>
+        </div>
+        <button type="button" className="settings-btn primary"
+          disabled={!selected || choose.isPending}
+          onClick={() => choose.mutate(Number(selected))}>
+          {choose.isPending ? 'Starting…' : 'Start their session'}
+        </button>
+        {current && (
+          <button type="button" className="settings-btn quiet"
+            disabled={choose.isPending}
+            onClick={() => choose.mutate(null)}>
+            End session
+          </button>
+        )}
+      </div>
+
+      <form
+        onSubmit={e => { e.preventDefault(); if (newName.trim()) add.mutate(newName.trim()); }}
+        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}
+      >
+        <div style={{ flex: '1 1 220px' }}>
+          <label htmlFor="who-new" className="settings-label">Add a student</label>
+          <input id="who-new" className="settings-input" value={newName} maxLength={80}
+            onChange={e => setNewName(e.target.value)} placeholder="First name, or initials" autoComplete="off" />
+        </div>
+        <button type="submit" className="settings-btn quiet" disabled={!newName.trim() || add.isPending}>
+          {add.isPending ? 'Adding…' : 'Add student'}
+        </button>
+      </form>
+
+      {students.length > 0 && (
+        <details style={{ marginTop: 16 }}>
+          <summary style={{ cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+            Remove a student ({students.length})
+          </summary>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {students.map(s => (
+              <li key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ flex: 1, color: 'var(--text-primary)' }}>{s.name}</span>
+                {confirmRemove === s.id ? (
+                  <>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Their goals stay; their name goes.</span>
+                    <button type="button" className="settings-btn danger" disabled={remove.isPending}
+                      onClick={() => remove.mutate(s.id)}>Remove {s.name}</button>
+                    <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(null)}>Keep</button>
+                  </>
+                ) : (
+                  <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(s.id)}
+                    aria-label={`Remove ${s.name}`}>Remove</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <p className={`settings-result ${result?.tone || ''}`} role="status" aria-live="polite">
+        {result?.text || ''}
+      </p>
     </section>
   );
 }
@@ -755,7 +900,7 @@ export default function Teacher() {
 
   const handleAck = async (flagId) => {
     await api.acknowledgeFlag(flagId);
-    queryClient.invalidateQueries(['flags', goalId]);
+    queryClient.invalidateQueries({ queryKey: ['flags', goalId] });
   };
 
   const handleStudentChange = (e) => {
@@ -773,12 +918,14 @@ export default function Teacher() {
         <p>Tier 2 — goal-referenced progress monitoring for individual students</p>
       </header>
 
+      <WhoIsHerePanel students={students} />
+
       <AnalyticsSummary />
 
       {/* Student selector */}
       <section aria-label="Student selection" style={{ marginBottom: 24 }}>
         <label htmlFor="teacher-student-select" style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>
-          Select Student
+          View a student's progress
         </label>
         <select
           id="teacher-student-select"
@@ -823,7 +970,7 @@ export default function Teacher() {
                   goalId={goalId}
                   status={selectedGoal.status}
                   queryClient={queryClient}
-                  onDeselect={() => { setGoalId(null); queryClient.invalidateQueries(['goals', studentId, 'all']); }}
+                  onDeselect={() => { setGoalId(null); queryClient.invalidateQueries({ queryKey: ['goals', studentId, 'all'] }); }}
                 />
               </div>
 
@@ -838,11 +985,18 @@ export default function Teacher() {
             goals={goals}
             selectedGoalId={goalId}
             onGoalSelect={setGoalId}
-            onGoalCreated={() => queryClient.invalidateQueries(['goals', studentId, 'all'])}
+            onGoalCreated={() => queryClient.invalidateQueries({ queryKey: ['goals', studentId, 'all'] })}
             queryClient={queryClient}
           />
 
-          {/* 4. Secondary usage strip */}
+          {/* 4. How well they are heard, and the settings that help */}
+          <RecognitionReadout studentId={studentId} />
+          <SpeechSettings
+            studentId={studentId}
+            studentName={students.find(s => String(s.id) === String(studentId))?.name || 'this student'}
+          />
+
+          {/* 5. Secondary usage strip */}
           <UsageStrip studentId={studentId} />
         </>
       )}

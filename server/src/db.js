@@ -110,6 +110,74 @@ function migrate() {
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_progress_points_goal ON progress_points(goal_id)`); } catch {}
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_decision_flags_goal ON decision_flags(goal_id)`); } catch {}
 
+  // ── Student identity (AT-50) ──
+  // Which student is using this computer is saved here, so it survives a
+  // restart, and every session and voice command records that student
+  // directly instead of being matched later by a text prefix.
+  db.run(`CREATE TABLE IF NOT EXISTS device_state (key TEXT PRIMARY KEY, value TEXT)`);
+  try { db.run(`ALTER TABLE sessions ADD COLUMN student_id INTEGER`); } catch {}
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_student ON sessions(student_id)`); } catch {}
+  // ── Student speech profiles (Stage 1 / Stage 4) — JSON, see student-profile.js ──
+  db.run(`CREATE TABLE IF NOT EXISTS student_profiles (
+    student_id INTEGER PRIMARY KEY,
+    profile TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
+  // ── Every voice turn, for the recognition readout (Stage 1) ──
+  // outcome: 'no_speech' (nothing usable heard), 'filtered' (heard, but
+  // treated as noise, music or echo), 'command', 'dictation', 'control'
+  // (sleep, stop, …) or 'error' (the recogniser failed).
+  db.run(`CREATE TABLE IF NOT EXISTS voice_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    student_id INTEGER,
+    session_id TEXT,
+    outcome TEXT NOT NULL,
+    transcript TEXT,
+    command_id TEXT,
+    audio_kb INTEGER,
+    ms INTEGER
+  )`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_voice_turns_student ON voice_turns(student_id, created_at)`); } catch {}
+
+  // ── "No, I meant …" pairs, from which shortcuts are learned (Stage 4) ──
+  db.run(`CREATE TABLE IF NOT EXISTS correction_pairs (
+    student_id INTEGER NOT NULL,
+    heard TEXT NOT NULL,
+    meant TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    last_at TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (student_id, heard, meant)
+  )`);
+
+  // ── How desktop targets were found (Stage 2 UIA resolution rate) ──
+  // method: 'uia' (found in the accessibility tree), 'coordinates' (a screen
+  // position, e.g. from the screenshot), 'not_found'.
+  db.run(`CREATE TABLE IF NOT EXISTS resolution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    app TEXT NOT NULL,
+    method TEXT NOT NULL,
+    action TEXT,
+    found INTEGER NOT NULL,
+    ok INTEGER,
+    ms INTEGER,
+    student_id INTEGER
+  )`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_resolution_app ON resolution_log(app)`); } catch {}
+
+  if (!getDeviceState('prefix_attribution_migrated')) {
+    // Once: commands saved under the old prefix scheme get their student.
+    db.run(`UPDATE commands SET student_id = (
+        SELECT s.id FROM students s
+        WHERE s.session_prefix IS NOT NULL AND s.session_prefix != ''
+          AND commands.session_id LIKE (s.session_prefix || '%')
+        ORDER BY s.id LIMIT 1)
+      WHERE student_id IS NULL AND session_id IS NOT NULL AND type LIKE 'voice%'`);
+    setDeviceState('prefix_attribution_migrated', '1');
+  }
+
   saveToFile();
 }
 
@@ -130,6 +198,18 @@ function queryOne(sql, params = []) {
 
 function run(sql, params = []) {
   db.run(sql, params);
+}
+
+// ── Device state ──
+
+export function getDeviceState(key) {
+  return queryOne('SELECT value FROM device_state WHERE key = ?', [key])?.value ?? null;
+}
+
+/** Save a value for this device; null removes it. */
+export function setDeviceState(key, value) {
+  if (value == null) run('DELETE FROM device_state WHERE key = ?', [key]);
+  else run('INSERT INTO device_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, String(value)]);
 }
 
 // ── Commands ──
@@ -172,7 +252,7 @@ export function insertCommand({ id, type, direction, payload, result, latency_ms
   // Only voice-originated commands feed the KPI engine — dev/chat test
   // traffic from the dashboard's Chat page must not pollute a student's data.
   const isVoice = typeof type === 'string' && type.startsWith('voice');
-  const resolvedStudentId = student_id ?? (isVoice ? resolveStudentIdForSession(session_id) : null);
+  const resolvedStudentId = isVoice ? (student_id ?? resolveStudentIdForSession(session_id)) : null;
   const resolvedOutcome = outcome ?? (isVoice ? deriveOutcome(resultStr) : null);
   const resolvedPromptCount = prompt_count ?? (isVoice ? 0 : null);
 
@@ -182,6 +262,15 @@ export function insertCommand({ id, type, direction, payload, result, latency_ms
      resultStr,
      latency_ms || null, session_id || null,
      resolvedStudentId, resolvedOutcome, resolvedPromptCount]);
+  if (session_id) run('UPDATE sessions SET command_count = command_count + 1 WHERE id = ?', [session_id]);
+}
+
+/**
+ * Change a saved command's outcome: 'error' when the student undid it,
+ * 'superseded' when a later try at the same task replaced it.
+ */
+export function updateCommandOutcome(id, outcome) {
+  run('UPDATE commands SET outcome = ? WHERE id = ?', [outcome, id]);
 }
 
 export function getCommands({ limit = 50, offset = 0, type = null, direction = null } = {}) {
@@ -205,8 +294,25 @@ export function getCommandStats() {
 
 // ── Sessions ──
 
-export function insertSession({ id, started_at }) { run('INSERT INTO sessions (id,started_at) VALUES (?,?)', [id, started_at]); }
-export function getSessions({ limit = 20 } = {}) { return query('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?', [limit]); }
+export function insertSession({ id, started_at, student_id = null }) {
+  run('INSERT INTO sessions (id,started_at,student_id) VALUES (?,?,?)', [id, started_at, student_id]);
+}
+export function endSession(id, ended_at) {
+  run('UPDATE sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL', [ended_at, id]);
+}
+
+/** Sessions left open by a crash or forced quit end at their last command. */
+export function closeAbandonedSessions() {
+  run(`UPDATE sessions SET ended_at = COALESCE(
+      (SELECT MAX(created_at) FROM commands WHERE commands.session_id = sessions.id), started_at)
+    WHERE ended_at IS NULL`);
+}
+export function getSessions({ limit = 20, studentId = null } = {}) {
+  if (studentId != null) {
+    return query('SELECT * FROM sessions WHERE student_id = ? ORDER BY started_at DESC LIMIT ?', [studentId, limit]);
+  }
+  return query('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?', [limit]);
+}
 
 // ── Log Events ──
 
@@ -244,6 +350,10 @@ export function getStudents() {
   return query('SELECT * FROM students ORDER BY name ASC');
 }
 
+export function getStudent(id) {
+  return queryOne('SELECT * FROM students WHERE id = ?', [id]);
+}
+
 export function addStudent({ name, session_prefix }) {
   run('INSERT INTO students (name, session_prefix) VALUES (?, ?)', [name, session_prefix || null]);
   return queryOne('SELECT * FROM students WHERE id = last_insert_rowid()');
@@ -251,37 +361,34 @@ export function addStudent({ name, session_prefix }) {
 
 export function deleteStudent(id) {
   run('DELETE FROM students WHERE id = ?', [id]);
+  run('DELETE FROM student_profiles WHERE student_id = ?', [id]);
+  run('DELETE FROM correction_pairs WHERE student_id = ?', [id]);
 }
 
 export function getTeacherAnalytics() {
   const students = getStudents();
 
-  // Per-student stats: join students to commands via session_prefix
+  // Per-student stats, from the student recorded on each command
   const perStudent = students.map(s => {
-    const prefix = s.session_prefix || s.name;
-    const total = queryOne(
-      `SELECT COUNT(*) as count FROM commands WHERE session_id LIKE ?`,
-      [`${prefix}%`]
-    );
-    const successCount = queryOne(
-      `SELECT COUNT(*) as count FROM commands WHERE session_id LIKE ? AND (result NOT LIKE '%error%' AND result NOT LIKE '%Error%')`,
-      [`${prefix}%`]
-    );
-    const avgLat = queryOne(
-      `SELECT ROUND(AVG(latency_ms), 0) as avg_ms FROM commands WHERE session_id LIKE ? AND latency_ms IS NOT NULL`,
-      [`${prefix}%`]
+    const stats = queryOne(
+      `SELECT SUM(CASE WHEN outcome IS NULL OR outcome != 'superseded' THEN 1 ELSE 0 END) AS total,
+              SUM(CASE WHEN outcome IN ('success','repaired') THEN 1 ELSE 0 END) AS succeeded,
+              ROUND(AVG(latency_ms), 0) AS avg_ms,
+              MAX(created_at) AS last_active
+       FROM commands WHERE student_id = ?`,
+      [s.id]
     );
     const topCmd = queryOne(
-      `SELECT type, COUNT(*) as count FROM commands WHERE session_id LIKE ? GROUP BY type ORDER BY count DESC LIMIT 1`,
-      [`${prefix}%`]
+      `SELECT type, COUNT(*) as count FROM commands WHERE student_id = ? GROUP BY type ORDER BY count DESC LIMIT 1`,
+      [s.id]
     );
-    const lastActive = queryOne(
-      `SELECT created_at FROM commands WHERE session_id LIKE ? ORDER BY created_at DESC LIMIT 1`,
-      [`${prefix}%`]
+    const sessionsThisWeek = queryOne(
+      `SELECT COUNT(*) AS count FROM sessions WHERE student_id = ? AND started_at >= datetime('now', '-7 days', 'localtime')`,
+      [s.id]
     );
 
-    const totalCount = total?.count || 0;
-    const succCount = successCount?.count || 0;
+    const totalCount = stats?.total || 0;
+    const succCount = stats?.succeeded || 0;
 
     return {
       id: s.id,
@@ -289,9 +396,10 @@ export function getTeacherAnalytics() {
       session_prefix: s.session_prefix,
       commands: totalCount,
       successRate: totalCount > 0 ? Math.round((succCount / totalCount) * 100) : 0,
-      avgLatency: avgLat?.avg_ms || 0,
+      avgLatency: stats?.avg_ms || 0,
       topCommand: topCmd?.type || '—',
-      lastActive: lastActive?.created_at || '—',
+      lastActive: stats?.last_active || '—',
+      sessionsThisWeek: sessionsThisWeek?.count || 0,
     };
   });
 
@@ -409,6 +517,146 @@ export function getDecisionFlags({ goalId, unacknowledgedOnly = false } = {}) {
 
 export function acknowledgeFlag(id) {
   run(`UPDATE decision_flags SET acknowledged_at=datetime('now','localtime') WHERE id=?`, [id]);
+}
+
+// ── Student speech profiles ──
+
+export function getStudentProfileRow(studentId) {
+  return queryOne('SELECT * FROM student_profiles WHERE student_id = ?', [studentId]);
+}
+
+export function saveStudentProfileRow(studentId, profileJson) {
+  run(`INSERT INTO student_profiles (student_id, profile, updated_at) VALUES (?, ?, datetime('now','localtime'))
+       ON CONFLICT(student_id) DO UPDATE SET profile = excluded.profile, updated_at = excluded.updated_at`,
+    [studentId, profileJson]);
+}
+
+// ── Corrections (Stage 4) ──
+
+/** Count one "no, I meant" pair; returns how many times it has happened. */
+export function recordCorrection({ student_id, heard, meant }) {
+  run(`INSERT INTO correction_pairs (student_id, heard, meant, count, last_at) VALUES (?, ?, ?, 1, datetime('now','localtime'))
+       ON CONFLICT(student_id, heard, meant) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
+    [student_id, heard, meant]);
+  return queryOne('SELECT count FROM correction_pairs WHERE student_id = ? AND heard = ? AND meant = ?', [student_id, heard, meant])?.count ?? 0;
+}
+
+// ── Voice turns (Stage 1 recognition readout) ──
+
+export function logVoiceTurn({ student_id = null, session_id = null, outcome, transcript = null, command_id = null, audio_kb = null, ms = null }) {
+  run(
+    'INSERT INTO voice_turns (student_id, session_id, outcome, transcript, command_id, audio_kb, ms) VALUES (?,?,?,?,?,?,?)',
+    [student_id, session_id, outcome, transcript == null ? null : String(transcript).slice(0, 500), command_id, audio_kb, ms]
+  );
+}
+
+/**
+ * How well a student is being heard since `since` (local datetime):
+ * - heardRate: turns with usable words over all turns
+ * - firstTimeRate: commands that worked without a retry or correction
+ * - retries: commands that were another go at a failed one
+ */
+export function getRecognitionStats(studentId, { since }) {
+  const turns = queryOne(
+    `SELECT COUNT(*) AS turns,
+            SUM(CASE WHEN outcome IN ('command','dictation','control') THEN 1 ELSE 0 END) AS heard,
+            SUM(CASE WHEN outcome = 'no_speech' THEN 1 ELSE 0 END) AS no_speech,
+            SUM(CASE WHEN outcome = 'filtered' THEN 1 ELSE 0 END) AS filtered,
+            SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+            SUM(CASE WHEN outcome = 'dictation' THEN 1 ELSE 0 END) AS dictated,
+            ROUND(AVG(ms), 0) AS avg_ms
+     FROM voice_turns WHERE student_id = ? AND created_at >= ?`,
+    [studentId, since]
+  );
+  const commands = queryOne(
+    `SELECT SUM(CASE WHEN outcome != 'superseded' THEN 1 ELSE 0 END) AS tasks,
+            SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS first_time,
+            SUM(CASE WHEN outcome = 'repaired' THEN 1 ELSE 0 END) AS repaired,
+            SUM(CASE WHEN outcome = 'superseded' THEN 1 ELSE 0 END) AS retries,
+            SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS failed
+     FROM commands WHERE student_id = ? AND created_at >= ? AND outcome IS NOT NULL`,
+    [studentId, since]
+  );
+  const t = turns || {};
+  const c = commands || {};
+  return {
+    since,
+    turns: t.turns || 0,
+    heard: t.heard || 0,
+    noSpeech: t.no_speech || 0,
+    filtered: t.filtered || 0,
+    errors: t.errors || 0,
+    dictated: t.dictated || 0,
+    avgMs: t.avg_ms || null,
+    heardRate: t.turns ? (t.heard || 0) / t.turns : null,
+    tasks: c.tasks || 0,
+    firstTime: c.first_time || 0,
+    repaired: c.repaired || 0,
+    retries: c.retries || 0,
+    failed: c.failed || 0,
+    firstTimeRate: c.tasks ? (c.first_time || 0) / c.tasks : null,
+  };
+}
+
+/**
+ * Retries per completed task in the `days` before and after a moment — the
+ * last change to the student's speech settings (Stage 4 acceptance).
+ * A completed task's prompt_count is how many tries it needed before working.
+ */
+export function getRetriesAround(studentId, { at, days = 14 }) {
+  const window = (from, to) => {
+    const row = queryOne(
+      `SELECT COUNT(*) AS tasks, SUM(prompt_count) AS retries
+       FROM commands
+       WHERE student_id = ? AND outcome IN ('success','repaired')
+         AND created_at >= datetime(?, ?) AND created_at < datetime(?, ?)`,
+      [studentId, at, from, at, to]
+    );
+    const tasks = row?.tasks || 0;
+    return { tasks, retries: row?.retries || 0, retriesPerTask: tasks ? (row.retries || 0) / tasks : null };
+  };
+  return { at, days, before: window(`-${days} days`, '+0 days'), after: window('+0 days', `+${days} days`) };
+}
+
+/** The most recent turns that were heard but set aside as noise, for review. */
+export function getFilteredTurns(studentId, { limit = 20 } = {}) {
+  return query(
+    `SELECT created_at, transcript FROM voice_turns WHERE student_id = ? AND outcome = 'filtered' ORDER BY id DESC LIMIT ?`,
+    [studentId, limit]
+  );
+}
+
+// ── Desktop target resolution (Stage 2) ──
+
+export function logResolution({ app, method, action = null, found, ok = null, ms = null, student_id = null }) {
+  run(
+    'INSERT INTO resolution_log (app, method, action, found, ok, ms, student_id) VALUES (?,?,?,?,?,?,?)',
+    [app, method, action, found ? 1 : 0, ok == null ? null : (ok ? 1 : 0), ms, student_id]
+  );
+}
+
+/**
+ * Per app since `since` (local datetime): how many targets were found in the
+ * accessibility tree, by screen position, or not at all, and the resolution
+ * rate — tree hits over all attempts.
+ */
+export function getResolutionStats({ since = null } = {}) {
+  const rows = query(
+    `SELECT app,
+            SUM(CASE WHEN method = 'uia' THEN 1 ELSE 0 END) AS uia,
+            SUM(CASE WHEN method = 'coordinates' THEN 1 ELSE 0 END) AS coordinates,
+            SUM(CASE WHEN method = 'not_found' THEN 1 ELSE 0 END) AS not_found,
+            SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed_actions,
+            COUNT(*) AS attempts,
+            ROUND(AVG(ms), 0) AS avg_ms,
+            MIN(created_at) AS first_at,
+            MAX(created_at) AS last_at
+     FROM resolution_log
+     ${since ? 'WHERE created_at >= ?' : ''}
+     GROUP BY app ORDER BY attempts DESC`,
+    since ? [since] : []
+  );
+  return rows.map(r => ({ ...r, resolutionRate: r.attempts ? r.uia / r.attempts : null }));
 }
 
 // ── Commands for Probing ──

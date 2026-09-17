@@ -36,7 +36,7 @@ export const TOOL_CATEGORIES = [
   },
   {
     name: 'Desktop screen reading',
-    tools: ['list_desktop_elements', 'click_desktop_element', 'read_desktop_window',
+    tools: ['uia_query', 'uia_act', 'list_desktop_elements', 'click_desktop_element', 'read_desktop_window',
       'desktop_scroll', 'list_running_apps'],
   },
   { name: 'Conversation', tools: ['answer_question'] },

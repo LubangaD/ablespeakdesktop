@@ -38,3 +38,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Grounding test screenshots and the cases built from them stay on the computer
+server/tools/grounding-eval/images/
+server/tools/grounding-eval/dataset.json
+server/tools/grounding-eval/out/

@@ -6,11 +6,16 @@ import {
   getTeacherAnalytics, getStudents, addStudent, deleteStudent,
   insertGoal, getGoals, updateGoalStatus, upsertProgressPoint, getProgressPoints,
   insertPhaseChange, getPhaseChanges, insertDecisionFlag, getDecisionFlags, acknowledgeFlag,
-  getCommandsForStudentDate,
+  getCommandsForStudentDate, getRecognitionStats, getFilteredTurns, getResolutionStats,
+  getStudentProfileRow, getRetriesAround,
 } from '../db.js';
 import { computeProbeValue, computeProbesForDate, evaluateAndFlag } from '../probe-computer.js';
 import { MEASURE_REGISTRY } from '../progress-rules.js';
 import { buildToolCatalog } from '../tool-catalog.js';
+import { getActiveStudent, setActiveStudent } from '../student-session.js';
+import { localOnly } from './settings.js';
+import { localDate, addDays, localDateTime } from '../local-time.js';
+import { getProfile, saveProfile, normaliseProfile } from '../student-profile.js';
 
 export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath, aiEngine }) {
   const router = Router();
@@ -125,6 +130,74 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   });
 
   // ── Teacher Dashboard ──
+  // Students' data never leaves this computer: the server listens on every
+  // network interface, so these routes check the request is local.
+  router.use(['/teacher', '/students', '/goals', '/flags', '/progress', '/screen', '/agent',
+    '/commands', '/sessions', '/logs', '/context', '/config'], localOnly);
+
+  // ── Screen model (Stage 2) ──
+  // GET /api/screen — the controls in the window the student is using
+  router.get('/screen', async (req, res) => {
+    try {
+      const { getScreenModel } = await import('../screen-model.js');
+      const app = typeof req.query.app === 'string' && req.query.app.trim() ? req.query.app.trim() : undefined;
+      const model = await getScreenModel({ app, fresh: req.query.fresh === '1', maxElements: 200 });
+      res.status(model.status === 'success' ? 200 : 404).json(model);
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // GET /api/screen/text?app=notepad — the text of the window's document
+  router.get('/screen/text', async (req, res) => {
+    try {
+      const { getScreenModel, actOnElement } = await import('../screen-model.js');
+      const app = typeof req.query.app === 'string' && req.query.app.trim() ? req.query.app.trim() : undefined;
+      const model = await getScreenModel({ app, fresh: true, maxElements: 400 });
+      if (model.status !== 'success') return res.status(404).json(model);
+      const doc = model.elements.find(e => ['Document', 'Edit'].includes(e.type) && e.actions.includes('read_text'));
+      if (!doc) {
+        const field = model.elements.find(e => ['Document', 'Edit'].includes(e.type) && e.value);
+        return res.json({ window: model.window, text: field?.value || '' });
+      }
+      const read = await actOnElement({ app, ref: doc.ref, action: 'read_text', log: false });
+      res.json({ window: model.window, text: read.text ?? doc.value ?? '' });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  });
+
+  // ── Task agent evaluation (Stage 3) ──
+  // POST /api/agent/plan { instruction } — the plan only; nothing happens
+  router.post('/agent/plan', async (req, res) => {
+    const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : '';
+    if (!instruction) return res.status(400).json({ error: 'instruction is required' });
+    try {
+      res.json(await wsProxy.planTask(instruction));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/agent/run { instruction, autoConfirm } — runs it on this computer
+  router.post('/agent/run', async (req, res) => {
+    const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : '';
+    if (!instruction) return res.status(400).json({ error: 'instruction is required' });
+    try {
+      res.json(await wsProxy.runTaskForEvaluation(instruction, { autoConfirm: req.body?.autoConfirm === true }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/screen/resolution?days=30 — per app: found through the
+  // accessibility tree, by screen position, or not at all
+  router.get('/screen/resolution', (req, res) => {
+    const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+    const since = `${addDays(localDate(), -(days - 1))} 00:00:00`;
+    res.json({ days, since, apps: getResolutionStats({ since }) });
+  });
+
   router.get('/teacher/analytics', (req, res) => {
     const analytics = getTeacherAnalytics();
     res.json(analytics);
@@ -136,15 +209,119 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   });
 
   router.post('/teacher/students', (req, res) => {
-    const { name, session_prefix } = req.body;
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     if (!name) return res.status(400).json({ error: 'Student name is required' });
-    const student = addStudent({ name, session_prefix });
+    if (name.length > 80) return res.status(400).json({ error: 'Keep the name under 80 characters' });
+    const student = addStudent({ name, session_prefix: req.body.session_prefix });
     res.status(201).json(student);
   });
 
   router.delete('/teacher/students/:id', (req, res) => {
-    deleteStudent(req.params.id);
+    const id = Number(req.params.id);
+    if (getActiveStudent().student?.id === id) {
+      setActiveStudent(null);
+      broadcastActiveStudent();
+    }
+    deleteStudent(id);
     res.json({ deleted: true });
+  });
+
+  // ── Who is using this computer (AT-50) ──
+  // The overlay also re-reads how to listen, since that follows the student.
+  const broadcastActiveStudent = () => {
+    wsProxy.broadcastToDashboard({ type: 'active_student', ...getActiveStudent(), timestamp: new Date().toISOString() });
+    wsProxy.broadcastListeningSettings?.();
+  };
+
+  router.get('/students/active', (req, res) => {
+    res.json(getActiveStudent());
+  });
+
+  // Body: { student_id } — a student's id, or null for nobody in particular
+  router.put('/students/active', (req, res) => {
+    const studentId = req.body?.student_id ?? null;
+    if (studentId !== null && !Number.isInteger(studentId)) {
+      return res.status(400).json({ error: 'student_id must be a student id or null' });
+    }
+    try {
+      const active = setActiveStudent(studentId);
+      broadcastActiveStudent();
+      res.json(active);
+    } catch (err) {
+      res.status(404).json({ error: err.message });
+    }
+  });
+
+  // ── Speech profile (Stage 1; portable in Stage 4) ──
+  router.get('/students/:id/profile', (req, res) => {
+    const student = findStudent(req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    res.json(getProfile(student.id));
+  });
+
+  // Body: any part of the profile; the rest is kept.
+  router.put('/students/:id/profile', (req, res) => {
+    const student = findStudent(req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    try {
+      const profile = saveProfile(student.id, req.body || {});
+      if (getActiveStudent().student?.id === student.id) wsProxy.broadcastListeningSettings?.();
+      res.json(profile);
+    } catch (err) {
+      res.status(400).json({ error: err.message, errors: err.errors || [err.message] });
+    }
+  });
+
+  // A file a teacher can carry to another computer (Stage 4).
+  router.get('/students/:id/profile/export', (req, res) => {
+    const student = findStudent(req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    const file = {
+      kind: 'ablespeak-student-profile',
+      exportedAt: localDateTime(),
+      student: { name: student.name },
+      profile: getProfile(student.id),
+    };
+    const safeName = student.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'student';
+    res.setHeader('Content-Disposition', `attachment; filename="ablespeak-${safeName}.json"`);
+    res.json(file);
+  });
+
+  // Body: an exported file. Restores into the student with the same name,
+  // adding them if this computer does not have them yet.
+  router.post('/students/profile/import', (req, res) => {
+    const file = req.body || {};
+    if (file.kind !== 'ablespeak-student-profile' || !file.profile) {
+      return res.status(400).json({ error: 'That is not an AbleSpeak student profile file.' });
+    }
+    const name = typeof file.student?.name === 'string' ? file.student.name.trim() : '';
+    if (!name || name.length > 80) return res.status(400).json({ error: 'The file has no usable student name.' });
+    const { errors } = normaliseProfile(file.profile);
+    if (errors.length) return res.status(400).json({ error: errors.join('; '), errors });
+
+    let student = getStudents().find(s => s.name.toLowerCase() === name.toLowerCase());
+    const created = !student;
+    if (!student) student = addStudent({ name });
+    const profile = saveProfile(student.id, file.profile);
+    if (getActiveStudent().student?.id === student.id) wsProxy.broadcastListeningSettings?.();
+    res.status(created ? 201 : 200).json({ student, created, profile });
+  });
+
+  // ── How well the student is being heard (Stage 1) ──
+  // GET /api/students/:id/recognition?days=7
+  router.get('/students/:id/recognition', (req, res) => {
+    const student = findStudent(req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    const days = Math.max(1, Math.min(90, Number(req.query.days) || 7));
+    const since = `${addDays(localDate(), -(days - 1))} 00:00:00`;
+    const settingsChanged = getStudentProfileRow(student.id)?.updated_at || null;
+    res.json({
+      days,
+      ...getRecognitionStats(student.id, { since }),
+      recentlyFiltered: getFilteredTurns(student.id, { limit: 10 }),
+      // Did the speech settings help? Retries per task, two weeks either side.
+      sinceSettingsChanged: settingsChanged ? getRetriesAround(student.id, { at: settingsChanged }) : null,
+    });
   });
 
   // ════════════════════════════════════════════════
@@ -170,16 +347,13 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     }
 
     // Single-pass: query each qualifying day (>= 3 attempted) exactly once.
-    const today = new Date().toISOString().slice(0, 10);
-    const cutoffMs = new Date(today).getTime() - 14 * 86400000;
+    const today = localDate();
     const qualifyingDays = new Map(); // isoDate → dayCmds[]
 
-    for (let d = 0; d <= 14; d++) {
-      const dateMs = cutoffMs + d * 86400000;
-      const isoDate = new Date(dateMs).toISOString().slice(0, 10);
-      if (isoDate > today) break;
+    for (let d = -14; d <= 0; d++) {
+      const isoDate = addDays(today, d);
       const dayCmds = getCommandsForStudentDate(student.id, isoDate);
-      const dayAttempted = dayCmds.filter(c => c.outcome != null);
+      const dayAttempted = dayCmds.filter(c => c.outcome != null && c.outcome !== 'superseded');
       if (dayAttempted.length >= 3) qualifyingDays.set(isoDate, dayCmds);
     }
 
@@ -305,7 +479,7 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   // POST /api/progress/recompute — trigger probe computation for today
   router.post('/progress/recompute', async (req, res) => {
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDate();
       await computeProbesForDate(today);
       const activeGoals = getGoals({ status: 'active' });
       for (const g of activeGoals) await evaluateAndFlag(g.id, today);

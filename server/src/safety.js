@@ -27,7 +27,11 @@ const SEND_WORDS = ['send', 'submit', 'post', 'publish', 'email', 'share', 'purc
 // misheard "click delete" must be gated the same way close_application already
 // is (CVA-1). click_element may be called with only an xpath; tool-registry.js
 // resolves that to args.resolvedLabel before the gate sees it.
-const ELEMENT_TARGET_TOOLS = new Set(['click_element', 'click_desktop_element', 'select_option']);
+const ELEMENT_TARGET_TOOLS = new Set(['click_element', 'click_desktop_element', 'select_option', 'uia_act']);
+
+// uia_act only presses a control with these actions (none given means
+// "press it"); typing into a field labelled "Email" is not sending one.
+const PRESS_ACTIONS = new Set(['invoke', 'toggle', 'select']);
 
 /** Best available human-readable text for what an element-targeting tool is about to act on. */
 function targetLabel(args) {
@@ -37,6 +41,7 @@ function targetLabel(args) {
 /** True if the tool's target label is entirely made of / contains one of `words` as a whole word. */
 function labelMatches(tool, args, words) {
   if (!ELEMENT_TARGET_TOOLS.has(tool)) return false;
+  if (tool === 'uia_act' && args?.action && !PRESS_ACTIONS.has(args.action)) return false;
   const label = targetLabel(args);
   if (!label) return false;
   const tokens = label.split(/[^a-z0-9]+/).filter(Boolean);
@@ -110,7 +115,32 @@ export function classifyConsequential(tool, args = {}) {
   return null;
 }
 
+const CLOSE_WORDS = ['close', 'quit', 'exit', 'shut'];
+
+/**
+ * Steps of a multi-step plan that will stop for a spoken yes/no (Stage 3).
+ * Each tool call is still gated on its own; this only lets the plan say so
+ * up front. Returns [{ index, id }].
+ */
+export function classifyPlan(steps = []) {
+  const flagged = [];
+  steps.forEach((step, index) => {
+    const words = String(step?.do || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    if (words.some(w => DELETE_WORDS.includes(w))) flagged.push({ index, id: 'delete' });
+    else if (words.some(w => SEND_WORDS.includes(w))) flagged.push({ index, id: 'send' });
+    else if (words.some(w => CLOSE_WORDS.includes(w)) && !words.includes('tab')) flagged.push({ index, id: 'close-app' });
+  });
+  return flagged;
+}
+
 const AFFIRMATIVES = /^(yes|yeah|yep|yup|confirm|confirmed|do it|go ahead|proceed|okay|ok|sure|affirmative)\b/i;
+
+const NEGATIVES = /^(no|nope|nah|cancel|don'?t|do not|never ?mind|stop)\b/i;
+
+/** A clear "no" — used where other words should not count as an answer. */
+export function isNegative(text) {
+  return NEGATIVES.test(String(text || '').trim());
+}
 
 /** Anything that is not a clear affirmative is treated as a cancel (safe default). */
 export function isAffirmative(text) {

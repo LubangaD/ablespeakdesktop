@@ -63,6 +63,15 @@ const PROVIDERS = {
 // Models that are not chat/tool-use models — excluded from auto-selection
 const NON_CHAT_RE = /(audio|realtime|tts|whisper|embed|embedding|image|imagen|veo|dall|moderation|transcribe|search|live|robotics|aqa|learnlm|thinking)/i;
 
+// After a finished action the engine records "[executed: tool]" in its own
+// history. Models sometimes copy that into later replies, and the overlay
+// would read it aloud — strip it from anything returned to the student.
+const EXECUTED_MARKER_RE = /\[executed:[^\]]*\]/gi;
+
+export function cleanReply(text) {
+  return typeof text === 'string' ? text.replace(EXECUTED_MARKER_RE, '').trim() : text;
+}
+
 // Extract a numeric version from a model name for "newest first" sorting
 function versionScore(name) {
   const m = String(name).match(/(\d+(?:\.\d+)?)/);
@@ -400,7 +409,7 @@ export class AIEngine {
             content: currentResult.text || `[executed: ${roundResults.map(r => r.tool).join(', ')}]`,
           });
           return {
-            text: currentResult.text || this._summarizeToolResults(allToolResults),
+            text: cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
             toolCalls: allToolResults,
             latency: Date.now() - startTime,
             provider: this.provider,
@@ -448,7 +457,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       if (allToolResults.length > 0) {
         this.conversationHistory.push({ role: 'assistant', content: currentResult.text || '' });
         return {
-          text: currentResult.text || this._summarizeToolResults(allToolResults),
+          text: cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
           toolCalls: allToolResults,
           latency: Date.now() - startTime,
           provider: this.provider,
@@ -457,10 +466,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       }
 
       // Plain text response
-      let finalText = result.text;
+      let finalText = cleanReply(result.text);
       // Never reply with NOTHING when no action was taken — that leaves the
       // user staring at an empty bubble wondering what happened.
-      if (!finalText?.trim()) {
+      const noAction = !finalText?.trim();
+      if (noAction) {
         finalText = context.extensionConnected === false
           ? 'The Chrome extension is not connected, so I could not do that in the browser. Click the AbleSpeak extension icon in Chrome to reconnect it.'
           : 'I did not perform any action for that command. Could you rephrase it?';
@@ -470,6 +480,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       return {
         text: finalText,
         toolCalls: null,
+        noAction, // the command was not carried out (progress engine counts it as failed)
         latency,
         provider: this.provider,
         model: this.model,
@@ -488,6 +499,35 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       // Clean up screenshot so it doesn't persist across requests
       this._currentScreenshot = null;
       this._activeAbortController = null;
+    }
+  }
+
+  /**
+   * One model call with its own messages, for the task agent (Stage 3) to
+   * plan and check steps without touching the conversation history.
+   * Returns { text, toolCalls }.
+   */
+  async complete({ system, messages, tools = [] }) {
+    const send = () => {
+      const history = this.conversationHistory;
+      const screenshot = this._currentScreenshot;
+      this.conversationHistory = messages;
+      this._currentScreenshot = null;
+      try {
+        // Each provider reads the messages before its first await.
+        return this._dispatch(system, tools);
+      } finally {
+        this.conversationHistory = history;
+        this._currentScreenshot = screenshot;
+      }
+    };
+    try {
+      return await send();
+    } catch (err) {
+      if (!this._isModelError(err)) throw err;
+      const replacement = await this.autoSelectModel(true);
+      if (!replacement) throw err;
+      return send();
     }
   }
 
@@ -524,13 +564,14 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **Keyboard shortcuts**: Use `send_system_keys` to send shortcuts like Ctrl+C, Ctrl+V, Alt+F4 to the focused app',
       '- **List running apps**: Use `list_running_apps` to see what applications are currently open',
       '',
-      '### Desktop UI Control — click ANYTHING in ANY app (like having hands)',
-      '- **Click inside desktop apps**: Use `click_desktop_element` with the element\'s visible name — e.g. name:"Play", app_name:"spotify". Works on every Windows application.',
-      '- **See what is clickable**: Use `list_desktop_elements` to scan an app\'s window and get all button/menu/input names with coordinates.',
-      '- **Read a window**: Use `read_desktop_window` to read dialogs, documents, error messages in any app.',
-      '- **Scroll desktop apps**: Use `desktop_scroll` (browser pages use `scroll` instead).',
-      '- **Workflow**: Try `click_desktop_element` directly with the name the user said. If it returns "not found", call `list_desktop_elements`, find the closest matching name, and click that.',
-      '- **Double-click** to open files/icons: pass double_click:true.',
+      '### Desktop UI Control — through each app\'s own controls (like having hands)',
+      '- **Read the window first**: `uia_query` lists the controls in a desktop window through Windows accessibility — ref, type, name, state and the actions each supports. The controls of the window the student is using are often already listed below under "Controls in".',
+      '- **Act through the control**: `uia_act` with a ref presses buttons (invoke), switches checkboxes (toggle), picks tabs and list items (select), opens menus (expand), types into a field (set_value), scrolls a pane, or reads a document (read_text). This is reliable and does not move the mouse.',
+      '- **By name**: `click_desktop_element` with the visible name also works in every Windows app — it uses the same accessibility actions.',
+      '- **Screen positions are the fallback**: only when a control is not in the uia_query list (some apps draw their own controls), use the SCREENSHOT to find it and call `click_desktop_element` with x and y.',
+      '- **Read a window**: `read_desktop_window`, or `uia_act` with action "read_text" on a Document control.',
+      '- **Scroll desktop apps**: `uia_act` with scroll_down / scroll_up on the pane, or `desktop_scroll` (browser pages use `scroll` instead).',
+      '- **Double-click** to open files/icons: `click_desktop_element` with double_click:true.',
       '',
       '## Rules',
       '- Execute commands immediately when the intent is clear. You do NOT need to ask for confirmation yourself — irreversible actions (closing an app, deleting, sending/submitting) are automatically confirmed with the user by the system before they run.',
@@ -615,9 +656,9 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '',
       '## CRITICAL: Interacting with Desktop Apps',
       '- When the user mentions a SPECIFIC desktop app (Spotify, Notepad, Word, Excel, etc.), use DESKTOP tools to interact with it.',
-      '- **Workflow**: `focus_application` → `list_desktop_elements` (if needed) → `click_desktop_element` or `system_type_text`.',
-      '- Use the SCREENSHOT attached to understand what is currently on screen — it shows which app is active and what elements are visible.',
-      '- If the user says "click play" or "click the search bar" while a desktop app is visible in the screenshot, use `click_desktop_element` with the app name.',
+      '- **Workflow**: `focus_application` → `uia_query` (if the controls are not already listed below) → `uia_act` with the right ref. Use `system_type_text` to type at the cursor.',
+      '- Use the SCREENSHOT to understand the screen, but act through the listed controls whenever the control is listed.',
+      '- If the user says "click play" or "click the search bar" in a desktop app, find the control in the list and use `uia_act` with its ref.',
       '',
       '## IMPORTANT',
       '- Do NOT open new tabs unless explicitly asked.',
@@ -639,6 +680,15 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       parts.push('- Answer "what\'s on my screen" / "read this" / "what does it say" questions');
       parts.push('- Find the correct element names for click_desktop_element');
       parts.push('- Describe errors, dialogs, or notifications visible on screen');
+    }
+
+    // ── Screen model (Stage 2): the desktop window's controls, when known ──
+    if (context.screenModel?.elements?.length) {
+      const model = context.screenModel;
+      parts.push('', `## Controls in "${model.window}" (${model.app}) — the window the student is using`);
+      parts.push('Format: ref Type "name" [actions] (state). Act with `uia_act` using the ref. If what the student wants is not here, use the screenshot and click_desktop_element with x and y.');
+      parts.push(model.summary);
+      if (model.truncated) parts.push(`(${model.total} controls in total; call uia_query with a name to find others.)`);
     }
 
     // ── Extension status — be honest with the user when browser control is unavailable ──

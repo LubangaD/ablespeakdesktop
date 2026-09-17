@@ -10,6 +10,19 @@
  * All patterns must tolerate this.
  */
 
+import { resolveAppName } from './app-names.js';
+
+// AbleSpeak dashboard pages a student can open by voice ("go to settings")
+const NAV_MAP = {
+  dashboard: 'dashboard', home: 'dashboard',
+  chat: 'chat', voice: 'chat',
+  tools: 'tools',
+  context: 'context',
+  logs: 'logs',
+  settings: 'settings', preferences: 'settings', options: 'settings',
+  prompt: 'prompt', 'prompt editor': 'prompt',
+};
+
 // ── Silent commands: these execute without TTS feedback ──
 const SILENT_COMMANDS = new Set([
   'scroll', 'scroll_to_top', 'scroll_to_bottom',
@@ -65,13 +78,31 @@ export function matchFastCommand(text) {
   if (/^(start\s+)?(dictat(e|ed|ing|ion)|typ(e|ing))(\s+mode)?$/i.test(t) || /^(type|write)\s+(for me|mode)$/i.test(t) || /^(start\s+)?(typing|writing)$/i.test(t)) {
     return { tool: 'dictation_mode', args: { enabled: true }, silent: false };
   }
+  // Text to type is taken from what was said, not from `t`, which is
+  // lower-cased and has filler words like "please" removed.
+  const said = String(text || '').trim();
+
   // "dictate My name is Derek..." — activate AND type the trailing text
-  const dictateWithText = t.match(/^(?:start\s+)?dictat(?:e|ed|ing)\s+(.{5,})$/i);
-  if (dictateWithText) {
-    return { tool: 'dictation_mode', args: { enabled: true, initialText: dictateWithText[1] }, silent: false };
+  const dictateFirst = said.match(/^(?:start\s+)?dictat(?:e|ed|ing)[\s,.:;-]+([\s\S]{5,})$/i);
+  if (dictateFirst) {
+    return { tool: 'dictation_mode', args: { enabled: true, initialText: dictateFirst[1].trim() }, silent: false };
   }
   if (/^(stop|end|exit)\s+(dictat(ing|ion)|typ(ing|e))(\s+mode)?$/i.test(t) || /^command\s+mode$/i.test(t)) {
     return { tool: 'dictation_mode', args: { enabled: false }, silent: false };
+  }
+  // "My name is Derek. Dictate." — the sentence first, then the trigger word,
+  // set apart by a pause (punctuation) or said as a plain "dictate". The
+  // sentence keeps its full stop.
+  const dictateLast = said.match(/^([\s\S]{5,}?)([.!?])?([\s,;:-]+)(dictate|dictation)[.!?]*$/i);
+  if (dictateLast) {
+    const [, sentence, stop = '', gap, trigger] = dictateLast;
+    const paused = Boolean(stop) || /[,;:-]/.test(gap);
+    // "I want to dictate", "the end of dictation": the words lead into the
+    // trigger rather than being text to type.
+    const leadsIn = /\b(to|me|us|let's|lets|please|and|then|now|i|we|you|will|can|could|of|the|a|an|my|your|this|that|for|with|about|on|in|from|into|start|begin|stop|end|exit|quit|cancel|not|never|no|don't|dont|won't|can't)$/i.test(sentence.trim());
+    if (!leadsIn && (paused || /^dictate$/i.test(trigger))) {
+      return { tool: 'dictation_mode', args: { enabled: true, initialText: sentence.trim() + stop }, silent: false };
+    }
   }
 
   // ── Scrolling ──
@@ -244,8 +275,10 @@ export function matchFastCommand(text) {
   //  desktop app clicks like "click on the artist profile" in Spotify.)
 
   // ── Select / Choose / Pick — form controls (radio, checkbox, dropdown) ──
-  // "select dark mode", "choose economy", "pick one-way"
-  const selectMatch = t.match(/^(?:select|choose|pick|switch to)\s+(?:the\s+)?(.+?)(?:\s+(?:option|mode|theme|style|radio|button))?$/);
+  // "select dark mode", "choose economy", "pick one-way", "switch to dark mode".
+  // A plain "switch to Word" is an app switch, handled further down.
+  const selectMatch = t.match(/^(?:select|choose|pick)\s+(?:the\s+)?(.+?)(?:\s+(?:option|mode|theme|style|radio|button))?$/)
+    || t.match(/^switch to\s+(?:the\s+)?(.+?)\s+(?:option|mode|theme|style)$/);
   if (selectMatch) {
     const label = selectMatch[1].trim();
     // Don't match if it's "select all" (that's Ctrl+A) or app focus patterns
@@ -270,27 +303,26 @@ export function matchFastCommand(text) {
     return { tool: 'focus_application', args: { app_name: appName }, silent: true };
   }
 
-  // ── App Focus — "bring/show VS Code to front", "open spotify" ──
-  const focusAppMatch = t.match(/^(?:bring|show|switch to|focus)\s+(?:the\s+)?(.+?)(?:\s+to the front|\s+to front|\s+window)?$/);
+  // ── App Focus — "bring/show VS Code to front", "focus on Word" ──
+  // Dashboard pages ("show settings") are left for navigation below.
+  const focusAppMatch = t.match(/^(?:bring up|bring|show|switch to|focus on|focus)\s+(?:the\s+|my\s+)?(.+?)(?:\s+to the front|\s+to front|\s+window)?$/);
   if (focusAppMatch) {
     let appName = focusAppMatch[1].trim()
       .replace(/\b(tab|browser|window|app|application)\b/gi, '').trim();
     // Only match if it looks like an app name (1-3 words, no complex phrases)
-    if (appName && appName.split(/\s+/).length <= 3 && !/\b(and|or|then|after|also|this|that)\b/.test(appName)) {
+    if (appName && !NAV_MAP[appName] && appName.split(/\s+/).length <= 3 && !/\b(and|or|then|after|also|this|that)\b/.test(appName)) {
       return { tool: 'focus_application', args: { app_name: appName }, silent: true };
     }
   }
 
+  // "go to Word", "go to my spreadsheet" — only for apps we know by name, so
+  // "go to the top" and "go to settings" keep their own meaning.
+  const goToApp = t.match(/^go to\s+(.+)$/);
+  if (goToApp && resolveAppName(goToApp[1]).app) {
+    return { tool: 'focus_application', args: { app_name: goToApp[1].trim() }, silent: true };
+  }
+
   // ── AbleSpeak Dashboard Navigation — "go to settings", "open chat" ──
-  const NAV_MAP = {
-    dashboard: 'dashboard', home: 'dashboard',
-    chat: 'chat', voice: 'chat',
-    tools: 'tools',
-    context: 'context',
-    logs: 'logs',
-    settings: 'settings', preferences: 'settings', options: 'settings',
-    prompt: 'prompt', 'prompt editor': 'prompt',
-  };
   const navMatch = t.match(/^(?:go to|open|show|navigate to|switch to)\s+(?:the\s+)?(.+?)(?:\s+page)?$/);
   if (navMatch) {
     const page = NAV_MAP[navMatch[1].trim()];

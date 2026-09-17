@@ -96,7 +96,7 @@
   .transcript-area {
     width: 100%;
     min-height: 0;
-    max-height: 140px;
+    max-height: 96px;
     overflow-y: auto;
     text-align: center;
     transition: all 0.2s ease;
@@ -143,6 +143,53 @@
   @keyframes textPulse {
     0%, 100% { opacity: 0.7; }
     50% { opacity: 1; }
+  }
+
+  /* ── Last command: what was heard and how it ended (always on screen) ── */
+  .last-command {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .last-command[hidden] {
+    display: none;
+  }
+
+  .last-heard {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .last-outcome {
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .last-outcome[data-state="working"] { color: #c4b5fd; }
+  .last-outcome[data-state="done"] { color: #6ee7b7; }
+  .last-outcome[data-state="failed"] { color: #fca5a5; }
+  .last-outcome[data-state="waiting"] { color: #fcd34d; }
+  .last-outcome[data-state="ignored"] { color: rgba(255, 255, 255, 0.6); font-weight: 400; }
+
+  /* ── Whose session this is ── */
+  .who {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .who[hidden] {
+    display: none;
   }
 
   /* ── Button Row ── */
@@ -265,6 +312,15 @@
       Dictate <kbd>Ctrl + Shift + A</kbd>
     </div>
 
+    <!-- Whose progress this computer is recording -->
+    <div class="who" id="whoLabel" hidden></div>
+
+    <!-- Last command: what was heard, and whether it worked -->
+    <div class="last-command" id="lastCommand" hidden>
+      <div class="last-heard" id="lastHeard"></div>
+      <div class="last-outcome" id="lastOutcome" role="status" aria-live="polite"></div>
+    </div>
+
     <!-- Transcript / status text (screen reader announces changes) -->
     <div class="transcript-area" id="transcriptArea" aria-live="assertive" aria-atomic="true" role="status">
       <div class="transcript-text" id="transcriptText"></div>
@@ -339,19 +395,37 @@ if (!window.electronAPI) {
   const MAX_CONSECUTIVE_ERRORS = 10; // Very forgiving — don't kill the mic
 
   // ── Recording state ──
-  let mediaRecorder = null;
-  let audioChunks = [];
+  let mediaRecorder = null;  // The recording in progress, if any
   let stream = null;
-  let audioCtx = null;     // Reused across turns — see startListening (Fix #7)
+  let audioCtx = null;     // Reused across turns — see openMic (Fix #7)
   let audioSource = null;  // Latest MediaStreamSource node, disconnected between turns
-  let silenceStart = null;
-  const SILENCE_THRESHOLD = 15;
-  const SPEECH_THRESHOLD = 45;  // Higher = less likely to trigger on music
+  let analyser = null;     // Level meter on the open mic stream
+  let micStarting = false; // startListening() is waiting for the mic
+  // Levels and pauses follow the student's profile (listening_settings).
+  let SILENCE_THRESHOLD = 15;
+  let SPEECH_THRESHOLD = 45;  // Higher = less likely to trigger on music
   let SILENCE_DURATION = 1500; // 1.5s silence after speech = done talking
   const MIN_RECORD_MS = 600;     // Minimum 600ms recording before silence check
+  const MAX_RECORD_MS = 8000;    // 8s max for a command — shorter to limit music bleed
   const COOLDOWN_MS = 500;       // 500ms between recordings
-  let recordStart = 0;
   let lastRecordEnd = 0;         // When the last recording stopped
+
+  // Dictation keeps listening while earlier speech is typed. Each pause ends a
+  // phrase, which is sent to be typed while the next phrase is already being
+  // recorded, so nothing said during typing is lost. The server types phrases
+  // in the order they were spoken.
+  let DICTATION_SILENCE_MS = 1800;       // quiet this long ends a phrase
+  const DICTATION_SPEECH_GAP_MS = 4000;  // or this long without speech, in a noisy room
+  const DICTATION_MAX_RECORD_MS = 30000; // longer phrases are split, not dropped
+  let dictationClipsPending = 0;         // phrases sent but not yet typed
+
+  // HFI-2 "didn't catch that" is only for a real attempt at speaking (half a
+  // second of quiet, voice-level sound), and at most once every 30 seconds, so
+  // room noise can't make AbleSpeak talk over the student again and again.
+  let QUIET_SPEECH_THRESHOLD = 30;
+  const QUIET_SPEECH_MIN_MS = 500;
+  const NOT_HEARD_INTERVAL_MS = 30000;
+  let lastNotHeardAt = 0;
   let ttsActive = false;         // True while TTS audio is playing (mutes the mic — Gap 3)
   const TTS_COOLDOWN_MS = 2500;  // Wait after TTS finishes before re-opening the mic
   let ttsWatchdog = null;        // Failsafe: force-clears ttsActive if 'done' is ever lost
@@ -411,6 +485,92 @@ if (!window.electronAPI) {
     transcriptArea.style.display = text ? 'block' : 'none';
   }
 
+  // ── Last command: heard → working → done / failed (Stage 0) ──
+  // Stays on screen until the next command is heard, so the student can
+  // always see what AbleSpeak took them to say and whether it worked.
+  const lastCommand = document.getElementById('lastCommand');
+  const lastHeard = document.getElementById('lastHeard');
+  const lastOutcome = document.getElementById('lastOutcome');
+  const whoLabel = document.getElementById('whoLabel');
+  let turnOpen = false; // a command was heard and has not finished yet
+  let taskRunning = false; // a multi-step task is in progress (Stage 3)
+
+  function showOutcome(kind, text) {
+    lastOutcome.dataset.state = kind;
+    lastOutcome.textContent = text;
+    lastCommand.hidden = false;
+  }
+
+  function showHeard(text) {
+    lastHeard.textContent = `Heard: “${text}”`;
+    lastHeard.title = text;
+    turnOpen = true;
+    showOutcome('working', 'Working…');
+  }
+
+  // End the current command. Nothing to report if nothing was heard.
+  function finishTurn(kind, text) {
+    if (!turnOpen) return;
+    turnOpen = false;
+    showOutcome(kind, text);
+  }
+
+  // How to listen for the student now at the computer: a quiet speaker
+  // needs lower levels, a slow speaker a longer pause (Stage 1).
+  function applyListeningSettings(settings) {
+    if (!settings || typeof settings.speechThreshold !== 'number') return;
+    SPEECH_THRESHOLD = settings.speechThreshold;
+    SILENCE_THRESHOLD = settings.silenceThreshold;
+    QUIET_SPEECH_THRESHOLD = settings.quietThreshold;
+    SILENCE_DURATION = settings.commandPauseMs;
+    DICTATION_SILENCE_MS = settings.dictationPauseMs;
+    console.log(`[Overlay] Listening: ${settings.sensitivity}, pause ${settings.commandPauseMs} ms`);
+  }
+
+  function handleTaskProgress(event) {
+    const kind = event.phase;
+    if (kind === 'plan') {
+      taskRunning = true;
+      turnOpen = true;
+      const asks = event.asksFirst?.length
+        ? ` — I'll ask before step ${event.asksFirst.map(a => a.index + 1).join(' and ')}`
+        : '';
+      showOutcome('working', `Plan: ${event.steps.length} step${event.steps.length === 1 ? '' : 's'}${asks}`);
+      // Listen during the task, so "stop" works.
+      clearWatchdog();
+      if (state === 'processing') resumeListening(200);
+    } else if (kind === 'resume') {
+      taskRunning = true;
+      clearWatchdog();
+      if (state === 'processing') resumeListening(200);
+    } else if (kind === 'step') {
+      showOutcome('working', `Step ${event.index + 1} of ${event.total}: ${event.step.do}`);
+    } else if (kind === 'check' && !event.ok) {
+      showOutcome('working', `Step ${event.index + 1} didn't work — trying another way…`);
+    } else if (kind === 'replan') {
+      showOutcome('working', `New plan (${event.attempt} of 2): ${event.steps.length} step${event.steps.length === 1 ? '' : 's'}`);
+    } else if (['done', 'failed', 'stopped', 'cannot'].includes(kind)) {
+      taskRunning = false;
+    }
+  }
+
+  function showStudent(student) {
+    whoLabel.textContent = student ? `${student.name}'s session` : '';
+    whoLabel.hidden = !student;
+  }
+
+  // What to say out loud when something failed: the server's own sentence
+  // when it wrote one for the student, otherwise a plain apology.
+  // Tool results sometimes end with advice for the AI ("Use uia_query to…");
+  // the student never needs to see or hear that.
+  const forStudent = text => String(text || '').replace(/\s*Use [a-z]+_[a-z_]+ to [^.]*\.?/g, '').trim();
+
+  function spokenFailure(text) {
+    const said = forStudent(text);
+    if (!said || /^error:/i.test(said) || said.length > 160) return "Sorry, that didn't work. Please try again.";
+    return said;
+  }
+
   function setListeningUI() {
     state = 'listening';
     btnMic.title = 'Listening... click to stop';
@@ -424,7 +584,7 @@ if (!window.electronAPI) {
     } else if (dictationMode) {
       btnMic.className = 'btn btn-mic dictating';
       btnMic.style.opacity = '';
-      setTranscript('✏️ Dictating...', 'listening-label');
+      setTranscript(dictationClipsPending > 0 ? '✏️ Typing… keep talking' : '✏️ Dictating...', 'listening-label');
     } else {
       btnMic.className = 'btn btn-mic listening';
       btnMic.style.opacity = '';
@@ -459,6 +619,20 @@ if (!window.electronAPI) {
     setIdleUI();
     setTranscript("Didn't catch that — try again a little louder", 'not-heard');
     speak("I didn't catch that. Try again a little louder."); // 'done' event re-opens the mic
+  }
+
+  // Re-open the mic once the server has answered. In dictation the mic may
+  // already be recording the next phrase, so leave a running recording alone.
+  function resumeListening(delay) {
+    setTimeout(() => {
+      if (state === 'listening') return;
+      setIdleUI();
+      if (active) startListening();
+    }, delay);
+  }
+
+  function dictationClipAnswered() {
+    if (dictationClipsPending > 0) dictationClipsPending--;
   }
 
   // ── Processing Watchdog ──
@@ -550,6 +724,8 @@ if (!window.electronAPI) {
         setIdleUI();
         setTranscript(dictationMode ? '✏️ Reconnecting...' : 'Reconnecting...', 'listening-label');
       }
+      dictationClipsPending = 0; // answers to earlier phrases may never arrive
+      taskRunning = false;       // a task does not survive the connection
       clearWatchdog();
       setTimeout(connectWS, 2000);
     };
@@ -563,7 +739,31 @@ if (!window.electronAPI) {
     // Voice transcription received — show what was heard
     if (data.type === 'voice_transcription') {
       setTranscript(data.text || '', 'listening-label');
+      if (data.text) showHeard(data.text);
       feedWatchdog();
+      return;
+    }
+
+    // Who this computer is recording for — on connect, and when a teacher
+    // changes it on the Teacher page.
+    if (data.type === 'initial_status') {
+      showStudent(data.activeStudent || null);
+      applyListeningSettings(data.listening);
+      return;
+    }
+    if (data.type === 'listening_settings') {
+      applyListeningSettings(data);
+      return;
+    }
+
+    // A multi-step task: show each step, and keep listening so the student
+    // can say "stop" at any point.
+    if (data.type === 'agent_progress') {
+      handleTaskProgress(data);
+      return;
+    }
+    if (data.type === 'active_student') {
+      showStudent(data.student || null);
       return;
     }
 
@@ -573,28 +773,59 @@ if (!window.electronAPI) {
     // this IS the answer — so always recover, otherwise the mic sticks in
     // 'processing' until the 60s watchdog. (This was the stuck-overlay bug.)
     if (data.type === 'voice_no_speech') {
+      dictationClipAnswered();
+      finishTurn('ignored', 'Ignored — it sounded like background talk');
       clearWatchdog();
+      if (state === 'listening') return; // already recording the next phrase
       setIdleUI();
       if (!dictationMode) setTranscript('Ready', 'listening-label');
-      setTimeout(() => { if (active) startListening(); }, 300);
+      resumeListening(300);
       return;
     }
 
     // Voice error — also terminal for this turn. Recover even while processing.
     if (data.type === 'voice_error') {
+      dictationClipAnswered();
+      turnOpen = true; // nothing was heard, but the attempt still failed
+      finishTurn('failed', "✗ Couldn't understand that — please say it again");
       clearWatchdog();
       consecutiveErrors++;
       setTranscript(data.error || 'Voice error', 'error');
       // Always restart — use increasing backoff delay instead of killing the mic
       const backoff = Math.min(consecutiveErrors * 500, 3000);
-      setTimeout(() => { setIdleUI(); if (active) startListening(); }, backoff);
+      resumeListening(backoff);
+      return;
+    }
+
+    // Voice busy while recording: in dictation the server's queue is full and
+    // this phrase was dropped. Say so, because the student can't see the gap.
+    if (data.type === 'voice_busy' && state === 'listening') {
+      dictationClipAnswered();
+      if (data.task) {
+        setTranscript('Still working — say "stop" to cancel', 'listening-label');
+      } else if (!dictationMode) {
+        setTranscript('Still working on the last command…', 'listening-label');
+      } else {
+        setTranscript("⚠️ I missed the last part — please say it again", 'error');
+        turnOpen = true;
+        finishTurn('failed', '✗ Missed the last part — say it again');
+        speak('I missed the last part. Please say it again.');
+      }
       return;
     }
 
     // Voice busy — server is still on the previous command.
     // Stay in processing state with mic OFF — don't restart listening.
+    // A task is running: the server only listens for "stop". Keep the mic on.
+    if (data.type === 'voice_busy' && data.task) {
+      setTranscript('Still working — say "stop" to cancel', 'listening-label');
+      resumeListening(200);
+      return;
+    }
+
     if (data.type === 'voice_busy') {
       setTranscript('Still working… mic paused', '');
+      showOutcome('working', 'Still working on the last command…');
       if (state !== 'processing') setProcessingUI();
       feedWatchdog(); // Extend the watchdog since we know the server is alive
       return;
@@ -614,6 +845,9 @@ if (!window.electronAPI) {
   }
 
   function handleResponse(data) {
+    dictationClipAnswered();
+    // A finished task, or one paused on a question, is no longer running.
+    if (data.task || data.model === 'confirmation-prompt') taskRunning = false;
     clearWatchdog();
 
     // In always-listening mode, never deactivate
@@ -621,14 +855,27 @@ if (!window.electronAPI) {
 
     if (data.error) {
       consecutiveErrors++;
-      setTranscript(data.text || data.error || 'Error', 'error');
-      // Always restart — use increasing backoff delay instead of killing the mic
-      const backoff = Math.min(consecutiveErrors * 500, 3000);
-      setTimeout(() => { setIdleUI(); if (active) startListening(); }, backoff);
+      const failure = forStudent(data.text || (typeof data.error === 'string' ? data.error : '') || 'Error');
+      setTranscript('Try again, or say it a different way.', 'error');
+      turnOpen = true;
+      finishTurn('failed', `✗ Didn't work: ${failure.replace(/^That didn't work:\s*/i, '')}`);
+      // A failure is never silent: the student may not be looking (CVA-3).
+      // The Electron voice re-opens the mic when it finishes speaking.
+      const utterance = speak(spokenFailure(failure));
+      if (utterance) {
+        utterance.onend = () => resumeListening(200);
+      } else if (!ttsActive) {
+        // Always restart — use increasing backoff delay instead of killing the mic
+        resumeListening(Math.min(consecutiveErrors * 500, 3000));
+      }
       return;
     }
 
     consecutiveErrors = 0;
+    if (data.model === 'confirmation-prompt') finishTurn('waiting', 'Waiting — say yes or no');
+    else if (data.task?.status === 'stopped') finishTurn('done', 'Stopped');
+    else if (data.task) finishTurn('done', `✓ Done — ${data.task.steps} step${data.task.steps === 1 ? '' : 's'}`);
+    else finishTurn('done', '✓ Done');
 
     // Determine if silent (action commands like scroll)
     const isSilent = data.silent === true ||
@@ -637,7 +884,7 @@ if (!window.electronAPI) {
     if (isSilent) {
       setTranscript('✓', 'response');
       // Immediately restart listening
-      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
+      resumeListening(100);
       return;
     }
 
@@ -648,9 +895,7 @@ if (!window.electronAPI) {
       const utterance = speak(responseText);
       if (utterance) {
         // Browser speechSynthesis path — restart when the utterance ends.
-        utterance.onend = () => {
-          setTimeout(() => { setIdleUI(); if (active) startListening(); }, 200);
-        };
+        utterance.onend = () => resumeListening(200);
         // Safety fallback: if TTS hangs, force restart after 8s
         setTimeout(() => {
           if (state !== 'listening' && active && !ttsActive) {
@@ -669,11 +914,11 @@ if (!window.electronAPI) {
         }, 12000);
       } else {
         // No TTS engine available — restart immediately
-        setTimeout(() => { setIdleUI(); if (active) startListening(); }, 300);
+        resumeListening(300);
       }
     } else {
       // Empty response — restart immediately
-      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
+      resumeListening(100);
     }
   }
 
@@ -684,172 +929,264 @@ if (!window.electronAPI) {
   // ── Voice Recording (MediaRecorder + Gemini transcription) ──
   // ════════════════════════════════════════════════
 
+  // Open the microphone, or keep the one already open (dictation records
+  // phrase after phrase on the same stream, so no speech is lost in between).
+  async function openMic() {
+    if (stream && stream.active && analyser) return;
+    releaseMic();
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,  // Boost voice, suppress background
+        sampleRate: 16000,
+      }
+    });
+    stream = newStream;
+
+    // Record directly from the raw mic stream — matches the dashboard
+    // Chat page's proven-working capture path. (An earlier attempt routed
+    // recording through a highpass/compressor/MediaStreamDestination graph
+    // for noise filtering; that's removed because it could leave
+    // startListening() hung or throwing before the recorder ever started,
+    // which is worse than no filtering at all.)
+    //
+    // Reuse a single AudioContext across turns instead of creating a new
+    // one every call (Fix #7, borrowed from the dashboard's Chat page) —
+    // Chrome caps concurrent/recently-created AudioContexts, and an
+    // always-listening loop that creates+closes one every turn can exhaust
+    // that cap after only a handful of commands even though each one is
+    // individually closed, since close() isn't guaranteed to fully release
+    // the underlying hardware context before the next create.
+    if (!audioCtx || audioCtx.state === 'closed') {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } else if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    audioSource = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioSource.connect(analyser);
+  }
+
+  function releaseMic() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+    analyser = null;
+  }
+
+  // Stop the recording in progress. With `discard`, its audio is dropped
+  // instead of sent, and whoever stopped it decides what happens next.
+  function stopActiveRecorder(discard) {
+    const recorder = mediaRecorder;
+    mediaRecorder = null;
+    if (recorder && recorder.state === 'recording') {
+      recorder.discard = discard;
+      try { recorder.stop(); } catch {}
+    }
+  }
+
+  function sendAudio(blob, withScreenshot) {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.split(',')[1];
+      console.log(`[Overlay] Sending ${Math.round(blob.size/1024)}KB audio`);
+
+      // ── Screen Vision (borrowed from Clicky) ──
+      // Capture desktop screenshot so the AI can SEE what the user sees.
+      // Dictated phrases are typed, not reasoned about, so they skip it.
+      let screenshot = null;
+      if (withScreenshot) {
+        try {
+          if (window.electronAPI && window.electronAPI.captureScreen) {
+            screenshot = await window.electronAPI.captureScreen();
+            if (screenshot) console.log(`[Overlay] Screenshot captured (${Math.round(screenshot.length/1024)}KB)`);
+          }
+        } catch (err) {
+          console.warn('[Overlay] Screenshot failed:', err.message);
+        }
+      }
+
+      ws.send(JSON.stringify({
+        type: 'voice_audio',
+        source: 'overlay', // the student speaking (the Chat page's mic is not)
+        audio: base64,
+        mimeType: blob.type || 'audio/webm',
+        screenshot, // base64 JPEG or null
+      }));
+    };
+    reader.readAsDataURL(blob);
+  }
+
   async function startListening() {
     if (!active) return;
     if (ttsActive) return; // Don't capture our own TTS output (Gap 3)
-    if (state === 'listening' || state === 'processing') return;
+    if (state === 'listening' || state === 'processing' || micStarting) return;
 
-    // Enforce cooldown
+    // Enforce cooldown. Dictation skips it: sound right after a phrase is the
+    // next phrase, not an echo.
     const cooldownRemaining = COOLDOWN_MS - (Date.now() - lastRecordEnd);
-    if (cooldownRemaining > 0) {
+    if (!dictationMode && !taskRunning && cooldownRemaining > 0) {
       setTimeout(() => { if (active) startListening(); }, cooldownRemaining);
       return;
     }
 
+    // Never run two recordings at once.
+    stopActiveRecorder(true);
+
+    micStarting = true;
+    let recorder = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,  // Boost voice, suppress background
-          sampleRate: 16000,
-        }
-      });
+      await openMic();
+      if (!active || ttsActive) { releaseMic(); return; }
 
-      audioChunks = [];
+      const levels = analyser;
+      const chunks = [];
+      const startedAt = Date.now();
       let hasSpeechDetected = false;
-      // Anything above SILENCE_THRESHOLD but below SPEECH_THRESHOLD — a real
-      // sound was made, just not loud enough to count as speech. Distinguishes
-      // "tried to speak but too quietly" from ordinary room silence, so the
-      // HFI-2 "not heard" cue below only fires when someone actually spoke.
-      let hasAnySound = false;
+      let lastSpeechAt = 0;
+      let silenceStart = null;
+      // Time spent at a quiet voice level: louder than room hum, but below
+      // SPEECH_THRESHOLD. Tells "tried to speak but too quietly" apart from
+      // ordinary room sound for the HFI-2 "not heard" cue below.
+      let quietSoundMs = 0;
 
-      // Record directly from the raw mic stream — matches the dashboard
-      // Chat page's proven-working capture path. (An earlier attempt routed
-      // recording through a highpass/compressor/MediaStreamDestination graph
-      // for noise filtering; that's removed because it could leave
-      // startListening() hung or throwing before the recorder ever started,
-      // which is worse than no filtering at all.)
-      //
-      // Reuse a single AudioContext across turns instead of creating a new
-      // one every call (Fix #7, borrowed from the dashboard's Chat page) —
-      // Chrome caps concurrent/recently-created AudioContexts, and an
-      // always-listening loop that creates+closes one every turn can exhaust
-      // that cap after only a handful of commands even though each one is
-      // individually closed, since close() isn't guaranteed to fully release
-      // the underlying hardware context before the next create.
-      if (!audioCtx || audioCtx.state === 'closed') {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      } else if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
-      audioSource = source; // tracked so the next turn can disconnect it cleanly
-
-      mediaRecorder = new MediaRecorder(stream, {
+      recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus' : 'audio/webm',
       });
+      mediaRecorder = recorder;
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.push(e.data);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
       };
 
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+      let hardStop = null;
+      recorder.onstop = () => {
+        clearInterval(hardStop);
+        if (mediaRecorder === recorder) mediaRecorder = null;
         lastRecordEnd = Date.now();
 
-        if (hasSpeechDetected && blob.size > 5000) {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            setProcessingUI();
-            setTranscript('Processing...', '');
-            const reader = new FileReader();
-            reader.onload = async () => {
-              const base64 = reader.result.split(',')[1];
-              console.log(`[Overlay] Sending ${Math.round(blob.size/1024)}KB audio`);
+        // Dictation and running tasks keep the mic open between phrases, so
+        // nothing is missed and "stop" always works.
+        const keepMicOpen = (dictationMode || taskRunning) && active && !ttsActive && !recorder.discard;
+        if (!keepMicOpen && !mediaRecorder && recorder.stream === stream) releaseMic();
+        if (recorder.discard) return;
 
-              // ── Screen Vision (borrowed from Clicky) ──
-              // Capture desktop screenshot so the AI can SEE what the user sees
-              let screenshot = null;
-              try {
-                if (window.electronAPI && window.electronAPI.captureScreen) {
-                  screenshot = await window.electronAPI.captureScreen();
-                  if (screenshot) console.log(`[Overlay] Screenshot captured (${Math.round(screenshot.length/1024)}KB)`);
-                }
-              } catch (err) {
-                console.warn('[Overlay] Screenshot failed:', err.message);
-              }
+        const blob = new Blob(chunks, { type: recorder.mimeType });
+        const heardSpeech = hasSpeechDetected && blob.size > 5000;
 
-              ws.send(JSON.stringify({
-                type: 'voice_audio',
-                audio: base64,
-                mimeType: blob.type || 'audio/webm',
-                screenshot, // base64 JPEG or null
-              }));
-            };
-            reader.readAsDataURL(blob);
-          } else {
-            // Socket isn't open — DON'T sit in 'processing' forever. Recover and
-            // (re)connect so the next utterance can actually be sent.
-            console.warn('[Overlay] WebSocket not open — cannot send command; resetting and reconnecting');
-            setIdleUI();
-            setTranscript(dictationMode ? '✏️ Reconnecting…' : 'Reconnecting…', 'listening-label');
-            connectWS();
-            setTimeout(() => { if (active) startListening(); }, 800);
-          }
-        } else if (hasAnySound) {
-          // Real sound was made but never crossed SPEECH_THRESHOLD — the concrete
-          // engineering surface of the product's #1 documented adoption risk:
-          // quiet/atypical speech being silently dropped with zero feedback
-          // (HFI-2). Gated on hasAnySound so ordinary room silence — no sound
-          // at all — still returns to plain idle instead of narrating itself
-          // every ~2 seconds.
-          setNotHeardUI();
-        } else {
+        if (heardSpeech && !(ws && ws.readyState === WebSocket.OPEN)) {
+          // Socket isn't open — DON'T sit in 'processing' forever. Recover and
+          // (re)connect so the next utterance can actually be sent.
+          console.warn('[Overlay] WebSocket not open — cannot send command; resetting and reconnecting');
+          releaseMic();
           setIdleUI();
-          setTimeout(() => { if (active) startListening(); }, 300);
+          setTranscript(dictationMode ? '✏️ Reconnecting…' : 'Reconnecting…', 'listening-label');
+          connectWS();
+          setTimeout(() => { if (active) startListening(); }, 800);
+          return;
         }
+
+        if (heardSpeech && (dictationMode || taskRunning)) {
+          // Send the phrase and go straight back to recording.
+          sendAudio(blob, false);
+          if (dictationMode) dictationClipsPending++;
+          setIdleUI();
+          if (keepMicOpen) startListening(); // otherwise TTS 'done' re-opens the mic
+          return;
+        }
+
+        if (heardSpeech) {
+          setProcessingUI();
+          setTranscript('Processing...', '');
+          sendAudio(blob, true);
+          return;
+        }
+
+        setIdleUI();
+        // Real sound was made but never crossed SPEECH_THRESHOLD — the concrete
+        // engineering surface of the product's #1 documented adoption risk:
+        // quiet/atypical speech being silently dropped with zero feedback
+        // (HFI-2). Not while dictating (the mic never pauses there) or while
+        // AbleSpeak itself is talking.
+        const triedToSpeak = quietSoundMs >= QUIET_SPEECH_MIN_MS;
+        if (triedToSpeak && !dictationMode && !ttsActive
+            && Date.now() - lastNotHeardAt > NOT_HEARD_INTERVAL_MS) {
+          lastNotHeardAt = Date.now();
+          setNotHeardUI();
+          return;
+        }
+        if (keepMicOpen) startListening();
+        else setTimeout(() => { if (active) startListening(); }, 300);
       };
 
-      mediaRecorder.start(200);
-      recordStart = Date.now();
+      recorder.start(200);
       setListeningUI();
 
-      silenceStart = null;
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const MAX_RECORD_MS = 8000;   // 8s max — shorter to limit music bleed
+      const maxRecordMs = () => (dictationMode ? DICTATION_MAX_RECORD_MS : MAX_RECORD_MS);
+      // Backstop for the level loop below: if Chromium ever pauses it, the
+      // recording still ends instead of growing into minutes of audio.
+      hardStop = setInterval(() => {
+        if (recorder.state === 'recording' && Date.now() - startedAt > maxRecordMs() + 1000) {
+          console.warn('[Overlay] Recording ran past its limit — stopping it');
+          recorder.stop();
+        }
+      }, 1000);
+
+      const data = new Uint8Array(levels.frequencyBinCount);
+      let lastFrameAt = startedAt;
 
       function checkSilence() {
-        if (state !== 'listening' || !mediaRecorder || mediaRecorder.state !== 'recording') return;
-        const elapsed = Date.now() - recordStart;
-        if (elapsed > MAX_RECORD_MS) { mediaRecorder.stop(); return; }
-        analyser.getByteFrequencyData(data);
+        if (state !== 'listening' || recorder !== mediaRecorder || recorder.state !== 'recording') return;
+        const now = Date.now();
+        const elapsed = now - startedAt;
+        const frameMs = Math.min(now - lastFrameAt, 100);
+        lastFrameAt = now;
+        if (elapsed > maxRecordMs()) { recorder.stop(); return; }
+        levels.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
-        if (avg >= SPEECH_THRESHOLD) { hasSpeechDetected = true; hasAnySound = true; silenceStart = null; }
+        if (avg >= SPEECH_THRESHOLD) {
+          hasSpeechDetected = true;
+          lastSpeechAt = now;
+        } else if (avg >= QUIET_SPEECH_THRESHOLD) {
+          quietSoundMs += frameMs;
+        }
         if (elapsed < MIN_RECORD_MS) { requestAnimationFrame(checkSilence); return; }
         if (avg < SILENCE_THRESHOLD) {
-          if (!silenceStart) silenceStart = Date.now();
-          // Dictation mode: submit after 900ms silence — quick enough between sentences
-          // Command mode: wait the full SILENCE_DURATION (1.5s) for deliberate pauses
-          const silenceNeeded = hasSpeechDetected ? (dictationMode ? 900 : SILENCE_DURATION) : 2000;
-          if (Date.now() - silenceStart > silenceNeeded) { mediaRecorder.stop(); return; }
+          if (!silenceStart) silenceStart = now;
+          // Dictation waits longer, so a breath mid-sentence doesn't split it.
+          // Command mode waits SILENCE_DURATION (1.5s) for deliberate pauses.
+          const silenceNeeded = hasSpeechDetected ? (dictationMode ? DICTATION_SILENCE_MS : SILENCE_DURATION) : 2000;
+          if (now - silenceStart > silenceNeeded) { recorder.stop(); return; }
         } else {
-          hasAnySound = true; // between SILENCE_THRESHOLD and SPEECH_THRESHOLD — quiet, not silent
           silenceStart = null;
+        }
+        // Background noise can keep the level above SILENCE_THRESHOLD forever.
+        // In dictation, end the phrase once speech-level sound has stopped.
+        if (dictationMode && hasSpeechDetected && now - lastSpeechAt > DICTATION_SPEECH_GAP_MS) {
+          recorder.stop();
+          return;
         }
         requestAnimationFrame(checkSilence);
       }
       requestAnimationFrame(checkSilence);
     } catch (err) {
       console.error('[Overlay] Mic error:', err);
+      if (recorder && mediaRecorder === recorder) mediaRecorder = null;
+      releaseMic();
       setIdleUI();
       setTranscript('Mic error: ' + err.message, 'error');
+    } finally {
+      micStarting = false;
     }
   }
 
   function stopRecording() {
     // Stop the recording but DON'T deactivate — we want to stay ready
     consecutiveErrors = 0;
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-    }
-    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-    if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+    stopActiveRecorder(true);
+    releaseMic();
     setIdleUI();
     setTranscript('Ready — say something', '');
   }
@@ -925,7 +1262,7 @@ if (!window.electronAPI) {
       btnMic.innerHTML = MIC_SVG;
       setTranscript('Stopped', '');
       if (ttsWatchdog) { clearTimeout(ttsWatchdog); ttsWatchdog = null; }
-      setTimeout(() => { if (active && !ttsActive) { setIdleUI(); startListening(); } }, 300);
+      resumeListening(300);
       return;
     }
     toggleListening();
@@ -973,11 +1310,8 @@ if (!window.electronAPI) {
   // In always-listening mode, hiding is temporary (e.g. voice "dismiss")
   if (window.electronAPI.onStop) {
     window.electronAPI.onStop(() => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      }
-      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-      if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+      stopActiveRecorder(true);
+      releaseMic();
       setIdleUI();
       setTranscript('', '');
     });
@@ -1051,7 +1385,8 @@ if (!window.electronAPI) {
         btnMic.className = 'btn btn-mic speaking';
         btnMic.setAttribute('aria-label', 'Speaking — click to stop');
         btnMic.title = 'Click to stop speaking';
-        // Stop any in-progress recording so we don't capture our own voice
+        // Stop any in-progress recording so we don't capture our own voice.
+        // What the student said before this point is still sent.
         if (mediaRecorder && mediaRecorder.state === 'recording') {
           try { mediaRecorder.stop(); } catch {}
         }
@@ -1063,7 +1398,7 @@ if (!window.electronAPI) {
         // Cooldown, then re-open the mic (TTS finished speaking)
         if (active) {
           setTimeout(() => {
-            if (active && !ttsActive) { setIdleUI(); startListening(); }
+            if (active && !ttsActive && state !== 'listening') { setIdleUI(); startListening(); }
           }, TTS_COOLDOWN_MS);
         }
       }
@@ -1093,25 +1428,28 @@ if (!window.electronAPI) {
   const _origHandleWSMessage = handleWSMessage;
   handleWSMessage = function(data) {
     // Local fast-path: stop TTS immediately on interrupt words (the server also
-    // cancels server-side so the utterance never reaches the LLM).
-    if (data.type === 'voice_transcription' && INTERRUPT_PHRASES.test((data.text || '').trim())) {
+    // cancels server-side so the utterance never reaches the LLM). Not while
+    // dictating, where "stop" is text to type, as it is on the server.
+    if (data.type === 'voice_transcription' && !dictationMode && INTERRUPT_PHRASES.test((data.text || '').trim())) {
+      showHeard(data.text);
       if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
       window.speechSynthesis?.cancel();
       ttsActive = false;
       setTranscript('Stopped', '');
       clearWatchdog();
       // Restart mic so user can give a new command immediately
-      setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      resumeListening(300);
       return;
     }
 
     // Server told us the current operation was cancelled.
     if (data.type === 'voice_cancelled') {
+      finishTurn('done', 'Stopped');
       if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
       ttsActive = false;
       setTranscript('Stopped', '');
       clearWatchdog();
-      setTimeout(() => { if (active && !ttsActive) { setIdleUI(); startListening(); } }, 300);
+      resumeListening(300);
       return;
     }
 
@@ -1119,74 +1457,85 @@ if (!window.electronAPI) {
     // overlay but keep the mic hot and listening. Say "AbleSpeak" or "come back"
     // is the ONLY way back for a student with no keyboard or mouse (HFI-1).
     if (data.type === 'voice_dismissed') {
+      finishTurn('done', '✓ Hidden — say "come back" to show me');
       stopRecording();
       setTranscript('', '');
       window.electronAPI.hideOverlay();
       clearWatchdog();
       if (data.say) speak(data.say); // 'done' event will re-open the mic
-      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      else resumeListening(300);
       return;
     }
 
     // Server restored us from dismiss — show the overlay again.
     if (data.type === 'voice_restored') {
+      finishTurn('done', '✓ Back');
       window.electronAPI.showOverlay();
       clearWatchdog();
       if (data.say) speak(data.say);
-      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      else resumeListening(300);
       return;
     }
 
     // Server entered sleep mode — keep the mic on (to hear "wake up") but go quiet.
     if (data.type === 'voice_sleeping') {
+      finishTurn('done', '✓ Asleep — say "wake up"');
       sleeping = true;
       clearWatchdog();
       if (data.say) speak(data.say); // 'done' event will re-open the mic
-      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      else resumeListening(300);
       return;
     }
 
     // Server woke up — resume normal operation.
     if (data.type === 'voice_awake') {
+      finishTurn('done', '✓ Awake');
       sleeping = false;
       btnMic.style.opacity = '';
       clearWatchdog();
       if (data.say) speak(data.say);
-      else setTimeout(() => { if (active) { setIdleUI(); startListening(); } }, 300);
+      else resumeListening(300);
       return;
     }
 
     // ── Dictation Mode ──
     if (data.type === 'dictation_mode') {
+      finishTurn('done', data.enabled ? '✓ Dictation on' : '✓ Dictation off');
       dictationMode = data.enabled;
+      dictationClipsPending = 0;
       clearWatchdog();
-      if (dictationMode) {
-        // Enter dictation mode — green mic, different label
-        btnMic.className = 'btn btn-mic dictating';
-        setTranscript('✏️ Dictating...', 'listening-label');
+      if (state === 'listening') {
+        // Relabel the recording already running; it finishes in the new mode.
+        setListeningUI();
       } else {
+        // state may still be 'processing' — must reset before startListening() or it bails
         setIdleUI();
-        setTranscript('Command mode', 'listening-label');
+        // Enter dictation mode — green mic, different label
+        if (dictationMode) btnMic.className = 'btn btn-mic dictating';
       }
+      setTranscript(dictationMode ? '✏️ Dictating...' : 'Command mode', 'listening-label');
       if (data.say) speak(data.say);
-      else setTimeout(() => { if (active) startListening(); }, 300);
+      else resumeListening(300);
       return;
     }
 
-    // Dictation text was typed — show brief feedback, restart mic immediately.
+    // Dictation text was typed — show brief feedback. The mic is usually
+    // already recording the next phrase; if not, restart it.
     // A typing failure must be audible, not just logged server-side — the
     // student is mid-sentence and has no way to proofread a word that never
     // actually got typed (CVA-3).
     if (data.type === 'dictation_typed') {
+      dictationClipAnswered();
       clearWatchdog();
       if (data.error) {
+        finishTurn('failed', '✗ ' + (data.message || "That didn't type"));
         setTranscript('⚠️ ' + (data.message || "That didn't type"), 'error');
         speak(data.message || "That didn't type. Please try again."); // 'done' event re-opens the mic
         return;
       }
+      finishTurn('done', /^\[.*\]$/.test((data.text || '').trim()) ? `✓ ${data.text.trim().slice(1, -1)}` : '✓ Typed');
       setTranscript('✏️ ' + (data.text || '').trim().slice(0, 60), 'listening-label');
-      // state may still be 'processing' — must reset before startListening() or it bails
-      setTimeout(() => { setIdleUI(); if (active) startListening(); }, 100);
+      resumeListening(100);
       return;
     }
 

@@ -15,13 +15,15 @@ import {
   getDecisionFlags,
 } from './db.js';
 import { evaluateRules, MEASURE_REGISTRY } from './progress-rules.js';
+import { localDate, addDays } from './local-time.js';
 
 // ── Measure computation (pure layer, exported for testing) ──
 
 /**
  * Compute the probe value for one measure from a set of command rows.
  *
- * Measure definitions (attempted = rows with outcome NOT NULL):
+ * Measure definitions (attempted = one row per task: outcome set and not
+ * 'superseded', which marks an earlier try the student then retried):
  *   independence_rate   — (outcome='success' AND prompt_count=0) / attempted
  *   task_completion     — (outcome IN ('success','repaired')) / attempted
  *   prompts_to_complete — AVG(prompt_count) over rows with outcome IN ('success','repaired')
@@ -38,8 +40,8 @@ import { evaluateRules, MEASURE_REGISTRY } from './progress-rules.js';
 export function computeProbeValue(measure, commandRows) {
   if (!(measure in MEASURE_REGISTRY)) return null;
 
-  // Attempted = rows with a non-null outcome (voice-path rows set this via T1)
-  const attempted = commandRows.filter(r => r.outcome != null);
+  // Attempted = tasks: voice rows with an outcome, minus superseded tries
+  const attempted = commandRows.filter(r => r.outcome != null && r.outcome !== 'superseded');
   if (attempted.length < 3) return null;
 
   if (measure === 'independence_rate') {
@@ -144,13 +146,12 @@ let _probeInterval = null;
  * @param {() => string} todayFn  injectable for testability (defaults to ISO today)
  * @returns {NodeJS.Timeout}
  */
-export function startProbeScheduler(todayFn = () => new Date().toISOString().slice(0, 10)) {
+export function startProbeScheduler(todayFn = () => localDate()) {
   if (_probeInterval) return _probeInterval; // idempotent
 
   const runDaily = async () => {
     const today = todayFn();
-    const yesterdayMs = new Date(today).getTime() - 86400000;
-    const yesterday = new Date(yesterdayMs).toISOString().slice(0, 10);
+    const yesterday = addDays(today, -1);
     try {
       await computeProbesForDate(yesterday);
       await computeProbesForDate(today);

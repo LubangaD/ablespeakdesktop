@@ -1,0 +1,126 @@
+{
+  "about": "Stage 3 acceptance: 20 multi-step instructions across six apps. Each check is read from the screen after the task (tools/agent-eval/run.mjs). 'apps' are the processes the runner closes afterwards, but only if they were not already open.",
+  "tasks": [
+    {
+      "id": "notepad-type",
+      "instruction": "Open Notepad and type My name is Amina",
+      "apps": ["notepad"],
+      "checks": [{ "kind": "text", "app": "notepad", "includes": ["My name is Amina"] }]
+    },
+    {
+      "id": "notepad-two-lines",
+      "instruction": "Open Notepad, type Line one, then start a new line and type Line two",
+      "apps": ["notepad"],
+      "checks": [{ "kind": "text", "app": "notepad", "includes": ["Line one", "Line two"] }]
+    },
+    {
+      "id": "notepad-replace",
+      "instruction": "Open Notepad, type cat, then select all and type dog",
+      "apps": ["notepad"],
+      "checks": [{ "kind": "text", "app": "notepad", "includes": ["dog"], "excludes": ["cat"] }]
+    },
+    {
+      "id": "calculator-add",
+      "instruction": "Open Calculator and work out 12 plus 30",
+      "apps": ["CalculatorApp"],
+      "checks": [{ "kind": "control", "app": "calculator", "nameIncludes": "42" }]
+    },
+    {
+      "id": "calculator-multiply",
+      "instruction": "Open Calculator and multiply 7 by 6",
+      "apps": ["CalculatorApp"],
+      "checks": [{ "kind": "control", "app": "calculator", "nameIncludes": "42" }]
+    },
+    {
+      "id": "calculator-scientific",
+      "instruction": "Open Calculator and then switch it to the scientific calculator",
+      "apps": ["CalculatorApp"],
+      "checks": [{ "kind": "control", "app": "calculator", "nameIncludes": "Scientific" }]
+    },
+    {
+      "id": "explorer-downloads",
+      "instruction": "Open File Explorer and go to the Downloads folder",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "file explorer", "titleIncludes": "Downloads" }]
+    },
+    {
+      "id": "explorer-documents",
+      "instruction": "Open File Explorer and open the Documents folder",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "file explorer", "titleIncludes": "Documents" }]
+    },
+    {
+      "id": "explorer-search",
+      "instruction": "Open File Explorer, go to Documents and search for pdf",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "file explorer", "titleIncludes": "pdf" }]
+    },
+    {
+      "id": "settings-display",
+      "instruction": "Open Settings and go to the Display page",
+      "apps": ["SystemSettings"],
+      "checks": [{ "kind": "control", "app": "settings", "nameIncludes": "Brightness" }]
+    },
+    {
+      "id": "settings-sound",
+      "instruction": "Open Settings and then open the Sound settings",
+      "apps": ["SystemSettings"],
+      "checks": [{ "kind": "control", "app": "settings", "nameIncludes": "Volume" }]
+    },
+    {
+      "id": "settings-bluetooth",
+      "instruction": "Open Settings and go to Bluetooth and devices",
+      "apps": ["SystemSettings"],
+      "checks": [{ "kind": "control", "app": "settings", "nameIncludes": "Bluetooth" }]
+    },
+    {
+      "id": "edge-search",
+      "instruction": "Open Edge and search for Nairobi weather",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "msedge", "titleIncludes": "Nairobi weather" }]
+    },
+    {
+      "id": "edge-maps",
+      "instruction": "Open Edge, go to Google Maps and look up Kisumu",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "msedge", "titleIncludes": "Kisumu" }]
+    },
+    {
+      "id": "chrome-wikipedia",
+      "instruction": "Open Chrome and go to Wikipedia",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "chrome", "titleIncludes": "Wikipedia" }]
+    },
+    {
+      "id": "chrome-youtube-search",
+      "instruction": "Open YouTube in Chrome and search for photosynthesis",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "chrome", "titleIncludes": "photosynthesis" }]
+    },
+    {
+      "id": "chrome-new-tab",
+      "instruction": "Open a new tab in Chrome and go to bbc.com",
+      "apps": [],
+      "checks": [{ "kind": "window", "app": "chrome", "titleIncludes": "BBC" }]
+    },
+    {
+      "id": "word-type",
+      "instruction": "Open Word, start a blank document and type Science homework",
+      "apps": ["WINWORD"],
+      "checks": [{ "kind": "text", "app": "word", "includes": ["Science homework"] }]
+    },
+    {
+      "id": "word-title-bold",
+      "instruction": "Open Word, start a blank document, type Title and make it bold",
+      "apps": ["WINWORD"],
+      "checks": [{ "kind": "text", "app": "word", "includes": ["Title"] }]
+    },
+    {
+      "id": "notepad-close",
+      "instruction": "Open Notepad, type draft note, and then close Notepad",
+      "apps": ["notepad"],
+      "confirm": true,
+      "checks": [{ "kind": "gone", "app": "notepad" }]
+    }
+  ]
+}

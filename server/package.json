@@ -27,13 +27,20 @@
       "overlay-wake.cjs",
       "wake-preload.cjs",
       "tools/**/*",
-      "data/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!**/*.test.mjs",
+      "!tools/grounding-eval/images/**",
+      "!tools/grounding-eval/out/**",
+      "!tools/grounding-eval/dataset.json"
     ],
     "extraResources": [
       {
         "from": "../dashboard/dist",
         "to": "dashboard/dist"
+      },
+      {
+        "from": "../chrome-integration-master",
+        "to": "chrome-extension"
       }
     ],
     "asarUnpack": [

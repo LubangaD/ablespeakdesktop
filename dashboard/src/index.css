@@ -2858,3 +2858,137 @@ h1, h2, h3, h4, h5, h6 {
   .ds-ready-banner { flex-direction: row; align-items: center; }
 }
 
+
+/* ── Settings: API keys ── */
+.settings-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.settings-lead {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.settings-path {
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 6px;
+  word-break: break-all;
+}
+.settings-key-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-key-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-key-head h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.settings-key-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.settings-label {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.settings-input {
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+}
+.settings-input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.settings-key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.settings-btn {
+  min-height: var(--touch-min);
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.settings-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.settings-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.settings-btn.primary {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+.settings-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.settings-btn.quiet {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.settings-btn.danger {
+  background: rgba(251, 113, 133, 0.12);
+  color: var(--error);
+  border-color: rgba(251, 113, 133, 0.4);
+}
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--touch-min);
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.settings-link:hover {
+  color: var(--accent);
+}
+.settings-result {
+  min-height: 1.4em;
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.settings-result.success { color: var(--success); }
+.settings-result.warn { color: var(--warning); }
+.settings-result.error { color: var(--error); }
