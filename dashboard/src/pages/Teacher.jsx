@@ -160,7 +160,7 @@ function ProgressChart({ goal, points, phases }) {
         role="img"
         aria-label={ariaLabel}
         width={W} height={H}
-        style={{ display: 'block', background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', maxWidth: '100%' }}
+        style={{ display: 'block', background: 'var(--surface-1)', borderRadius: 'var(--radius)', maxWidth: '100%' }}
       >
         {/* Y grid lines */}
         {yTicks.map((v, i) => (
@@ -301,8 +301,8 @@ function FlagBanner({ flags, onAck }) {
   if (!flags || flags.length === 0) return null;
   return (
     <div role="alert" aria-live="assertive" style={{
-      background: 'rgba(239,71,111,0.08)',
-      border: '1px solid rgba(239,71,111,0.4)',
+      background: 'rgba(251, 113, 133,0.08)',
+      border: '1px solid rgba(251, 113, 133,0.4)',
       borderRadius: 'var(--radius-sm)',
       padding: '12px 16px',
       marginBottom: 20,
@@ -316,13 +316,13 @@ function FlagBanner({ flags, onAck }) {
       {flags.map(f => (
         <div key={f.id} style={{
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: 12, padding: '8px 0', borderTop: '1px solid rgba(239,71,111,0.2)',
+          gap: 12, padding: '8px 0', borderTop: '1px solid rgba(251, 113, 133,0.2)',
         }}>
           <p style={{ fontSize: 14, color: 'var(--text-primary)', margin: 0, flex: 1 }}>
             <strong style={{ color: 'var(--error)' }}>{f.rule}</strong>
             {' — '}
             {RULE_GUIDANCE[f.rule] || 'Review this goal.'}
-            <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 8 }}>
               {f.fired_at}
             </span>
           </p>
@@ -331,7 +331,7 @@ function FlagBanner({ flags, onAck }) {
             aria-label={`Acknowledge ${f.rule} flag from ${f.fired_at}`}
             style={{
               padding: '6px 14px', minHeight: 44, minWidth: 100,
-              borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239,71,111,0.4)',
+              borderRadius: 'var(--radius-sm)', border: '1px solid rgba(251, 113, 133,0.4)',
               background: 'transparent', color: 'var(--error)', fontSize: 13,
               fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', flexShrink: 0,
             }}
@@ -397,13 +397,13 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
     }
   };
 
-  const inp = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
-  const lbl = { display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 };
+  const inp = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
+  const lbl = { display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 };
 
   return (
     <section aria-label="Goal management" style={{ marginBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-muted)' }}>GOALS</h3>
+        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>GOALS</h3>
         <button
           onClick={() => setShowForm(f => !f)}
           aria-expanded={showForm}
@@ -424,7 +424,7 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
               aria-pressed={selectedGoalId === g.id}
               style={{
                 padding: '10px 14px', minHeight: 44, textAlign: 'left',
-                background: selectedGoalId === g.id ? 'var(--bg-hover)' : 'var(--bg-tertiary)',
+                background: selectedGoalId === g.id ? 'var(--surface-3)' : 'var(--surface-2)',
                 border: `1px solid ${selectedGoalId === g.id ? 'var(--accent)' : 'var(--border)'}`,
                 borderRadius: 'var(--radius-sm)', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 12,
@@ -435,11 +435,11 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
                 <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 14 }}>
                   {MEASURE_REGISTRY[g.measure]?.label}
                 </span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 8 }}>
                   {g.baseline_date} → {g.target_date}
                 </span>
               </span>
-              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: g.status === 'active' ? 'rgba(29,158,138,0.15)' : 'var(--bg-hover)', color: g.status === 'active' ? 'var(--success)' : 'var(--text-muted)' }}>
+              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: g.status === 'active' ? 'rgba(29,158,138,0.15)' : 'var(--surface-3)', color: g.status === 'active' ? 'var(--success)' : 'var(--text-secondary)' }}>
                 {g.status}
               </span>
             </button>
@@ -472,7 +472,7 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
               </div>
               <button type="button" onClick={suggest} disabled={suggestionLoading}
                 aria-label="Suggest baseline from last 14 days of data"
-                style={{ padding: '10px 14px', minHeight: 44, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
+                style={{ padding: '10px 14px', minHeight: 44, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
                 {suggestionLoading ? '...' : 'Suggest'}
               </button>
             </div>
@@ -532,12 +532,12 @@ function PhasePanel({ goalId, queryClient }) {
     }
   };
 
-  const inp = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
-  const lbl = { display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 };
+  const inp = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
+  const lbl = { display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 };
 
   return (
     <section aria-label="Add phase change" style={{ marginBottom: 24 }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>PHASE CHANGE</h3>
+      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 12 }}>PHASE CHANGE</h3>
       <div className="card">
         <form onSubmit={add} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
@@ -588,7 +588,7 @@ function GoalActions({ goalId, status, queryClient, onDeselect }) {
       </button>
       <button onClick={() => updateStatus('discontinued')} disabled={!!loading}
         aria-label="Mark goal as discontinued"
-        style={{ padding: '8px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
+        style={{ padding: '8px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
         {loading === 'discontinued' ? 'Saving…' : 'Discontinue'}
       </button>
     </div>
@@ -599,13 +599,13 @@ function GoalActions({ goalId, status, queryClient, onDeselect }) {
 // Uses the existing, already-working GET /api/teacher/analytics endpoint
 // (server/src/db.js getTeacherAnalytics()) — this data has always been
 // computed correctly, it just was never rendered anywhere in the dashboard.
-const thStyle = { textAlign: 'left', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 };
+const thStyle = { textAlign: 'left', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 600 };
 const tdStyle = { padding: '10px 14px', color: 'var(--text-primary)' };
 
 function SummaryCard({ label, value, accent }) {
   return (
     <div className="card" style={{ padding: '14px 16px' }}>
-      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color: accent ? 'var(--accent)' : 'var(--text-primary)' }}>{value}</div>
     </div>
   );
@@ -620,17 +620,17 @@ function AnalyticsSummary() {
   });
 
   if (isLoading) {
-    return <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading class analytics…</p>;
+    return <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading class analytics…</p>;
   }
   if (error) {
-    return <p style={{ fontSize: 13, color: 'var(--danger, #ef4444)' }}>Could not load class analytics: {error.message}</p>;
+    return <p style={{ fontSize: 13, color: 'var(--error)' }}>Could not load class analytics: {error.message}</p>;
   }
 
   const { summary, students } = analytics;
 
   return (
     <section aria-label="Class success rate summary" style={{ marginBottom: 32 }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>
+      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 12 }}>
         SUCCESS RATE — ALL STUDENTS
       </h3>
 
@@ -643,7 +643,7 @@ function AnalyticsSummary() {
       </div>
 
       {students.length === 0 ? (
-        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
           No students added yet — add one above to start tracking success rate.
         </p>
       ) : (
@@ -670,10 +670,10 @@ function AnalyticsSummary() {
                   <td style={tdStyle}>
                     <span style={{
                       fontWeight: 600,
-                      color: s.commands === 0 ? 'var(--text-muted)'
-                        : s.successRate >= 80 ? 'var(--success, #22c55e)'
-                        : s.successRate >= 50 ? 'var(--warning, #eab308)'
-                        : 'var(--danger, #ef4444)',
+                      color: s.commands === 0 ? 'var(--text-secondary)'
+                        : s.successRate >= 80 ? 'var(--success)'
+                        : s.successRate >= 50 ? 'var(--warning)'
+                        : 'var(--error)',
                     }}>
                       {s.commands === 0 ? '—' : `${s.successRate}%`}
                     </span>
@@ -807,7 +807,7 @@ function WhoIsHerePanel({ students }) {
                 <span style={{ flex: 1, color: 'var(--text-primary)' }}>{s.name}</span>
                 {confirmRemove === s.id ? (
                   <>
-                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Their goals stay; their name goes.</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Their goals stay; their name goes.</span>
                     <button type="button" className="settings-btn danger" disabled={remove.isPending}
                       onClick={() => remove.mutate(s.id)}>Remove {s.name}</button>
                     <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(null)}>Keep</button>
@@ -845,7 +845,7 @@ function UsageStrip({ studentId }) {
       gap: 24,
       flexWrap: 'wrap',
     }}>
-      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>
         <strong style={{ color: 'var(--text-secondary)' }}>Usage (context only):</strong>
         {' '}{stats?.today ?? '—'} commands today
         {stats?.avgLatency ? ` · ${stats.avgLatency}ms avg` : ''}
@@ -924,7 +924,7 @@ export default function Teacher() {
 
       {/* Student selector */}
       <section aria-label="Student selection" style={{ marginBottom: 24 }}>
-        <label htmlFor="teacher-student-select" style={{ display: 'block', fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>
+        <label htmlFor="teacher-student-select" style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
           View a student's progress
         </label>
         <select
@@ -932,14 +932,14 @@ export default function Teacher() {
           value={studentId || ''}
           onChange={handleStudentChange}
           aria-label="Select a student to view progress"
-          style={{ width: '100%', maxWidth: 360, padding: '10px 12px', minHeight: 44, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
+          style={{ width: '100%', maxWidth: 360, padding: '10px 12px', minHeight: 44, background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
         >
           <option value="">— select a student —</option>
           {students.map(s => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
-        {studentsLoading && <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>Loading students…</p>}
+        {studentsLoading && <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 6 }}>Loading students…</p>}
       </section>
 
       {studentId && (
@@ -953,10 +953,10 @@ export default function Teacher() {
           {selectedGoal && (
             <section aria-label="Progress chart" style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                   PROGRESS — {MEASURE_REGISTRY[selectedGoal.measure]?.label?.toUpperCase()}
                 </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   {points.length} point{points.length !== 1 ? 's' : ''} · {phases.length} phase{phases.length !== 1 ? 's' : ''}
                 </span>
               </div>

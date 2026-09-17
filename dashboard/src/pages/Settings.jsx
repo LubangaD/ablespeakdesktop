@@ -65,7 +65,7 @@ export default function Settings() {
             role={notice.tone === 'error' ? 'alert' : 'status'}
             style={notice.tone === 'error'
               ? { marginBottom: 16 }
-              : { background: 'rgba(6,214,160,0.08)', border: '1px solid rgba(6,214,160,0.3)', marginBottom: 16 }}
+              : { background: 'rgba(52, 211, 153,0.08)', border: '1px solid rgba(52, 211, 153,0.3)', marginBottom: 16 }}
           >
             {notice.tone === 'error'
               ? <AlertCircle size={18} style={{ color: 'var(--error)' }} aria-hidden="true" />
@@ -310,13 +310,13 @@ function ProviderCard({ id, provider, isActive, onSwitch }) {
 
   return (
     <div className="card" style={{
-      borderColor: isActive ? 'var(--accent)' : provider.configured ? 'var(--border)' : 'rgba(239,71,111,0.3)',
+      borderColor: isActive ? 'var(--accent)' : provider.configured ? 'var(--border)' : 'rgba(251, 113, 133,0.3)',
       position: 'relative',
     }}>
       {isActive && (
         <div style={{
           position: 'absolute', top: 12, right: 12,
-          background: 'var(--accent)', color: 'var(--bg-primary)',
+          background: 'var(--accent)', color: 'var(--canvas)',
           padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700,
         }}>
           ACTIVE
@@ -329,14 +329,14 @@ function ProviderCard({ id, provider, isActive, onSwitch }) {
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
           {!provider.envKey ? '✓ No key needed' : provider.configured ? '✓ API key saved' : '✗ Add a key under API keys above'}
         </span>
       </div>
 
       {/* Model selector (live list from provider API) */}
       <div style={{ marginBottom: 12 }}>
-        <label htmlFor={`model-${id}`} style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <label htmlFor={`model-${id}`} style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <span>Model {liveModels?.models?.length ? `(${liveModels.models.length} available)` : '(default list)'}</span>
           {provider.configured && (
             <button
@@ -346,7 +346,7 @@ function ProviderCard({ id, provider, isActive, onSwitch }) {
               title="Refresh model list"
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--text-muted)', padding: 4, display: 'flex', alignItems: 'center',
+                color: 'var(--text-secondary)', padding: 4, display: 'flex', alignItems: 'center',
               }}
             >
               <RefreshCw size={14} style={modelsLoading ? { animation: 'spin 1s linear infinite' } : undefined} />

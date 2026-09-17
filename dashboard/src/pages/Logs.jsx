@@ -72,11 +72,11 @@ export default function Logs() {
 
       <div className="log-stream" ref={containerRef} role="log" aria-label="AbleSpeak log output" aria-live={paused ? 'off' : 'polite'}>
         {logs.length === 0 && (
-          <div style={{ color: 'var(--text-muted)', padding: 20 }}>Waiting for log events...</div>
+          <div style={{ color: 'var(--text-secondary)', padding: 20 }}>Waiting for log events...</div>
         )}
         {logs.map((log, i) => (
           <div key={i} className={`log-line ${log.level}`}>
-            <span style={{ color: 'var(--text-muted)' }}>{log.timestamp} </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{log.timestamp} </span>
             <span style={{ fontWeight: 600, minWidth: 50, display: 'inline-block' }}>{log.level}</span>
             {' '}
             {log.message}

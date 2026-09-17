@@ -20,7 +20,7 @@ const percent = value => (value == null ? '—' : `${Math.round(value * 100)}%`)
 function Stat({ label, value, detail }) {
   return (
     <div className="card" style={{ padding: '12px 14px' }}>
-      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)' }}>{value}</div>
       {detail && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{detail}</div>}
     </div>
@@ -56,7 +56,7 @@ export function RecognitionReadout({ studentId }) {
 
   return (
     <section aria-labelledby="recognition-heading" style={{ marginBottom: 24 }}>
-      <h3 id="recognition-heading" style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>
+      <h3 id="recognition-heading" style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 12 }}>
         HOW WELL ABLESPEAK HEARS THEM — LAST 7 DAYS
       </h3>
       {isLoading && <p className="settings-lead">Loading…</p>}
@@ -82,12 +82,12 @@ export function RecognitionReadout({ studentId }) {
                 </summary>
                 <ul style={{ margin: '4px 0 0 18px', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7 }}>
                   {data.recentlyFiltered.map((turn, i) => (
-                    <li key={i}><span style={{ color: 'var(--text-muted)' }}>{turn.created_at.slice(5, 16)}</span> — “{turn.transcript}”</li>
+                    <li key={i}><span style={{ color: 'var(--text-secondary)' }}>{turn.created_at.slice(5, 16)}</span> — “{turn.transcript}”</li>
                   ))}
                 </ul>
               </details>
             )}
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
               Everyday readout from this computer. The speech study measures command match rate separately.
             </p>
           </>
@@ -222,7 +222,7 @@ export function SpeechSettings({ studentId, studentName }) {
                   style={{ width: 20, height: 20 }} />
                 <span>
                   <strong style={{ color: 'var(--text-primary)' }}>{choice.label}</strong>
-                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}> — {choice.hint}</span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}> — {choice.hint}</span>
                 </span>
               </label>
             ))}
@@ -237,7 +237,7 @@ export function SpeechSettings({ studentId, studentName }) {
             onChange={e => setPause(e.target.value)}
             style={{ width: '100%', minHeight: 44 }}
             aria-describedby="speech-pause-hint" />
-          <p id="speech-pause-hint" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <p id="speech-pause-hint" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             Longer suits a student who pauses in the middle of a command.
           </p>
         </div>
@@ -252,7 +252,7 @@ export function SpeechSettings({ studentId, studentName }) {
 
         <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
           <legend className="settings-label">Their own shortcuts</legend>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
             When {studentName} says the phrase on the left, AbleSpeak does the command on the right.
             Shortcuts marked "learned" were added after {studentName} corrected the same thing twice.
           </p>
@@ -261,7 +261,7 @@ export function SpeechSettings({ studentId, studentName }) {
               <input className="settings-input" style={{ flex: '1 1 160px' }} value={shortcut.say}
                 aria-label={`Shortcut ${i + 1}: what ${studentName} says`} placeholder="my music"
                 onChange={e => updateShortcut(i, 'say', e.target.value)} />
-              <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>→</span>
+              <span aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>→</span>
               <input className="settings-input" style={{ flex: '2 1 220px' }} value={shortcut.means}
                 aria-label={`Shortcut ${i + 1}: what it does`} placeholder="open spotify"
                 onChange={e => updateShortcut(i, 'means', e.target.value)} />
@@ -280,7 +280,7 @@ export function SpeechSettings({ studentId, studentName }) {
 
         <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
           <legend className="settings-label">Routines</legend>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
             A name {studentName} can say, and the commands it runs in order — one per line.
             For example "start my homework": open Word, then open Chrome.
           </p>
