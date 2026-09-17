@@ -318,6 +318,8 @@ app.post('/api/voice/transcribe', async (req, res) => {
 const overlayHtml = join(__dirname, '..', 'overlay.html');
 if (existsSync(overlayHtml)) {
   app.get('/overlay', (req, res) => res.sendFile(overlayHtml));
+  // The overlay's bundled fonts, at the same relative path it uses from disk
+  app.use('/fonts', express.static(join(__dirname, '..', 'fonts')));
 }
 
 // POST /api/overlay/reload — Reload the Electron overlay BrowserWindow from disk.

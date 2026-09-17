@@ -5,6 +5,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AbleSpeak Overlay</title>
 <style>
+  /* Colours, type and states follow docs/design/DESIGN.md ("Voice State Bar"). */
+  @font-face {
+    font-family: 'Inter Variable';
+    src: url('fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+    font-weight: 100 900;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'Space Grotesk Variable';
+    src: url('fonts/space-grotesk-latin-wght-normal.woff2') format('woff2-variations');
+    font-weight: 300 700;
+    font-display: swap;
+  }
+
+  :root {
+    --surface-1: #0a1628;
+    --surface-2: #102038;
+    --surface-3: #172c4c;
+    --text-title: #ffffff;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --accent: #f5a623;
+    --teal: #1d9e8a;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --error: #fb7185;
+    --font-display: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
+    --font-body: 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
+  }
+
   /* ── Reset & Base ── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -13,7 +43,8 @@
     height: 100%;
     overflow: hidden;
     background: transparent;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-body);
+    color: var(--text-primary);
     user-select: none;
     -webkit-app-region: no-drag;
   }
@@ -38,31 +69,26 @@
     padding: 8px;
   }
 
-  /* ── Floating Pill ── */
+  /* ── Floating panel (level 3: a voice dialog above other apps) ── */
   .pill {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    background: rgba(18, 18, 24, 0.92);
-    backdrop-filter: blur(24px) saturate(1.4);
-    -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    padding: 10px 18px 12px;
-    min-width: 200px;
-    max-width: 420px;
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.55),
-      0 0 0 1px rgba(255, 255, 255, 0.04),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    gap: 8px;
+    background: rgba(23, 44, 76, 0.97);
+    border: 1.5px solid rgba(255, 255, 255, 0.25);
+    border-radius: 24px;
+    padding: 10px 16px 12px;
+    min-width: 240px;
+    max-width: 100%;
+    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
     animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     transform-origin: bottom center;
   }
 
   @keyframes slideUp {
-    from { opacity: 0; transform: translateY(16px) scale(0.96); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   .pill.hiding {
@@ -70,26 +96,81 @@
   }
 
   @keyframes slideDown {
-    from { opacity: 1; transform: translateY(0) scale(1); }
-    to   { opacity: 0; transform: translateY(12px) scale(0.96); }
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(12px); }
   }
 
-  /* ── Shortcut Hint ── */
+  /* ── Top row: voice state + shortcut ── */
+  .overlay-top {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  /* The state never relies on colour alone: each has its own icon and word */
+  .state-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 2px 12px 2px 10px;
+    border-radius: 9999px;
+    border: 1.5px solid currentColor;
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .state-icon { display: inline-flex; align-items: center; }
+  .state-icon svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .state-chip[data-state="listening"] { color: var(--teal); box-shadow: 0 0 0 3px rgba(29, 158, 138, 0.25); }
+  .state-chip[data-state="processing"] { color: var(--warning); }
+  .state-chip[data-state="processing"] svg { animation: spin 2.4s linear infinite; }
+  .state-chip[data-state="speaking"] { color: var(--accent); background: rgba(245, 166, 35, 0.15); }
+  .state-chip[data-state="dictating"] { color: var(--warning); }
+
+  .bars { display: inline-flex; align-items: center; gap: 2px; height: 16px; }
+  .bars i {
+    display: block;
+    width: 3px;
+    height: 100%;
+    border-radius: 2px;
+    background: currentColor;
+    animation: bar 1.6s ease-in-out infinite;
+  }
+  .bars i:nth-child(2) { animation-delay: -0.4s; }
+  .bars i:nth-child(3) { animation-delay: -0.8s; }
+  .bars i:nth-child(4) { animation-delay: -1.2s; }
+
+  /* Slow and smooth: nothing flashes */
+  @keyframes bar {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   .shortcut-hint {
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    background: linear-gradient(135deg, #a78bfa 0%, #6ee7b7 50%, #93c5fd 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    opacity: 0.9;
+    font-size: 14px;
+    color: var(--text-secondary);
   }
 
   .shortcut-hint kbd {
-    font-family: inherit;
+    font-family: var(--font-body);
     font-weight: 700;
-    -webkit-text-fill-color: transparent;
+    color: var(--accent);
   }
 
   /* ── Transcript / Status Area ── */
@@ -99,7 +180,6 @@
     max-height: 96px;
     overflow-y: auto;
     text-align: center;
-    transition: all 0.2s ease;
   }
 
   .transcript-area:empty {
@@ -107,42 +187,36 @@
   }
 
   .transcript-text {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.85);
+    font-size: 15px;
+    color: var(--text-title);
     line-height: 1.4;
     word-wrap: break-word;
     overflow-wrap: break-word;
   }
 
   .transcript-text.response {
-    color: rgba(167, 139, 250, 0.95);
+    color: var(--text-title);
   }
 
   .transcript-text.error {
-    color: rgba(248, 113, 113, 0.9);
-    font-size: 12px;
+    color: var(--error);
+    font-size: 14px;
   }
 
   /* HFI-2: distinct from .error — nothing broke, the mic just didn't catch it */
   .transcript-text.not-heard {
-    color: rgba(251, 191, 36, 0.9);
-    font-size: 12px;
+    color: var(--warning);
+    font-size: 14px;
   }
 
   .transcript-text.listening-label {
-    color: rgba(110, 231, 183, 0.9);
-    font-size: 12px;
-    animation: textPulse 1.5s ease-in-out infinite;
+    color: var(--text-secondary);
+    font-size: 14px;
   }
 
   .transcript-text.interim {
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--text-secondary);
     font-style: italic;
-  }
-
-  @keyframes textPulse {
-    0%, 100% { opacity: 0.7; }
-    50% { opacity: 1; }
   }
 
   /* ── Last command: what was heard and how it ended (always on screen) ── */
@@ -152,9 +226,10 @@
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    padding: 6px 10px;
+    padding: 6px 12px;
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .last-command[hidden] {
@@ -162,8 +237,8 @@
   }
 
   .last-heard {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    color: var(--text-primary);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -171,67 +246,62 @@
   }
 
   .last-outcome {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     text-align: center;
   }
 
-  .last-outcome[data-state="working"] { color: #c4b5fd; }
-  .last-outcome[data-state="done"] { color: #6ee7b7; }
-  .last-outcome[data-state="failed"] { color: #fca5a5; }
-  .last-outcome[data-state="waiting"] { color: #fcd34d; }
-  .last-outcome[data-state="ignored"] { color: rgba(255, 255, 255, 0.6); font-weight: 400; }
+  .last-outcome[data-state="working"] { color: var(--warning); }
+  .last-outcome[data-state="done"] { color: var(--success); }
+  .last-outcome[data-state="failed"] { color: var(--error); }
+  .last-outcome[data-state="waiting"] { color: var(--warning); }
+  .last-outcome[data-state="ignored"] { color: var(--text-secondary); font-weight: 400; }
 
   /* ── Whose session this is ── */
   .who {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px;
+    color: var(--text-secondary);
   }
 
   .who[hidden] {
     display: none;
   }
 
-  /* ── Button Row ── */
+  /* ── Button Row (12px apart) ── */
   .btn-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 12px;
   }
 
   .btn {
     width: 56px;
     height: 56px;
-    border-radius: 50%;
-    border: none;
+    border-radius: 16px;
+    border: 1.5px solid rgba(255, 255, 255, 0.16);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     position: relative;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.7);
+    background: var(--surface-2);
+    color: var(--text-primary);
   }
 
   .btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    transform: scale(1.08);
+    border-color: var(--teal);
+    color: var(--text-title);
   }
 
   .btn:focus-visible {
-    outline: 3px solid #6ee7b7;
+    outline: 3px solid var(--accent);
     outline-offset: 2px;
   }
 
-  .btn:active {
-    transform: scale(0.95);
-  }
-
   .btn svg {
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     fill: none;
     stroke: currentColor;
     stroke-width: 2;
@@ -241,75 +311,62 @@
 
   /* ── Mic Button (special) ── */
   .btn-mic {
-    width: 60px;
-    height: 60px;
-    background: rgba(255, 255, 255, 0.08);
+    width: 64px;
+    height: 64px;
+  }
+
+  .btn-mic svg {
+    width: 26px;
+    height: 26px;
   }
 
   .btn-mic.listening {
-    background: rgba(110, 231, 183, 0.2);
-    color: #6ee7b7;
-    box-shadow: 0 0 0 0 rgba(110, 231, 183, 0.4);
-    animation: micPulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes micPulse {
-    0%   { box-shadow: 0 0 0 0 rgba(110, 231, 183, 0.35); }
-    70%  { box-shadow: 0 0 0 12px rgba(110, 231, 183, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(110, 231, 183, 0); }
+    background: rgba(29, 158, 138, 0.22);
+    border: 2px solid var(--teal);
+    color: var(--text-title);
+    box-shadow: 0 0 0 4px rgba(29, 158, 138, 0.25);
   }
 
   .btn-mic.processing {
-    background: rgba(167, 139, 250, 0.2);
-    color: #a78bfa;
-    animation: none;
+    background: rgba(251, 191, 36, 0.14);
+    border: 2px solid var(--warning);
+    color: var(--warning);
   }
 
   .btn-mic.dictating {
-    background: rgba(251, 191, 36, 0.25);
-    color: #fbbf24;
-    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4);
-    animation: dictPulse 1s ease-in-out infinite;
+    background: rgba(251, 191, 36, 0.14);
+    border: 2px solid var(--warning);
+    color: var(--text-title);
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.2);
   }
 
-  @keyframes dictPulse {
-    0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.35); }
-    70%  { box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
-  }
-
-  /* ── Speaking state — mic becomes a red stop button ── */
+  /* ── Speaking state — the mic becomes a stop button (octagon icon) ── */
   .btn-mic.speaking {
-    background: rgba(248, 113, 113, 0.22);
-    color: #f87171;
-    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.4);
-    animation: speakPulse 1.2s ease-in-out infinite;
-  }
-
-  @keyframes speakPulse {
-    0%   { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.35); }
-    70%  { box-shadow: 0 0 0 12px rgba(248, 113, 113, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+    background: var(--surface-1);
+    border: 2px solid var(--error);
+    color: var(--error);
   }
 
   /* ── Continuous-listening toggle ── */
   .btn.loop-on {
-    background: rgba(110, 231, 183, 0.18);
-    color: #6ee7b7;
-  }
-
-  .btn-mic svg {
-    width: 20px;
-    height: 20px;
+    background: rgba(29, 158, 138, 0.22);
+    border-color: var(--teal);
+    color: var(--text-title);
   }
 </style>
 </head>
 <body>
 <div class="overlay-root" role="application" aria-label="AbleSpeak Voice Overlay">
   <div class="pill" id="pill">
-    <!-- Shortcut hint -->
-    <div class="shortcut-hint" aria-hidden="true">
-      Dictate <kbd>Ctrl + Shift + A</kbd>
+    <!-- Voice state (the mic button's label says the same thing to screen readers) -->
+    <div class="overlay-top" aria-hidden="true">
+      <div class="state-chip" id="stateChip" data-state="idle">
+        <span class="state-icon" id="stateIcon"></span>
+        <span id="stateLabel">MIC OFF</span>
+      </div>
+      <div class="shortcut-hint">
+        Dictate <kbd>Ctrl + Shift + A</kbd>
+      </div>
     </div>
 
     <!-- Whose progress this computer is recording -->
@@ -433,7 +490,7 @@ if (!window.electronAPI) {
 
   // SVG icons — swapped on the mic button depending on state
   const MIC_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
-  const STOP_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>`;
+  const STOP_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`;
   let sleeping = false;          // True while in sleep mode (Gap 5)
   let dictationMode = false;     // True while in dictation mode (typing speech directly)
 
@@ -571,6 +628,41 @@ if (!window.electronAPI) {
     return said;
   }
 
+  // ── Voice state chip (DESIGN.md "Voice State Bar") ──
+  // State changes happen in many places (TTS, sleep, dictation, recovery), so
+  // the chip is refreshed from the UI helpers below and on a short timer.
+  const stateChip = document.getElementById('stateChip');
+  const stateIcon = document.getElementById('stateIcon');
+  const stateLabel = document.getElementById('stateLabel');
+  const svg = paths => `<svg viewBox="0 0 24 24">${paths}</svg>`;
+  const STATE_CHIP = {
+    idle: { label: 'MIC OFF', icon: svg('<line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/>') },
+    listening: { label: 'LISTENING', icon: '<span class="bars"><i></i><i></i><i></i><i></i></span>' },
+    processing: { label: 'PROCESSING', icon: svg('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>') },
+    speaking: { label: 'SPEAKING', icon: svg('<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>') },
+    dictating: { label: 'DICTATING', icon: svg('<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/>') },
+    sleeping: { label: 'SLEEPING', icon: svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>') },
+  };
+  let shownState = null;
+
+  function currentStateKind() {
+    if (ttsActive) return 'speaking';
+    if (state === 'processing') return 'processing';
+    if (state === 'listening') return sleeping ? 'sleeping' : dictationMode ? 'dictating' : 'listening';
+    return 'idle';
+  }
+
+  function refreshStateChip() {
+    const kind = currentStateKind();
+    if (kind === shownState) return;
+    shownState = kind;
+    stateChip.dataset.state = kind;
+    stateIcon.innerHTML = STATE_CHIP[kind].icon;
+    stateLabel.textContent = STATE_CHIP[kind].label;
+  }
+  refreshStateChip();
+  setInterval(refreshStateChip, 400);
+
   function setListeningUI() {
     state = 'listening';
     btnMic.title = 'Listening... click to stop';
@@ -590,6 +682,7 @@ if (!window.electronAPI) {
       btnMic.style.opacity = '';
       setTranscript('Listening...', 'listening-label');
     }
+    refreshStateChip();
   }
 
   function setProcessingUI() {
@@ -599,6 +692,7 @@ if (!window.electronAPI) {
     btnMic.setAttribute('aria-label', 'Microphone — processing your command');
     btnMic.setAttribute('aria-pressed', 'false');
     startWatchdog();
+    refreshStateChip();
   }
 
   function setIdleUI() {
@@ -608,6 +702,7 @@ if (!window.electronAPI) {
     btnMic.setAttribute('aria-label', 'Microphone — click to start listening');
     btnMic.setAttribute('aria-pressed', 'false');
     clearWatchdog();
+    refreshStateChip();
   }
 
   // HFI-2: distinct from plain idle — tells the student AbleSpeak noticed
@@ -1385,6 +1480,7 @@ if (!window.electronAPI) {
         btnMic.className = 'btn btn-mic speaking';
         btnMic.setAttribute('aria-label', 'Speaking — click to stop');
         btnMic.title = 'Click to stop speaking';
+        refreshStateChip();
         // Stop any in-progress recording so we don't capture our own voice.
         // What the student said before this point is still sent.
         if (mediaRecorder && mediaRecorder.state === 'recording') {

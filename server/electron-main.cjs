@@ -407,7 +407,7 @@ function createOverlay() {
 
   // Position at bottom-center of screen
   const overlayW = 420;
-  const overlayH = 250; // room for the last-command lines above the live text
+  const overlayH = 280; // room for the state row, last-command lines and live text at 14px+
   const x = Math.round((screenW - overlayW) / 2);
   const y = screenH - overlayH - 20;
 
