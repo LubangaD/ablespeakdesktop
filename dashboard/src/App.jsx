@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { useEffect, useRef } from 'react';
-import { LayoutDashboard, MessageCircle, Wrench, GitBranch, ScrollText, Settings, FileText, Mic, Sun, GraduationCap } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { LayoutDashboard, MessageCircle, Wrench, GitBranch, ScrollText, Settings, FileText, GraduationCap, Plug, Unplug } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Tools from './pages/Tools';
 import Context from './pages/Context';
@@ -9,6 +9,7 @@ import SettingsPage from './pages/Settings';
 import Chat from './pages/Chat';
 import Prompt from './pages/Prompt';
 import Teacher from './pages/Teacher';
+import { StatusPill } from './components/ui';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard, ariaLabel: 'Navigate to Dashboard' },
@@ -25,7 +26,7 @@ const navItems = [
  * Inner component that can use useNavigate() (must be inside BrowserRouter).
  * Listens for voice navigation and settings WebSocket messages.
  */
-function AppRoutes() {
+function AppRoutes({ onConnectionChange }) {
   const navigate = useNavigate();
   const wsRef = useRef(null);
 
@@ -42,6 +43,8 @@ function AppRoutes() {
     function connect() {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+
+      ws.onopen = () => onConnectionChange(true);
 
       ws.onmessage = (event) => {
         try {
@@ -66,6 +69,7 @@ function AppRoutes() {
       };
 
       ws.onclose = () => {
+        onConnectionChange(false);
         // Reconnect after 3s
         setTimeout(connect, 3000);
       };
@@ -75,7 +79,7 @@ function AppRoutes() {
 
     connect();
     return () => { if (wsRef.current) wsRef.current.close(); };
-  }, [navigate]);
+  }, [navigate, onConnectionChange]);
 
   return (
     <Routes>
@@ -94,6 +98,8 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const [connected, setConnected] = useState(false);
+
   return (
     <BrowserRouter>
       <a href="#main-content" className="skip-nav">Skip to main content</a>
@@ -120,24 +126,25 @@ export default function App() {
             ))}
           </div>
 
-          {/* Footer — with logo */}
+          {/* Is the dashboard talking to the AbleSpeak server? */}
           <div className="sidebar-footer">
-            <img src="/ablespeak-logo.png" alt="" className="sidebar-footer-logo" />
-            <span className="powered-by">AbleSpeak Gateway</span>
+            <span className="sidebar-footer-label" id="gateway-label">AbleSpeak gateway</span>
+            {connected
+              ? <StatusPill tone="success" icon={Plug} label="Connected" aria-describedby="gateway-label" />
+              : <StatusPill tone="error" icon={Unplug} label="Offline" aria-describedby="gateway-label" />}
           </div>
         </nav>
         <main id="main-content" className="main-content" role="main">
-          <AppRoutes />
+          <AppRoutes onConnectionChange={setConnected} />
           <footer className="app-footer">
-            <span>Built with <span className="heart">❤</span> for people</span>
-            <span className="app-footer-divider">·</span>
+            <span>Built with <span className="heart" role="img" aria-label="love">❤</span> for people</span>
+            <span aria-hidden="true">·</span>
             <span>© 2026 Tunga Innovation Ltd</span>
           </footer>
         </main>
       </div>
       {/* Screen reader live region for voice navigation announcements */}
-      <div id="a11y-announcer" aria-live="assertive" aria-atomic="true"
-           style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0 0 0 0)' }} />
+      <div id="a11y-announcer" className="sr-only" aria-live="assertive" aria-atomic="true" />
     </BrowserRouter>
   );
 }
