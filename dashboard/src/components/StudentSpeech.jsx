@@ -7,7 +7,9 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { SlidersHorizontal, Ear, PlusCircle, Download, Upload } from 'lucide-react';
 import { api } from '../lib/api';
+import { Button, Field, Panel, Radio, StatTile, StatusPill, TextField } from './ui';
 
 const SENSITIVITY_CHOICES = [
   { value: 'standard', label: 'Standard', hint: 'Most students, in a normal room.' },
@@ -16,16 +18,6 @@ const SENSITIVITY_CHOICES = [
 ];
 
 const percent = value => (value == null ? '—' : `${Math.round(value * 100)}%`);
-
-function Stat({ label, value, detail }) {
-  return (
-    <div className="card" style={{ padding: '12px 14px' }}>
-      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)' }}>{value}</div>
-      {detail && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{detail}</div>}
-    </div>
-  );
-}
 
 // Did the last change to their speech settings help? (Stage 4 acceptance)
 function RetriesComparison({ around }) {
@@ -39,10 +31,10 @@ function RetriesComparison({ around }) {
     else verdict = 'No difference yet.';
   }
   return (
-    <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-      <strong style={{ color: 'var(--text-primary)' }}>Retries per finished command</strong>, {days} days either side of the
-      settings change on {changed}: {per(before.retriesPerTask)} before ({before.tasks} commands) → {per(after.retriesPerTask)} after
-      ({after.tasks} commands). {verdict}
+    <p className="panel-lead">
+      <strong>Retries per finished command</strong>, {days} days either side of the
+      settings change on {changed}: <span className="tabular">{per(before.retriesPerTask)}</span> before ({before.tasks} commands)
+      → <span className="tabular">{per(after.retriesPerTask)}</span> after ({after.tasks} commands). {verdict}
     </p>
   );
 }
@@ -55,39 +47,39 @@ export function RecognitionReadout({ studentId }) {
   });
 
   return (
-    <section aria-labelledby="recognition-heading" style={{ marginBottom: 24 }}>
-      <h3 id="recognition-heading" style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 12 }}>
-        HOW WELL ABLESPEAK HEARS THEM — LAST 7 DAYS
+    <section aria-labelledby="recognition-heading" className="section">
+      <h3 id="recognition-heading" className="section-title">
+        <Ear size={22} aria-hidden="true" /> How well AbleSpeak hears them, last 7 days
       </h3>
-      {isLoading && <p className="settings-lead">Loading…</p>}
-      {error && <p className="settings-result error">Couldn't load this: {error.message}</p>}
+      {isLoading && <p className="muted-note">Loading…</p>}
+      {error && <p className="form-result error">Couldn't load this: {error.message}</p>}
       {data && (
         data.turns === 0 ? (
-          <p className="settings-lead">Nothing heard from this student in the last 7 days.</p>
+          <p className="muted-note">Nothing heard from this student in the last 7 days.</p>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 12 }}>
-              <Stat label="Understood" value={percent(data.heardRate)} detail={`${data.heard} of ${data.turns} times they spoke`} />
-              <Stat label="Worked first time" value={percent(data.firstTimeRate)} detail={`${data.firstTime} of ${data.tasks} commands`} />
-              <Stat label="Tried again" value={data.retries} detail={`${data.repaired} then worked`} />
-              <Stat label="Set aside as noise" value={data.filtered + data.noSpeech} detail={`${data.filtered} with words`} />
+            <div className="stat-grid">
+              <StatTile label="Understood" value={percent(data.heardRate)} detail={`${data.heard} of ${data.turns} times they spoke`} />
+              <StatTile label="Worked first time" value={percent(data.firstTimeRate)} detail={`${data.firstTime} of ${data.tasks} commands`} />
+              <StatTile label="Tried again" value={data.retries} detail={`${data.repaired} then worked`} />
+              <StatTile label="Set aside as noise" value={data.filtered + data.noSpeech} detail={`${data.filtered} with words`} />
             </div>
             {data.sinceSettingsChanged && (
               <RetriesComparison around={data.sinceSettingsChanged} />
             )}
             {data.recentlyFiltered.length > 0 && (
-              <details>
-                <summary style={{ cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+              <details className="disclosure">
+                <summary>
                   Words set aside as background talk ({data.recentlyFiltered.length}). If these were the student, try "Quiet voice" below.
                 </summary>
-                <ul style={{ margin: '4px 0 0 18px', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7 }}>
+                <ul className="filtered-list">
                   {data.recentlyFiltered.map((turn, i) => (
-                    <li key={i}><span style={{ color: 'var(--text-secondary)' }}>{turn.created_at.slice(5, 16)}</span> — “{turn.transcript}”</li>
+                    <li key={i}><span className="tabular filtered-time">{turn.created_at.slice(5, 16)}</span> “{turn.transcript}”</li>
                   ))}
                 </ul>
               </details>
             )}
-            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+            <p className="muted-note">
               Everyday readout from this computer. The speech study measures command match rate separately.
             </p>
           </>
@@ -202,116 +194,108 @@ export function SpeechSettings({ studentId, studentName }) {
   const updateRoutine = (i, field, value) =>
     setRoutines(list => list.map((r, j) => (j === i ? { ...r, [field]: value } : r)));
 
-  if (isLoading) return <p className="settings-lead">Loading speech settings…</p>;
-  if (error) return <p className="settings-result error">Couldn't load speech settings: {error.message}</p>;
+  if (isLoading) return <p className="muted-note section">Loading speech settings…</p>;
+  if (error) return <p className="form-result error section">Couldn't load speech settings: {error.message}</p>;
 
   return (
-    <section aria-labelledby="speech-heading" className="card" style={{ marginBottom: 24 }}>
-      <h3 id="speech-heading" className="settings-heading">Speech settings for {studentName}</h3>
-      <p className="settings-lead">These follow {studentName} whenever their session is running on this computer.</p>
+    <Panel title={`Speech settings for ${studentName}`} titleId="speech-heading" icon={SlidersHorizontal} className="section">
+      <p className="panel-lead">These follow {studentName} whenever their session is running on this computer.</p>
 
-      <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-          <legend className="settings-label">How sensitive the microphone is</legend>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {SENSITIVITY_CHOICES.map(choice => (
-              <label key={choice.value} style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 44, cursor: 'pointer' }}>
-                <input type="radio" name="sensitivity" value={choice.value}
-                  checked={sensitivity === choice.value}
-                  onChange={() => setSensitivity(choice.value)}
-                  style={{ width: 20, height: 20 }} />
-                <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>{choice.label}</strong>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}> — {choice.hint}</span>
-                </span>
-              </label>
-            ))}
-          </div>
+      <form onSubmit={save} className="form-stack">
+        <fieldset className="fieldset">
+          <legend className="field-label">How sensitive the microphone is</legend>
+          {SENSITIVITY_CHOICES.map(choice => (
+            <Radio key={choice.value} name="sensitivity" value={choice.value}
+              checked={sensitivity === choice.value}
+              onChange={() => setSensitivity(choice.value)}
+              label={choice.label} hint={choice.hint} />
+          ))}
         </fieldset>
 
-        <div>
-          <label htmlFor="speech-pause" className="settings-label">
-            Pause that ends a command: <strong>{Number(pause).toFixed(1)} seconds</strong>
-          </label>
+        <Field id="speech-pause" label={<>Pause that ends a command: <span className="tabular">{Number(pause).toFixed(1)}</span> seconds</>}
+          hint="Longer suits a student who pauses in the middle of a command.">
           <input id="speech-pause" type="range" min="0.8" max="4" step="0.1" value={pause}
+            className="range-input"
             onChange={e => setPause(e.target.value)}
-            style={{ width: '100%', minHeight: 44 }}
             aria-describedby="speech-pause-hint" />
-          <p id="speech-pause-hint" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            Longer suits a student who pauses in the middle of a command.
-          </p>
-        </div>
+        </Field>
 
-        <div>
-          <label htmlFor="speech-words" className="settings-label">Their words — names, subjects, places (one per line)</label>
-          <textarea id="speech-words" className="settings-input" rows={4} value={vocabulary}
+        <Field id="speech-words" label="Their words: names, subjects, places (one per line)">
+          <textarea id="speech-words" className="field-input" rows={4} value={vocabulary}
             onChange={e => setVocabulary(e.target.value)}
-            placeholder={'Wanjiku\nKiswahili\nKisumu'}
-            style={{ height: 'auto', paddingTop: 10, paddingBottom: 10, resize: 'vertical' }} />
-        </div>
+            placeholder={'Wanjiku\nKiswahili\nKisumu'} />
+        </Field>
 
-        <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-          <legend className="settings-label">Their own shortcuts</legend>
-          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+        <fieldset className="fieldset">
+          <legend className="field-label">Their own shortcuts</legend>
+          <p className="field-hint">
             When {studentName} says the phrase on the left, AbleSpeak does the command on the right.
             Shortcuts marked "learned" were added after {studentName} corrected the same thing twice.
           </p>
           {shortcuts.map((shortcut, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-              <input className="settings-input" style={{ flex: '1 1 160px' }} value={shortcut.say}
+            <div key={i} className="shortcut-row">
+              <TextField id={`shortcut-say-${i}`} className="grow" value={shortcut.say}
                 aria-label={`Shortcut ${i + 1}: what ${studentName} says`} placeholder="my music"
-                onChange={e => updateShortcut(i, 'say', e.target.value)} />
-              <span aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>→</span>
-              <input className="settings-input" style={{ flex: '2 1 220px' }} value={shortcut.means}
+                onChange={e => updateShortcut(i, 'say', e.target.value)}
+                onClear={() => updateShortcut(i, 'say', '')} />
+              <span aria-hidden="true" className="shortcut-arrow">→</span>
+              <TextField id={`shortcut-means-${i}`} className="grow-2" value={shortcut.means}
                 aria-label={`Shortcut ${i + 1}: what it does`} placeholder="open spotify"
-                onChange={e => updateShortcut(i, 'means', e.target.value)} />
+                onChange={e => updateShortcut(i, 'means', e.target.value)}
+                onClear={() => updateShortcut(i, 'means', '')} />
               {shortcut.learned && (
-                <span className="badge badge-success" title={`Learned when ${studentName} corrected AbleSpeak twice`}>learned</span>
+                <StatusPill tone="success" label="Learned" title={`Learned when ${studentName} corrected AbleSpeak twice`} />
               )}
-              <button type="button" className="settings-btn quiet"
+              <Button variant="ghost"
                 aria-label={`Remove shortcut ${i + 1}`}
-                onClick={() => setShortcuts(list => list.filter((_, j) => j !== i))}>Remove</button>
+                onClick={() => setShortcuts(list => list.filter((_, j) => j !== i))}>Remove</Button>
             </div>
           ))}
-          <button type="button" className="settings-btn quiet" onClick={() => setShortcuts(list => [...list, blankShortcut()])}>
-            Add a shortcut
-          </button>
+          <div>
+            <Button icon={PlusCircle} onClick={() => setShortcuts(list => [...list, blankShortcut()])}>
+              Add a shortcut
+            </Button>
+          </div>
         </fieldset>
 
-        <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-          <legend className="settings-label">Routines</legend>
-          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+        <fieldset className="fieldset">
+          <legend className="field-label">Routines</legend>
+          <p className="field-hint">
             A name {studentName} can say, and the commands it runs in order — one per line.
             For example "start my homework": open Word, then open Chrome.
           </p>
           {routines.map((routine, i) => (
-            <div key={i} className="card" style={{ padding: 12, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <input className="settings-input" value={routine.name}
+            <div key={i} className="routine-card">
+              <TextField id={`routine-name-${i}`} value={routine.name}
                 aria-label={`Routine ${i + 1}: its name`} placeholder="start my homework"
-                onChange={e => updateRoutine(i, 'name', e.target.value)} />
-              <textarea className="settings-input" rows={3} value={routine.steps}
+                onChange={e => updateRoutine(i, 'name', e.target.value)}
+                onClear={() => updateRoutine(i, 'name', '')} />
+              <textarea className="field-input" rows={3} value={routine.steps}
                 aria-label={`Routine ${i + 1}: its commands, one per line`} placeholder={'open word\nopen chrome'}
-                onChange={e => updateRoutine(i, 'steps', e.target.value)}
-                style={{ height: 'auto', paddingTop: 10, paddingBottom: 10, resize: 'vertical' }} />
-              <button type="button" className="settings-btn quiet" style={{ alignSelf: 'flex-start' }}
-                aria-label={`Remove routine ${i + 1}`}
-                onClick={() => setRoutines(list => list.filter((_, j) => j !== i))}>Remove routine</button>
+                onChange={e => updateRoutine(i, 'steps', e.target.value)} />
+              <div>
+                <Button variant="ghost"
+                  aria-label={`Remove routine ${i + 1}`}
+                  onClick={() => setRoutines(list => list.filter((_, j) => j !== i))}>Remove routine</Button>
+              </div>
             </div>
           ))}
-          <button type="button" className="settings-btn quiet" onClick={() => setRoutines(list => [...list, blankRoutine()])}>
-            Add a routine
-          </button>
+          <div>
+            <Button icon={PlusCircle} onClick={() => setRoutines(list => [...list, blankRoutine()])}>
+              Add a routine
+            </Button>
+          </div>
         </fieldset>
 
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button type="submit" className="settings-btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save speech settings'}</button>
-          <button type="button" className="settings-btn quiet" onClick={exportFile}>Save to a file</button>
-          <button type="button" className="settings-btn quiet" onClick={() => fileInput.current?.click()}>Load from a file</button>
+        <div className="button-row">
+          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Saving…' : 'Save speech settings'}</Button>
+          <Button icon={Download} onClick={exportFile}>Save to a file</Button>
+          <Button icon={Upload} onClick={() => fileInput.current?.click()}>Load from a file</Button>
           <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={importFile} />
         </div>
       </form>
 
-      <p className={`settings-result ${result?.tone || ''}`} role="status" aria-live="polite">{result?.text || ''}</p>
-    </section>
+      <p className={`form-result ${result?.tone || ''}`} role="status" aria-live="polite">{result?.text || ''}</p>
+    </Panel>
   );
 }

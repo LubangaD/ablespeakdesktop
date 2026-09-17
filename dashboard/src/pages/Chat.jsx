@@ -2,7 +2,8 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Send, AlertCircle } from 'lucide-react';
+import { Mic, Send, Info, TriangleAlert, Wrench, Bot, Timer, AudioLines, MessageCircle } from 'lucide-react';
+import { Button, TextField, VoiceStateBar } from '../components/ui';
 
 const SHOWN_EVENTS = [
   'voice_transcription', 'voice_no_speech', 'voice_error', 'command_complete',
@@ -18,7 +19,7 @@ const nextId = () => `m${Date.now()}-${++messageCount}`;
 function eventNote(msg) {
   switch (msg.type) {
     case 'dictation_typed':
-      return msg.error ? `⚠ ${msg.message}` : `✏️ Typed: ${msg.text}`;
+      return msg.error ? `Couldn't type that: ${msg.message}` : `Typed: ${msg.text}`;
     case 'voice_cancelled':
       return 'Stopped.';
     case 'dictation_mode':
@@ -288,7 +289,7 @@ export default function Chat() {
       } else if (result?.text) {
         responseText = result.text;
       } else if (result?.status) {
-        responseText = result.status === 'success' ? '✓ Command executed successfully.' : result.status;
+        responseText = result.status === 'success' ? 'Done.' : result.status;
       } else if (result) {
         responseText = JSON.stringify(result, null, 2);
       }
@@ -314,11 +315,11 @@ export default function Chat() {
         const calls = msg.toolCalls || [];
         const failed = calls.filter(tc => tc.result?.status === 'error');
         if (failed.length > 0) {
-          displayText = `⚠ ${failed[0].result?.message || failed[0].result?.error || 'Action failed'}`;
+          displayText = failed[0].result?.message || failed[0].result?.error || 'Action failed';
         } else if (calls.length > 0) {
           // Show the tool's actual outcome (e.g. "Spotify is now playing: ...")
           const lastMsg = [...calls].reverse().find(tc => tc.result?.message)?.result?.message;
-          displayText = lastMsg ? `✓ ${lastMsg}` : '✓ Done';
+          displayText = lastMsg || 'Done.';
         } else {
           displayText = '(no action taken)';
         }
@@ -327,7 +328,7 @@ export default function Chat() {
         id: msg.id || nextId(),
         role: 'assistant',
         text: displayText,
-        error: msg.error,
+        error: msg.error || (!msg.text?.trim() && (msg.toolCalls || []).some(tc => tc.result?.status === 'error')),
         provider: msg.provider,
         model: msg.model,
         latency: msg.latency,
@@ -410,71 +411,65 @@ export default function Chat() {
     }
   };
 
+  // What the voice state bar shows: the mic first, then the reply being worked on
+  const barState = voiceState === 'listening' ? 'listening'
+    : voiceState === 'processing' || processing ? 'processing'
+    : 'idle';
+  const barDetail = voiceState === 'listening' ? 'Speak now. It stops when you pause.'
+    : voiceState === 'processing' ? 'Turning your speech into text…'
+    : processing ? 'AbleSpeak is working on it…'
+    : 'Press Ctrl + Shift + A, or use the microphone button.';
+
   return (
     <div className="as-chat-page">
+      <header className="chat-header">
+        <h2><MessageCircle size={28} aria-hidden="true" /> Chat</h2>
+        <VoiceStateBar state={barState} detail={barDetail} />
+      </header>
+
       {/* Chat container */}
       <div className="as-chat-container" ref={feedRef} role="log" aria-label="Voice conversation" aria-live="polite">
         {messages.map(msg => (
           <ChatBubble key={msg.id} message={msg} />
         ))}
-
-        {/* Voice state indicators */}
-        {voiceState === 'listening' && (
-          <div className="as-bubble-row user">
-            <div className="as-bubble user interim voice-listening">
-              <span className="voice-pulse" />
-              Listening...
-            </div>
-          </div>
-        )}
-
-        {voiceState === 'processing' && (
-          <div className="as-bubble-row user">
-            <div className="as-bubble user interim">
-              Transcribing...
-            </div>
-          </div>
-        )}
-
-        {/* Processing / thinking indicator */}
-        {processing && (
-          <div className="as-thinking">
-            <div className="as-thinking-line" />
-          </div>
-        )}
       </div>
 
       {/* Bottom input bar — mic + text + send */}
       <div className="as-chat-input-bar">
-        <button
-          className={`as-mic-btn ${isListening ? 'active' : ''} ${voiceState === 'processing' ? 'processing' : ''}`}
+        <Button
+          variant={isListening ? 'stop' : 'secondary'}
+          className="chat-mic"
+          icon={isListening ? undefined : Mic}
           onClick={toggleListening}
           disabled={voiceState === 'processing'}
           aria-label={isListening ? 'Stop listening' : 'Start listening'}
+          aria-pressed={isListening}
           title={isListening ? 'Stop listening' : 'Click to speak'}
         >
-          {isListening ? <MicOff size={20} /> : <Mic size={20} />}
-        </button>
+          {isListening ? 'STOP' : 'Speak'}
+        </Button>
 
         <form onSubmit={handleTextSubmit} className="as-chat-form">
-          <input
-            ref={inputRef}
-            type="text"
-            className="as-chat-input"
-            placeholder="Voice is primary — use Ctrl+Shift+A or click mic"
+          <TextField
+            id="chat-input"
+            className="grow"
+            inputRef={inputRef}
+            placeholder="Type a command, or speak with Ctrl + Shift + A"
             value={inputText}
             onChange={e => setInputText(e.target.value)}
+            onClear={() => setInputText('')}
             onKeyDown={handleKeyDown}
+            autoComplete="off"
             aria-label="Type a message (voice input is primary — use the microphone button or Ctrl+Shift+A)"
           />
-          <button
+          <Button
             type="submit"
-            className="as-send-btn"
+            variant="primary"
+            icon={Send}
             disabled={!inputText.trim()}
-            aria-label="Send message"
           >
             Send
-          </button>
+          </Button>
         </form>
       </div>
     </div>
@@ -488,35 +483,40 @@ function ChatBubble({ message }) {
   if (isSystem) {
     return (
       <div className="as-system-msg">
-        <AlertCircle size={14} />
-        {message.text}
+        <Info size={16} aria-hidden="true" />
+        <span>{message.text}</span>
       </div>
     );
   }
 
+  const failedTools = (message.toolCalls || []).filter(tc => tc.result?.status === 'error' || tc.result?.error);
+
   return (
     <div className={`as-bubble-row ${isUser ? 'user' : 'assistant'}`}>
       <div className={`as-bubble ${isUser ? 'user' : 'assistant'} ${message.error ? 'error' : ''}`}>
+        <span className="as-bubble-who">
+          {isUser
+            ? <>{message.source === 'voice' && <AudioLines size={14} aria-hidden="true" />} You{message.source === 'voice' ? ' said' : ''}</>
+            : <>{message.error && <TriangleAlert size={14} aria-hidden="true" />} AbleSpeak{message.error ? ' (didn’t work)' : ''}</>}
+        </span>
         <span className="as-bubble-text">{message.text}</span>
-        {message.source === 'voice' && isUser && (
-          <span className="as-voice-tag">🎙️</span>
-        )}
         {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="as-bubble-tools">
+          <span className="as-bubble-tools">
             {message.toolCalls.map((tc, i) => {
-              const isError = tc.result?.status === 'error' || tc.result?.error;
+              const isError = failedTools.includes(tc);
               return (
-                <span key={i} className="as-tool-tag" title={isError ? (tc.result?.message || tc.result?.error) : 'succeeded'}>
-                  {isError ? '⚠' : '🔧'} {tc.tool || tc.name}{isError ? ' failed' : ''}
+                <span key={i} className={`as-tool-tag${isError ? ' failed' : ''}`} title={isError ? (tc.result?.message || tc.result?.error) : 'succeeded'}>
+                  {isError ? <TriangleAlert size={14} aria-hidden="true" /> : <Wrench size={14} aria-hidden="true" />}
+                  {tc.tool || tc.name}{isError ? ' failed' : ''}
                 </span>
               );
             })}
-          </div>
+          </span>
         )}
         {(message.latency || message.provider) && (
           <span className="as-bubble-meta">
-            {message.provider && <span>🤖 {message.model || message.provider}</span>}
-            {message.latency && <span>⚡ {message.latency}ms</span>}
+            {message.provider && <span><Bot size={14} aria-hidden="true" /> {message.model || message.provider}</span>}
+            {message.latency && <span className="tabular"><Timer size={14} aria-hidden="true" /> {message.latency} ms</span>}
           </span>
         )}
       </div>

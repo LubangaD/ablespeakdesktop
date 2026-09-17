@@ -236,6 +236,7 @@ select.field-input option { background: var(--surface-1); color: var(--text-titl
   font-size: var(--body-sm);
   color: var(--text-secondary);
 }
+.form-result:empty { min-height: 0; margin: 0; }
 .form-result.success { color: var(--success); }
 .form-result.warn { color: var(--warning); }
 .form-result.error { color: var(--error); }

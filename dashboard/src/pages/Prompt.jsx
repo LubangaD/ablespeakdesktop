@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState } from 'react';
-import { CheckSquare, Square, ChevronDown, FileText, Copy, Check } from 'lucide-react';
+import { FileText, Copy, Check } from 'lucide-react';
+import { Button, Checkbox } from '../components/ui';
 
 const PROMPT_MODES = ['general', 'chrome', 'gmail', 'youtube', 'vscode'];
 
@@ -10,7 +11,6 @@ export default function Prompt() {
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 3000 });
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [activeMode, setActiveMode] = useState('general');
-  const [showDropdown, setShowDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState('prompt');
   const [copied, setCopied] = useState(false);
 
@@ -153,17 +153,22 @@ You are a voice programming assistant for Visual Studio Code.
   return (
     <div className="as-prompt-page">
       {/* Page header */}
-      <div className="pp-header">
-        <h2><FileText size={24} aria-hidden="true" /> Prompt Studio</h2>
-        <p className="pp-subtitle">The instructions AbleSpeak follows for each app. Switch modes to see what changes.</p>
-      </div>
+      <header className="page-header compact">
+        <h2><FileText size={28} aria-hidden="true" /> Prompt studio</h2>
+        <p>The instructions AbleSpeak follows for each app. Switch modes to see what changes.</p>
+      </header>
 
-      {/* Top bar — carded */}
+      {/* Top bar */}
       <div className="as-topbar">
-        <div className="as-tabs">
+        <div className="as-tabs" role="tablist" aria-label="What to show">
           {['prompt', 'tools', 'context'].map(tab => (
             <button
               key={tab}
+              type="button"
+              role="tab"
+              id={`prompt-tab-${tab}`}
+              aria-selected={activeTab === tab}
+              aria-controls="prompt-doc"
               className={`as-tab ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
@@ -173,52 +178,33 @@ You are a voice programming assistant for Visual Studio Code.
         </div>
 
         <div className="as-topbar-right">
-          {/* Auto-Update checkbox */}
-          <label className="as-checkbox" onClick={() => setAutoUpdate(!autoUpdate)}>
-            {autoUpdate ? <CheckSquare size={18} /> : <Square size={18} />}
-            <span>Auto-Update</span>
+          <Checkbox label="Auto-update" checked={autoUpdate} onChange={e => setAutoUpdate(e.target.checked)} />
+          <label className="inline-select" htmlFor="prompt-mode">
+            <span>Mode</span>
+            <select id="prompt-mode" className="field-input" value={activeMode} onChange={e => setActiveMode(e.target.value)}>
+              {PROMPT_MODES.map(mode => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
           </label>
-
-          {/* Active mode dropdown */}
-          <div className="as-dropdown-wrap">
-            <span className="as-dropdown-label">Active:</span>
-            <div className="as-dropdown" onClick={() => setShowDropdown(!showDropdown)}>
-              <span>{activeMode}</span>
-              <ChevronDown size={16} />
-              {showDropdown && (
-                <div className="as-dropdown-menu">
-                  {PROMPT_MODES.map(mode => (
-                    <button
-                      key={mode}
-                      className={`as-dropdown-item ${mode === activeMode ? 'active' : ''}`}
-                      onClick={(e) => { e.stopPropagation(); setActiveMode(mode); setShowDropdown(false); }}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
       {/* Document card */}
-      <div className="pp-doc">
+      <section className="pp-doc panel surface-2" id="prompt-doc" role="tabpanel" aria-labelledby={`prompt-tab-${activeTab}`}>
         <div className="pp-doc-bar">
           <div className="pp-doc-title">
-            <span className="pp-doc-dot" />
             {docTitle}
-            <span className="pp-doc-mode">{activeMode}</span>
+            <span className="tag">{activeMode}</span>
           </div>
-          <button className="pp-copy-btn" onClick={handleCopy} aria-label="Copy to clipboard">
-            {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
-          </button>
+          <Button icon={copied ? Check : Copy} onClick={handleCopy} aria-live="polite">
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
         </div>
         <div className="pp-doc-body">
           {renderMarkdown(docText)}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

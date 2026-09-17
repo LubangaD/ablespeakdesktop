@@ -21,8 +21,13 @@ export function Field({ id, label, hint, className = '', children }) {
   );
 }
 
-export function TextField({ id, label, hint, value, onChange, onClear, className = '', inputClassName = '', ...rest }) {
+export function TextField({ id, label, hint, value, onChange, onClear, inputRef: outerRef, className = '', inputClassName = '', ...rest }) {
   const inputRef = useRef(null);
+  const setRef = el => {
+    inputRef.current = el;
+    if (outerRef) outerRef.current = el;
+  };
+  const name = label || rest['aria-label'] || 'this field';
   const clear = () => {
     if (onClear) onClear();
     else onChange?.({ target: { value: '' } });
@@ -33,7 +38,7 @@ export function TextField({ id, label, hint, value, onChange, onClear, className
     <Field id={id} label={label} hint={hint} className={className}>
       <div className="field-wrap">
         <input
-          ref={inputRef}
+          ref={setRef}
           id={id}
           className={`field-input has-clear ${inputClassName}`.trim()}
           value={value}
@@ -42,7 +47,7 @@ export function TextField({ id, label, hint, value, onChange, onClear, className
           {...rest}
         />
         {value ? (
-          <button type="button" className="field-clear" onClick={clear} aria-label={`Clear ${label || 'this field'}`}>
+          <button type="button" className="field-clear" onClick={clear} aria-label={`Clear ${typeof name === 'string' ? name : 'this field'}`}>
             <X size={20} aria-hidden="true" />
           </button>
         ) : null}

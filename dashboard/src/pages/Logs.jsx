@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useState, useEffect, useRef } from 'react';
+import { Pause, Play, ScrollText } from 'lucide-react';
+import { Button, Chip } from '../components/ui';
 
 export default function Logs() {
   const [level, setLevel] = useState(null);
@@ -41,43 +43,41 @@ export default function Logs() {
   return (
     <div>
       <header className="page-header">
-        <h2>Log Viewer</h2>
-        <p>Real-time AbleSpeak engine log stream</p>
+        <h2><ScrollText size={28} aria-hidden="true" /> Logs</h2>
+        <p>What the AbleSpeak engine is doing, as it happens.</p>
       </header>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center' }}>
-        <div className="filter-group" role="group" aria-label="Filter by log level" style={{ marginBottom: 0 }}>
+      <div className="logs-toolbar">
+        <div className="chip-row" role="group" aria-label="Filter by log level">
           {levels.map(l => (
-            <button
+            <Chip
               key={l}
-              className={`filter-btn${(l === 'All' && !level) || level === l ? ' active' : ''}`}
+              selected={(l === 'All' && !level) || level === l}
               onClick={() => setLevel(l === 'All' ? null : l)}
-              aria-label={`Show ${l} logs`}
-              aria-pressed={(l === 'All' && !level) || level === l}
+              aria-label={`Show ${l === 'All' ? 'all' : l} logs`}
             >
               {l}
-            </button>
+            </Chip>
           ))}
         </div>
-        <button
-          className={`filter-btn${paused ? ' active' : ''}`}
+        <Button
+          icon={paused ? Play : Pause}
           onClick={() => setPaused(!paused)}
-          aria-label={paused ? 'Resume auto-scroll' : 'Pause auto-scroll'}
           aria-pressed={paused}
-          style={{ marginLeft: 'auto' }}
+          className="push-right"
         >
-          {paused ? '▶ Resume' : '⏸ Pause'}
-        </button>
+          {paused ? 'Resume scrolling' : 'Pause scrolling'}
+        </Button>
       </div>
 
       <div className="log-stream" ref={containerRef} role="log" aria-label="AbleSpeak log output" aria-live={paused ? 'off' : 'polite'}>
         {logs.length === 0 && (
-          <div style={{ color: 'var(--text-secondary)', padding: 20 }}>Waiting for log events...</div>
+          <div className="log-empty">Waiting for log events…</div>
         )}
         {logs.map((log, i) => (
           <div key={i} className={`log-line ${log.level}`}>
-            <span style={{ color: 'var(--text-secondary)' }}>{log.timestamp} </span>
-            <span style={{ fontWeight: 600, minWidth: 50, display: 'inline-block' }}>{log.level}</span>
+            <span className="log-time">{log.timestamp} </span>
+            <span className="log-level">{log.level}</span>
             {' '}
             {log.message}
           </div>

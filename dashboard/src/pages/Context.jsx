@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Folder, FileText, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, FileText, GitBranch } from 'lucide-react';
+import { Checkbox } from '../components/ui';
 
 export default function Context() {
   const { data: context } = useQuery({ queryKey: ['context'], queryFn: api.getContext, refetchInterval: 1000 });
@@ -25,23 +26,19 @@ export default function Context() {
   return (
     <div className="as-context-page">
       {/* Header strip */}
-      <div className="as-context-header">
-        <span className="as-context-title">AbleSpeak Context</span>
-        <label className="as-checkbox-sm">
-          <input
-            type="checkbox"
-            checked={showDebug}
-            onChange={e => setShowDebug(e.target.checked)}
-          />
-          Show debug info
-        </label>
-      </div>
+      <header className="as-context-header">
+        <div className="page-header compact">
+          <h2><GitBranch size={28} aria-hidden="true" /> Context</h2>
+          <p>What AbleSpeak knows about this computer and the open browser. Choose an item to see its value.</p>
+        </div>
+        <Checkbox label="Show debug info" checked={showDebug} onChange={e => setShowDebug(e.target.checked)} />
+      </header>
 
       <div className="as-context-split">
         {/* Left panel — tree */}
         <div className="as-context-tree-panel">
           {contextTree ? (
-            <div className="as-context-tree">
+            <div className="as-context-tree" role="tree" aria-label="Context">
               {Object.entries(contextTree).map(([key, val]) => (
                 <ContextTreeNode
                   key={key}
@@ -64,14 +61,14 @@ export default function Context() {
         </div>
 
         {/* Right panel — detail viewer */}
-        <div className="as-context-detail-panel">
-          <div className="as-context-key-label">Context Key</div>
-          <div className="as-context-key-field">
-            {selectedKey || ''}
+        <div className="as-context-detail-panel" aria-live="polite">
+          <div className="as-context-key-label" id="context-key-label">Context key</div>
+          <div className="as-context-key-field" aria-labelledby="context-key-label">
+            {selectedKey || 'Nothing chosen yet'}
           </div>
 
-          <div className="as-context-value-label">Context Value</div>
-          <div className="as-context-value-field">
+          <div className="as-context-value-label" id="context-value-label">Context value</div>
+          <div className="as-context-value-field" aria-labelledby="context-value-label">
             {selectedValue !== null && selectedValue !== undefined
               ? (typeof selectedValue === 'object'
                 ? JSON.stringify(selectedValue, null, 2)
@@ -184,7 +181,7 @@ function ContextTreeNode({ label, value, path, depth, onSelect, selectedKey, def
     return (
       <div
         className={`as-tree-leaf ${isSelected ? 'selected' : ''}`}
-        style={{ paddingLeft: depth * 20 + 12 }}
+        style={{ paddingLeft: depth * 24 + 44 }}
         onClick={() => onSelect(path, value)}
         role="treeitem"
         tabIndex={0}
@@ -193,7 +190,7 @@ function ContextTreeNode({ label, value, path, depth, onSelect, selectedKey, def
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(path, value); }
         }}
       >
-        <FileText size={14} className="as-tree-icon leaf" aria-hidden="true" />
+        <FileText size={18} className="as-tree-icon leaf" aria-hidden="true" />
         <span className="as-tree-key">{label}</span>
       </div>
     );
@@ -205,7 +202,7 @@ function ContextTreeNode({ label, value, path, depth, onSelect, selectedKey, def
     <div className="as-tree-node" role="treeitem" aria-expanded={open}>
       <div
         className={`as-tree-branch ${isSelected ? 'selected' : ''}`}
-        style={{ paddingLeft: depth * 20 + 4 }}
+        style={{ paddingLeft: depth * 24 + 12 }}
         onClick={handleClick}
         tabIndex={0}
         role="button"
@@ -218,10 +215,10 @@ function ContextTreeNode({ label, value, path, depth, onSelect, selectedKey, def
         }}
       >
         {open
-          ? <ChevronDown size={16} className="as-tree-chevron" aria-hidden="true" />
-          : <ChevronRight size={16} className="as-tree-chevron" aria-hidden="true" />
+          ? <ChevronDown size={20} className="as-tree-chevron" aria-hidden="true" />
+          : <ChevronRight size={20} className="as-tree-chevron" aria-hidden="true" />
         }
-        <Folder size={14} className="as-tree-icon folder" aria-hidden="true" />
+        <Folder size={18} className="as-tree-icon folder" aria-hidden="true" />
         <span className="as-tree-label">{label}</span>
       </div>
       {open && (

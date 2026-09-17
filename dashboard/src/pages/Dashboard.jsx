@@ -2,7 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { api } from '../lib/api';
 import { useState, useEffect } from 'react';
-import { Mic, Brain, AlertTriangle, XCircle, Activity, Monitor, Cpu, Keyboard, WifiOff, Wifi, Command, Sparkles } from 'lucide-react';
+import {
+  Mic, Brain, Activity, Monitor, Cpu, Keyboard, WifiOff, Wifi, Command, Sparkles,
+  AudioLines, Bot, CircleCheck, ArrowLeftRight, ScrollText, Circle,
+} from 'lucide-react';
+import { Notice, Panel, StatTile, StatusPill } from '../components/ui';
 
 export default function Dashboard() {
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: api.getHealth });
@@ -30,86 +34,81 @@ export default function Dashboard() {
   const aiOk = !!aiStatus?.provider;
   const commandsToday = stats?.today || 0;
   const avgLatency = stats?.avgLatency || 0;
+  const apps = systemInfo?.visibleApplications || [];
 
   return (
     <div className="ds-home">
       {/* ── Warm Greeting ── */}
-      <section className="ds-hero">
+      <section className="ds-hero" aria-labelledby="greeting-heading">
         <div className="ds-hero-text">
-          <div className="ds-hero-eyebrow">
-            <Sparkles size={14} aria-hidden="true" />
-            <span>{greeting()}</span>
-          </div>
-          <h2 className="ds-greeting">Ready when you are.</h2>
+          <p className="ds-hero-eyebrow">
+            <Sparkles size={18} aria-hidden="true" />
+            {greeting()}
+          </p>
+          <h2 id="greeting-heading" className="ds-greeting">Ready when you are.</h2>
           <p className="ds-greeting-sub">
             Press <kbd className="ds-kbd">Ctrl</kbd> <kbd className="ds-kbd">Shift</kbd> <kbd className="ds-kbd">A</kbd> anywhere, then just say what you want to do.
           </p>
         </div>
         <div className="ds-hero-stats">
-          <div className="ds-stat-pill">
-            <span className="ds-stat-value">{commandsToday}</span>
-            <span className="ds-stat-label">commands today</span>
-          </div>
-          <div className="ds-stat-pill">
-            <span className="ds-stat-value">{avgLatency ? `${avgLatency}ms` : '—'}</span>
-            <span className="ds-stat-label">avg latency</span>
-          </div>
+          <StatTile label="Commands today" value={commandsToday} />
+          <StatTile label="Average latency" value={avgLatency ? `${avgLatency} ms` : '—'} />
         </div>
       </section>
 
       {/* ── Getting Started — 3 simple steps for the student ── */}
-      <section className="ds-steps" aria-label="How to use AbleSpeak">
-        <div className="ds-step">
-          <div className="ds-step-num"><Keyboard size={20} /></div>
-          <div className="ds-step-body">
-            <div className="ds-step-title">1 · Wake it up</div>
-            <div className="ds-step-text">Press <kbd className="ds-kbd-sm">Ctrl Shift A</kbd> from any screen.</div>
-          </div>
-        </div>
-        <div className="ds-step-arrow" aria-hidden="true">→</div>
-        <div className="ds-step">
-          <div className="ds-step-num"><Mic size={20} /></div>
-          <div className="ds-step-body">
-            <div className="ds-step-title">2 · Say it</div>
-            <div className="ds-step-text">“Open my email”, “scroll down”, “click submit”.</div>
-          </div>
-        </div>
-        <div className="ds-step-arrow" aria-hidden="true">→</div>
-        <div className="ds-step">
-          <div className="ds-step-num"><Command size={20} /></div>
-          <div className="ds-step-body">
-            <div className="ds-step-title">3 · It happens</div>
-            <div className="ds-step-text">AbleSpeak does it for you, hands-free.</div>
-          </div>
-        </div>
+      <section aria-label="How to use AbleSpeak">
+        <ol className="ds-steps">
+          <li className="ds-step">
+            <span className="ds-step-icon" aria-hidden="true"><Keyboard size={24} /></span>
+            <span className="ds-step-body">
+              <span className="ds-step-title">1. Wake it up</span>
+              <span className="ds-step-text">Press <kbd className="ds-kbd">Ctrl Shift A</kbd> from any screen.</span>
+            </span>
+          </li>
+          <li className="ds-step">
+            <span className="ds-step-icon" aria-hidden="true"><Mic size={24} /></span>
+            <span className="ds-step-body">
+              <span className="ds-step-title">2. Say it</span>
+              <span className="ds-step-text">“Open my email”, “scroll down”, “click submit”.</span>
+            </span>
+          </li>
+          <li className="ds-step">
+            <span className="ds-step-icon" aria-hidden="true"><Command size={24} /></span>
+            <span className="ds-step-body">
+              <span className="ds-step-title">3. It happens</span>
+              <span className="ds-step-text">AbleSpeak does it for you, hands-free.</span>
+            </span>
+          </li>
+        </ol>
       </section>
 
       {/* ── Status Cards — plain language ── */}
       <section className="ds-status-grid" aria-label="What's working">
         <StatusCard
-          icon={<Mic size={20} />}
+          icon={Mic}
           label="Microphone"
           value="Ready to hear you"
           ok={true}
           detail="Press Ctrl + Shift + A"
         />
         <StatusCard
-          icon={<Brain size={20} />}
-          label="Voice Brain"
-          value={aiOk ? 'Awake & ready' : 'Waking up…'}
+          icon={Brain}
+          label="Voice brain"
+          value={aiOk ? 'Awake and ready' : 'Waking up…'}
           ok={aiOk}
           detail={aiOk ? 'Understands what you say' : 'Connecting…'}
         />
         <StatusCard
-          icon={extOk ? <Wifi size={20} /> : <WifiOff size={20} />}
-          label="Web Browser"
+          icon={extOk ? Wifi : WifiOff}
+          label="Web browser"
           value={extOk ? 'Connected' : 'Not connected'}
           ok={extOk}
           detail={extOk ? 'Voice works on websites too' : 'Add the Chrome helper'}
         />
         <StatusCard
-          icon={<Keyboard size={20} />}
-          label="Voice Overlay"
+          icon={Keyboard}
+          label="Voice overlay"
           value="Always on"
           ok={true}
           detail="Ready on every screen"
@@ -120,11 +119,9 @@ export default function Dashboard() {
       {alerts.length > 0 && (
         <section className="ds-alerts" aria-label="Things to check" aria-live="polite">
           {alerts.map((a, i) => (
-            <div key={i} className={`ds-alert ${a.status}`}>
-              {a.status === 'error' ? <XCircle size={16} /> : <AlertTriangle size={16} />}
-              <span className="ds-alert-component">{a.component}</span>
-              <span className="ds-alert-message">{a.message}</span>
-            </div>
+            <Notice key={i} tone={a.status === 'error' ? 'error' : 'warning'} title={a.component}>
+              {a.message}
+            </Notice>
           ))}
         </section>
       )}
@@ -132,66 +129,61 @@ export default function Dashboard() {
       {/* ── Two-column: Open Apps + Recent Activity ── */}
       <div className="ds-columns">
         {/* Open Applications */}
-        <section className="ds-panel" aria-label="Apps AbleSpeak can see">
-          <div className="ds-panel-header">
-            <Monitor size={16} aria-hidden="true" />
-            <h3>Apps AbleSpeak Can See</h3>
-            <span className="ds-panel-count">{systemInfo?.visibleApplications?.length || 0}</span>
-          </div>
-          <div className="ds-app-list">
-            {(systemInfo?.visibleApplications || []).slice(0, 12).map(app => (
-              <div key={app.id} className={`ds-app-item ${app.foreground ? 'foreground' : ''}`}>
-                <div className="ds-app-dot" />
-                <div className="ds-app-info">
-                  <div className="ds-app-name">{app.title || app.processName}</div>
-                  <div className="ds-app-process">{app.processName}</div>
-                </div>
-                {app.foreground && <span className="ds-app-badge">In front</span>}
-              </div>
+        <Panel title="Apps AbleSpeak can see" titleId="apps-heading" icon={Monitor} flush
+          aside={<span><span className="tabular">{apps.length}</span> open</span>}>
+          <ul className="ds-list">
+            {apps.slice(0, 12).map(app => (
+              <li key={app.id} className={`ds-app-item${app.foreground ? ' foreground' : ''}`}>
+                <span className="ds-app-info">
+                  <span className="ds-app-name">{app.title || app.processName}</span>
+                  <span className="ds-app-process">{app.processName}</span>
+                </span>
+                {app.foreground && <StatusPill tone="info" label="In front" />}
+              </li>
             ))}
-            {(!systemInfo?.visibleApplications || systemInfo.visibleApplications.length === 0) && (
-              <div className="ds-empty">Looking at what's open…</div>
-            )}
-          </div>
-        </section>
+          </ul>
+          {apps.length === 0 && (
+            <p className="ds-empty">Looking at what's open…</p>
+          )}
+        </Panel>
 
         {/* Recent Activity */}
-        <section className="ds-panel" aria-label="What you just did">
-          <div className="ds-panel-header">
-            <Activity size={16} aria-hidden="true" />
-            <h3>What You Just Did</h3>
-          </div>
-          <div className="ds-activity-list">
-            {activity.length === 0 && (
-              <div className="ds-empty">
-                <Mic size={28} style={{ opacity: 0.35, marginBottom: 10 }} />
-                <div style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Nothing yet — your voice goes here</div>
-                <div style={{ fontSize: 12, marginTop: 4, opacity: 0.6 }}>Press Ctrl + Shift + A and say something</div>
-              </div>
-            )}
-            {activity.map((item) => (
-              <div key={item.id} className="ds-activity-item">
-                <div className="ds-activity-dot" data-type={item.type} />
-                <div className="ds-activity-body">
-                  <div className="ds-activity-text">{formatActivity(item)}</div>
-                  <div className="ds-activity-time">
-                    {item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        <Panel title="What you just did" titleId="activity-heading" icon={Activity} flush>
+          {activity.length === 0 ? (
+            <div className="ds-empty">
+              <Mic size={32} aria-hidden="true" className="ds-empty-icon" />
+              <p className="ds-empty-title">Nothing yet. What you say will show here.</p>
+              <p>Press Ctrl + Shift + A and say something.</p>
+            </div>
+          ) : (
+            <ul className="ds-list">
+              {activity.map((item) => {
+                const { icon: Icon, tone } = activityLook(item.type);
+                return (
+                  <li key={item.id} className="ds-activity-item">
+                    <Icon size={18} aria-hidden="true" className={`ds-activity-icon ${tone}`} />
+                    <span className="ds-activity-body">
+                      <span className="ds-activity-text">{formatActivity(item)}</span>
+                      <span className="ds-activity-time tabular">
+                        {item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      </span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
       </div>
 
       {/* ── System Info (quiet footer) ── */}
       {systemInfo?.computerInfo && (
         <section className="ds-sysinfo" aria-label="Computer information">
-          <Cpu size={14} style={{ opacity: 0.4 }} />
+          <Cpu size={18} aria-hidden="true" />
           <span>{systemInfo.computerInfo.osName}</span>
-          <span className="ds-sysinfo-sep">·</span>
+          <span aria-hidden="true">·</span>
           <span>{systemInfo.computerInfo.hostname}</span>
-          <span className="ds-sysinfo-sep">·</span>
+          <span aria-hidden="true">·</span>
           <span>On for {systemInfo.computerInfo.uptime}</span>
         </section>
       )}
@@ -200,16 +192,18 @@ export default function Dashboard() {
 }
 
 // ── Status Card Component ──
-function StatusCard({ icon, label, value, ok, detail }) {
+function StatusCard({ icon: Icon, label, value, ok, detail }) {
   return (
     <div className={`ds-status-card ${ok ? 'ok' : 'offline'}`}>
-      <div className="ds-status-icon">{icon}</div>
-      <div className="ds-status-body">
-        <div className="ds-status-label">{label}</div>
-        <div className="ds-status-value">{value}</div>
-        <div className="ds-status-detail">{detail}</div>
+      <div className="ds-status-top">
+        <span className="ds-status-icon" aria-hidden="true"><Icon size={22} /></span>
+        {ok
+          ? <StatusPill tone="success" label="Ready" />
+          : <StatusPill tone="warning" label="Not ready" />}
       </div>
-      <div className={`ds-status-indicator ${ok ? 'ok' : 'offline'}`} />
+      <div className="ds-status-label">{label}</div>
+      <div className="ds-status-value">{value}</div>
+      <div className="ds-status-detail">{detail}</div>
     </div>
   );
 }
@@ -222,11 +216,23 @@ function greeting() {
   return 'Good evening';
 }
 
+// Each kind of activity has its own icon, so colour is never the only cue
+function activityLook(type) {
+  switch (type) {
+    case 'voice_transcription': return { icon: AudioLines, tone: 'accent' };
+    case 'chat_assistant_message': return { icon: Bot, tone: 'teal' };
+    case 'command_complete': return { icon: CircleCheck, tone: 'success' };
+    case 'prompt_switch': return { icon: ArrowLeftRight, tone: 'muted' };
+    case 'log_event': return { icon: ScrollText, tone: 'muted' };
+    default: return { icon: Circle, tone: 'muted' };
+  }
+}
+
 function formatActivity(item) {
   if (item.type === 'voice_transcription') return `You said: “${item.text}”`;
   if (item.type === 'chat_assistant_message') return `AbleSpeak: ${(item.text || '').slice(0, 80)}${(item.text || '').length > 80 ? '…' : ''}`;
-  if (item.type === 'command_complete') return `Done ✓ (took ${item.latency_ms}ms)`;
-  if (item.type === 'prompt_switch') return `Switched mode → ${item.prompt}`;
+  if (item.type === 'command_complete') return `Done (took ${item.latency_ms} ms)`;
+  if (item.type === 'prompt_switch') return `Switched mode to ${item.prompt}`;
   if (item.type === 'log_event' && item.event) return `${item.event.message?.slice(0, 60)}`;
   return item.type;
 }

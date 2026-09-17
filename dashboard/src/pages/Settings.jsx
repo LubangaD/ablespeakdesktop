@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useState, useEffect } from 'react';
-import { Brain, Globe, Check, AlertCircle, RefreshCw, KeyRound, Mic, ExternalLink } from 'lucide-react';
+import { Brain, Globe, RefreshCw, KeyRound, Mic, ExternalLink, Settings as SettingsIcon, CircleCheck, CircleX, Server } from 'lucide-react';
+import { Button, Field, Notice, Panel, StatusPill, TextField } from '../components/ui';
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -30,48 +31,33 @@ export default function Settings() {
   return (
     <div>
       <header className="page-header">
-        <h2>Settings</h2>
-        <p>AbleSpeak AI Agent configuration</p>
+        <h2><SettingsIcon size={28} aria-hidden="true" /> Settings</h2>
+        <p>Keys and the language model AbleSpeak uses on this computer.</p>
       </header>
 
       <ApiKeysSection onChanged={refreshAi} />
 
       {/* LLM Provider Selector */}
-      <section aria-label="AI Provider" style={{ marginBottom: 32 }}>
-        <h3 className="settings-heading">LANGUAGE MODEL</h3>
+      <section aria-labelledby="llm-heading" className="section">
+        <h3 id="llm-heading" className="section-title"><Brain size={22} aria-hidden="true" /> Language model</h3>
 
         {/* Current provider status */}
         {aiStatus && (
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <Brain size={20} style={{ color: 'var(--accent)' }} aria-hidden="true" />
-              <h4 style={{ fontWeight: 600, fontSize: '1rem' }}>Current Provider</h4>
-              <span className={`badge ${aiStatus.configured ? 'badge-success' : 'badge-error'}`}>
-                {aiStatus.configured ? '● Active' : '○ No API Key'}
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Panel title="Current provider" titleId="current-provider-heading" className="section-gap"
+            aside={aiStatus.configured
+              ? <StatusPill tone="success" label="Active" />
+              : <StatusPill tone="error" label="No API key" />}>
+            <dl className="info-list">
               <InfoRow label="Provider" value={aiStatus.providerName} />
               <InfoRow label="Model" value={aiStatus.model} />
               <InfoRow label="Temperature" value={String(aiStatus.temperature)} />
-              <InfoRow label="Conversation History" value={`${aiStatus.historyLength} messages`} />
-            </div>
-          </div>
+              <InfoRow label="Conversation history" value={`${aiStatus.historyLength} messages`} />
+            </dl>
+          </Panel>
         )}
 
         {notice && (
-          <div
-            className={`health-alert${notice.tone === 'error' ? ' error' : ''}`}
-            role={notice.tone === 'error' ? 'alert' : 'status'}
-            style={notice.tone === 'error'
-              ? { marginBottom: 16 }
-              : { background: 'rgba(52, 211, 153,0.08)', border: '1px solid rgba(52, 211, 153,0.3)', marginBottom: 16 }}
-          >
-            {notice.tone === 'error'
-              ? <AlertCircle size={18} style={{ color: 'var(--error)' }} aria-hidden="true" />
-              : <Check size={18} style={{ color: 'var(--success)' }} aria-hidden="true" />}
-            <span style={{ color: notice.tone === 'error' ? 'var(--error)' : 'var(--success)' }}>{notice.text}</span>
-          </div>
+          <Notice tone={notice.tone} className="section-gap">{notice.text}</Notice>
         )}
 
         {/* Provider cards */}
@@ -89,17 +75,17 @@ export default function Settings() {
       </section>
 
       {/* Gateway Info */}
-      <section aria-label="Gateway information">
-        <h3 className="settings-heading">ABLESPEAK GATEWAY</h3>
-        <div className="card">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <InfoRow label="Agent Version" value="2.0.0 (Standalone)" />
-            <InfoRow label="Mode" value="Standalone AI Agent" />
-            <InfoRow label="Active Prompt" value={status?.activePrompt || 'ablespeak'} />
-            <InfoRow label="Extension Clients" value={String(status?.extensionClients || 0)} />
-            <InfoRow label="Dashboard Clients" value={String(status?.dashboardClients || 0)} />
-          </div>
-        </div>
+      <section aria-labelledby="gateway-heading" className="section">
+        <h3 id="gateway-heading" className="section-title"><Server size={22} aria-hidden="true" /> AbleSpeak gateway</h3>
+        <Panel as="div">
+          <dl className="info-list">
+            <InfoRow label="Agent version" value="2.0.0 (Standalone)" />
+            <InfoRow label="Mode" value="Standalone AI agent" />
+            <InfoRow label="Active prompt" value={status?.activePrompt || 'ablespeak'} />
+            <InfoRow label="Extension clients" value={String(status?.extensionClients || 0)} />
+            <InfoRow label="Dashboard clients" value={String(status?.dashboardClients || 0)} />
+          </dl>
+        </Panel>
       </section>
     </div>
   );
@@ -109,27 +95,23 @@ function ApiKeysSection({ onChanged }) {
   const { data, isLoading, isError, error } = useQuery({ queryKey: ['apiKeys'], queryFn: api.getApiKeys });
 
   return (
-    <section aria-labelledby="api-keys-heading" style={{ marginBottom: 32 }}>
-      <h3 id="api-keys-heading" className="settings-heading">
-        <KeyRound size={16} aria-hidden="true" /> API KEYS
+    <section aria-labelledby="api-keys-heading" className="section">
+      <h3 id="api-keys-heading" className="section-title">
+        <KeyRound size={22} aria-hidden="true" /> API keys
       </h3>
-      <p className="settings-lead">
+      <p className="panel-lead">
         Keys stay on this computer and work as soon as they are saved — no restart needed.
-        {data?.envPath && <> They are saved in <code className="settings-path">{data.envPath}</code>.</>}
+        {data?.envPath && <> They are saved in <code className="code-inline">{data.envPath}</code>.</>}
       </p>
 
-      {isLoading && <p className="settings-lead">Loading keys…</p>}
+      {isLoading && <p className="muted-note section-gap">Loading keys…</p>}
       {isError && (
-        <div className="health-alert error" role="alert" style={{ marginBottom: 16 }}>
-          <AlertCircle size={18} style={{ color: 'var(--error)' }} aria-hidden="true" />
-          <span style={{ color: 'var(--error)' }}>Couldn't load the API keys: {error.message}</span>
-        </div>
+        <Notice tone="error" className="section-gap">Couldn't load the API keys: {error.message}</Notice>
       )}
       {data && !data.voiceReady && (
-        <div className="health-alert warn" role="status" style={{ marginBottom: 16 }}>
-          <Mic size={18} style={{ color: 'var(--warning)' }} aria-hidden="true" />
-          <span>Voice needs a Google Gemini key. Until one is saved, AbleSpeak can't hear anything.</span>
-        </div>
+        <Notice tone="warning" icon={Mic} className="section-gap">
+          Voice needs a Google Gemini key. Until one is saved, AbleSpeak can't hear anything.
+        </Notice>
       )}
 
       {data && (
@@ -141,6 +123,12 @@ function ApiKeysSection({ onChanged }) {
       )}
     </section>
   );
+}
+
+function keyPill(provider) {
+  if (provider.configured) return <StatusPill tone="success" label="Saved" />;
+  if (provider.usedForVoice) return <StatusPill tone="warning" label="Needed" />;
+  return <StatusPill tone="neutral" label="Not set" />;
 }
 
 function ApiKeyCard({ provider, onChanged }) {
@@ -193,93 +181,88 @@ function ApiKeyCard({ provider, onChanged }) {
     }
   };
 
-  const badgeClass = provider.configured ? 'badge-success' : provider.usedForVoice ? 'badge-warning' : 'badge-error';
-
   return (
-    <form className="card settings-key-card" onSubmit={save} aria-labelledby={`${fieldId}-title`}>
-      <div className="settings-key-head">
-        <h4 id={`${fieldId}-title`}>{provider.name}</h4>
-        <span className={`badge ${badgeClass}`}>
-          {provider.configured ? `Saved ${provider.masked}` : 'Not set'}
-        </span>
-      </div>
-      {provider.usedForVoice && (
-        <p className="settings-key-note">
-          <Mic size={14} aria-hidden="true" /> Used for voice, whichever language model you choose.
-        </p>
-      )}
-
-      <label htmlFor={fieldId} className="settings-label">
-        {provider.configured ? 'Replace the key' : 'API key'}
-      </label>
-      <input
-        id={fieldId}
-        type="password"
-        className="settings-input"
-        value={key}
-        onChange={e => setKey(e.target.value)}
-        autoComplete="off"
-        spellCheck={false}
-        placeholder={provider.configured ? 'Paste a new key to replace it' : `Paste your ${provider.name} key`}
-      />
-
-      {isAzure && (
-        <>
-          <label htmlFor={`${fieldId}-endpoint`} className="settings-label">Endpoint</label>
-          <input
-            id={`${fieldId}-endpoint`}
-            type="url"
-            className="settings-input"
-            value={endpoint}
-            onChange={e => setEndpoint(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="https://your-resource.openai.azure.com"
-          />
-          <label htmlFor={`${fieldId}-deployment`} className="settings-label">Deployment name (optional)</label>
-          <input
-            id={`${fieldId}-deployment`}
-            type="text"
-            className="settings-input"
-            value={deployment}
-            onChange={e => setDeployment(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="gpt-4o-mini"
-          />
-        </>
-      )}
-
-      <div className="settings-key-actions">
-        <button type="submit" className="settings-btn primary" disabled={busy || !key.trim()}>
-          {busy ? 'Checking…' : 'Save key'}
-        </button>
-        {provider.configured && !confirmRemove && (
-          <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(true)} disabled={busy}>
-            Remove
-          </button>
+    <Panel as="form" onSubmit={save} title={provider.name} titleId={`${fieldId}-title`} icon={KeyRound}
+      aside={keyPill(provider)} className="key-card">
+      <div className="form-stack">
+        {(provider.configured || provider.usedForVoice) && (
+          <div className="key-facts">
+            {provider.configured && (
+              <p className="muted-note">Saved key ends <span className="tabular key-mask">{provider.masked}</span></p>
+            )}
+            {provider.usedForVoice && (
+              <p className="key-note"><Mic size={16} aria-hidden="true" /> Used for voice, whichever language model you choose.</p>
+            )}
+          </div>
         )}
-        {provider.configured && confirmRemove && (
+
+        <TextField
+          id={fieldId}
+          type="password"
+          label={provider.configured ? 'Replace the key' : 'API key'}
+          value={key}
+          onChange={e => setKey(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={provider.configured ? 'Paste a new key to replace it' : `Paste your ${provider.name} key`}
+        />
+
+        {isAzure && (
           <>
-            <button type="button" className="settings-btn danger" onClick={remove} disabled={busy}>
-              Remove {provider.name} key
-            </button>
-            <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(false)} disabled={busy}>
-              Keep it
-            </button>
+            <TextField
+              id={`${fieldId}-endpoint`}
+              type="url"
+              label="Endpoint"
+              value={endpoint}
+              onChange={e => setEndpoint(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://your-resource.openai.azure.com"
+            />
+            <TextField
+              id={`${fieldId}-deployment`}
+              label="Deployment name (optional)"
+              value={deployment}
+              onChange={e => setDeployment(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="gpt-4o-mini"
+            />
           </>
         )}
-        {provider.keyPage && (
-          <a className="settings-link" href={provider.keyPage} target="_blank" rel="noreferrer">
-            Get a key <ExternalLink size={13} aria-hidden="true" />
-          </a>
-        )}
-      </div>
 
-      <p className={`settings-result ${result?.tone || ''}`} role="status" aria-live="polite">
-        {result?.text || ''}
-      </p>
-    </form>
+        <div className="button-row">
+          <Button type="submit" variant="primary" disabled={busy || !key.trim()}>
+            {busy ? 'Checking…' : 'Save key'}
+          </Button>
+          {provider.configured && !confirmRemove && (
+            <Button onClick={() => setConfirmRemove(true)} disabled={busy}>
+              Remove
+            </Button>
+          )}
+          {provider.configured && confirmRemove && (
+            <>
+              <Button variant="danger" onClick={remove} disabled={busy}>
+                Remove {provider.name} key
+              </Button>
+              <Button onClick={() => setConfirmRemove(false)} disabled={busy}>
+                Keep it
+              </Button>
+            </>
+          )}
+          {provider.keyPage && (
+            <a className="text-link push-right" href={provider.keyPage} target="_blank" rel="noreferrer">
+              Get a key <ExternalLink size={16} aria-hidden="true" />
+              <span className="sr-only">(opens in your browser)</span>
+            </a>
+          )}
+        </div>
+
+        <p className={`form-result ${result?.tone || ''}`} role="status" aria-live="polite">
+          {result?.text || ''}
+        </p>
+      </div>
+    </Panel>
   );
 }
 
@@ -308,81 +291,68 @@ function ProviderCard({ id, provider, isActive, onSwitch }) {
     queryClient.invalidateQueries({ queryKey: ['models', id] });
   };
 
+  const keyText = !provider.envKey ? 'No key needed' : provider.configured ? 'API key saved' : 'Add a key under API keys above';
+  const keyReady = !provider.envKey || provider.configured;
+
   return (
-    <div className="card" style={{
-      borderColor: isActive ? 'var(--accent)' : provider.configured ? 'var(--border)' : 'rgba(251, 113, 133,0.3)',
-      position: 'relative',
-    }}>
-      {isActive && (
-        <div style={{
-          position: 'absolute', top: 12, right: 12,
-          background: 'var(--accent)', color: 'var(--canvas)',
-          padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700,
-        }}>
-          ACTIVE
-        </div>
-      )}
+    <Panel title={provider.name} titleId={`provider-${id}-title`} icon={Globe}
+      className={`provider-card${isActive ? ' active' : ''}`}
+      aside={isActive ? <StatusPill tone="info" label="In use" /> : null}>
+      <div className="form-stack">
+        <p className={`key-status ${keyReady ? 'ready' : 'missing'}`}>
+          {keyReady ? <CircleCheck size={18} aria-hidden="true" /> : <CircleX size={18} aria-hidden="true" />}
+          {keyText}
+        </p>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <Globe size={18} style={{ color: provider.configured ? 'var(--success)' : 'var(--error)' }} aria-hidden="true" />
-        <h4 style={{ fontWeight: 600, fontSize: 15 }}>{provider.name}</h4>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-          {!provider.envKey ? '✓ No key needed' : provider.configured ? '✓ API key saved' : '✗ Add a key under API keys above'}
-        </span>
-      </div>
-
-      {/* Model selector (live list from provider API) */}
-      <div style={{ marginBottom: 12 }}>
-        <label htmlFor={`model-${id}`} style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <span>Model {liveModels?.models?.length ? `(${liveModels.models.length} available)` : '(default list)'}</span>
-          {provider.configured && (
-            <button
-              type="button"
-              onClick={refreshModels}
-              aria-label={`Refresh ${provider.name} model list`}
-              title="Refresh model list"
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--text-secondary)', padding: 4, display: 'flex', alignItems: 'center',
-              }}
+        {/* Model selector (live list from provider API) */}
+        <Field id={`model-${id}`}
+          label={liveModels?.models?.length ? `Model (${liveModels.models.length} available)` : 'Model (default list)'}>
+          <div className="select-with-action">
+            <select
+              id={`model-${id}`}
+              value={selectedModel}
+              onChange={e => setSelectedModel(e.target.value)}
+              className="field-input"
             >
-              <RefreshCw size={14} style={modelsLoading ? { animation: 'spin 1s linear infinite' } : undefined} />
-            </button>
-          )}
-        </label>
-        <select
-          id={`model-${id}`}
-          value={selectedModel}
-          onChange={e => setSelectedModel(e.target.value)}
-          className="settings-input"
-        >
-          {models.map(m => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
-      </div>
+              {models.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {provider.configured && (
+              <Button
+                variant="ghost"
+                iconOnly
+                onClick={refreshModels}
+                aria-label={`Refresh ${provider.name} model list`}
+                title="Refresh model list"
+              >
+                <RefreshCw size={20} aria-hidden="true" className={modelsLoading ? 'spinning' : undefined} />
+              </Button>
+            )}
+          </div>
+        </Field>
 
-      <button
-        type="button"
-        onClick={() => onSwitch(id, selectedModel)}
-        disabled={!provider.configured || isActive}
-        className={`settings-btn ${provider.configured && !isActive ? 'primary' : 'quiet'}`}
-        style={{ width: '100%' }}
-      >
-        {isActive ? 'Currently Active' : provider.configured ? 'Switch to This' : 'Not Configured'}
-      </button>
-    </div>
+        {isActive ? (
+          <p className="key-status ready">
+            <CircleCheck size={18} aria-hidden="true" /> AbleSpeak is using this provider now.
+          </p>
+        ) : provider.configured ? (
+          <Button variant="primary" block onClick={() => onSwitch(id, selectedModel)}>
+            Switch to {provider.name}
+          </Button>
+        ) : (
+          <p className="muted-note">Save a key above to use this provider.</p>
+        )}
+      </div>
+    </Panel>
   );
 }
 
 function InfoRow({ label, value }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 36, gap: 16 }}>
-      <span style={{ color: 'var(--text-secondary)', fontSize: 15 }}>{label}</span>
-      <span style={{ fontWeight: 500, fontSize: 15, color: 'var(--text-primary)', textAlign: 'right' }}>{value}</span>
+    <div className="info-row">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
     </div>
   );
 }

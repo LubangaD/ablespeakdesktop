@@ -8,13 +8,14 @@
  *   4. Usage context strip — sessions this week, command count (secondary, visually muted)
  *
  * No new npm dependencies. SVG is hand-rolled.
- * WCAG AA+: aria-labels, ≥44px targets, focus rings, 7:1 contrast for text, reduced-motion.
+ * WCAG AA+: aria-labels, ≥48px targets, focus rings, 7:1 contrast for text, reduced-motion.
  */
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { RecognitionReadout, SpeechSettings } from '../components/StudentSpeech';
-import { AlertTriangle, CheckCircle2, Flag, TrendingUp, Target, PlusCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Button, Field, Notice, Panel, StatTile, StatusPill, TextField } from '../components/ui';
+import { CheckCircle2, TrendingUp, Target, PlusCircle, ChevronDown, ChevronUp, Users, Flag, LineChart } from 'lucide-react';
 
 // Today in this computer's time zone — the server counts days the same way.
 function localToday() {
@@ -25,9 +26,9 @@ function localToday() {
 // ── Inline math (mirrors server/src/progress-rules.js — no shared import) ──
 
 const MEASURE_REGISTRY = {
-  independence_rate: { label: 'Independence Rate', description: 'Tasks completed without any prompts', lowerIsBetter: false },
-  task_completion: { label: 'Task Completion', description: 'Tasks completed (success or repaired)', lowerIsBetter: false },
-  prompts_to_complete: { label: 'Prompts to Complete', description: 'Average prompts needed — lower is better', lowerIsBetter: true },
+  independence_rate: { label: 'Independence rate', description: 'Tasks completed without any prompts', lowerIsBetter: false },
+  task_completion: { label: 'Task completion', description: 'Tasks completed (success or repaired)', lowerIsBetter: false },
+  prompts_to_complete: { label: 'Prompts to complete', description: 'Average prompts needed — lower is better', lowerIsBetter: true },
 };
 
 function aimValueAt(goal, isoDate) {
@@ -79,10 +80,45 @@ const RULE_GUIDANCE = {
   insufficient_data: 'Fewer than 3 data points in the last 14 days — increase probe frequency.',
 };
 
+// ── Chart colours ──
+// Point and aim colours were checked together on the chart background with
+// the dataviz palette validator (colour-blind separation and 3:1 contrast).
+// Auto and manual points also differ in shape; the trend line is neutral ink.
+const CHART = {
+  surface: '#0a1628',
+  grid: 'rgba(255, 255, 255, 0.08)',
+  axis: 'rgba(255, 255, 255, 0.16)',
+  ink: '#94a3b8',
+  trend: '#cbd5e1',
+  auto: '#1d9e8a',
+  manual: '#9a7be0',
+  aim: '#c98500',
+  font: "'Inter Variable', 'Inter', system-ui, sans-serif",
+};
+
 // ── SVG chart dimensions ──
 const W = 760, H = 360;
-const ML = 64, MR = 24, MT = 20, MB = 56;
+const ML = 72, MR = 24, MT = 24, MB = 60;
 const CW = W - ML - MR, CH = H - MT - MB;
+
+function formatValue(goal, v, yRange) {
+  if (MEASURE_REGISTRY[goal.measure]?.lowerIsBetter) return v.toFixed(1);
+  return yRange <= 1.1 ? `${(v * 100).toFixed(0)}%` : v.toFixed(1);
+}
+
+function ChartLegend({ showTrend }) {
+  return (
+    <ul className="chart-legend" aria-hidden="true">
+      <li><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill={CHART.auto} /></svg>Auto probe</li>
+      <li><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill={CHART.manual} /></svg>Manual probe</li>
+      <li><svg width="24" height="14"><line x1="0" y1="7" x2="24" y2="7" stroke={CHART.aim} strokeWidth="2" strokeDasharray="6 3" /></svg>Aim line</li>
+      {showTrend && (
+        <li><svg width="24" height="14"><line x1="0" y1="7" x2="24" y2="7" stroke={CHART.trend} strokeWidth="2" /></svg>Trend</li>
+      )}
+      <li><svg width="24" height="14"><line x1="12" y1="0" x2="12" y2="14" stroke={CHART.ink} strokeWidth="1.5" strokeDasharray="4 3" /></svg>Phase change</li>
+    </ul>
+  );
+}
 
 // ── Progress Chart ──
 function ProgressChart({ goal, points, phases }) {
@@ -115,15 +151,16 @@ function ProgressChart({ goal, points, phases }) {
 
   // Trend line
   const trend = useMemo(() => trendLine(sorted), [sorted]);
+  const showTrend = !!trend && sorted.length >= 2;
   let trendLineEl = null;
-  if (trend && sorted.length >= 2) {
+  if (showTrend) {
     const D0 = dateToDay(sorted[0].measured_at);
     const trendAt = d => trend.slope * (d - D0) + trend.intercept;
     trendLineEl = (
       <line
         x1={dayX(0)} y1={valY(trendAt(0))}
         x2={dayX(totalDays)} y2={valY(trendAt(totalDays))}
-        stroke="#ef4444" strokeWidth={2} strokeDasharray="none"
+        stroke={CHART.trend} strokeWidth={2}
       />
     );
   }
@@ -155,124 +192,107 @@ function ProgressChart({ goal, points, phases }) {
   const dayToIso = d => new Date(baseMs + d * 86400000).toISOString().slice(0, 10);
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg
-        role="img"
-        aria-label={ariaLabel}
-        width={W} height={H}
-        style={{ display: 'block', background: 'var(--surface-1)', borderRadius: 'var(--radius)', maxWidth: '100%' }}
-      >
-        {/* Y grid lines */}
-        {yTicks.map((v, i) => (
-          <g key={i}>
-            <line x1={ML} y1={valY(v)} x2={ML + CW} y2={valY(v)} stroke="#1a2a40" strokeWidth={1} />
-            <text x={ML - 8} y={valY(v) + 4} textAnchor="end" fontSize={11} fill="#5a6a7a">
-              {MEASURE_REGISTRY[goal.measure]?.lowerIsBetter ? v.toFixed(1) : (yRange <= 1.1 ? (v * 100).toFixed(0) + '%' : v.toFixed(1))}
-            </text>
-          </g>
-        ))}
-
-        {/* X axis ticks */}
-        {xTickDays.map((d, i) => (
-          <g key={i}>
-            <line x1={dayX(d)} y1={MT} x2={dayX(d)} y2={MT + CH} stroke="#111d30" strokeWidth={1} />
-            <text x={dayX(d)} y={MT + CH + 16} textAnchor="middle" fontSize={10} fill="#5a6a7a">
-              {dayToIso(d).slice(5)} {/* MM-DD */}
-            </text>
-          </g>
-        ))}
-
-        {/* Chart border */}
-        <rect x={ML} y={MT} width={CW} height={CH} fill="none" stroke="#1a2a40" strokeWidth={1} />
-
-        {/* Phase change vertical lines */}
-        {phases.map(phase => {
-          const d = dateToDay(phase.changed_at);
-          if (d < 0 || d > totalDays) return null;
-          const x = dayX(d);
-          return (
-            <g key={phase.id}>
-              <line x1={x} y1={MT} x2={x} y2={MT + CH} stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="6 3" />
-              <text x={x + 3} y={MT + 14} fontSize={10} fill="#8b5cf6" style={{ fontWeight: 600 }}>
-                {phase.label.slice(0, 12)}
+    <div className="chart">
+      <ChartLegend showTrend={showTrend} />
+      <div className="chart-scroll">
+        <svg
+          role="img"
+          aria-label={ariaLabel}
+          viewBox={`0 0 ${W} ${H}`}
+          width={W} height={H}
+          className="chart-svg"
+          fontFamily={CHART.font}
+        >
+          {/* Y grid lines */}
+          {yTicks.map((v, i) => (
+            <g key={i}>
+              <line x1={ML} y1={valY(v)} x2={ML + CW} y2={valY(v)} stroke={CHART.grid} strokeWidth={1} />
+              <text x={ML - 10} y={valY(v) + 5} textAnchor="end" fontSize={14} fill={CHART.ink}>
+                {formatValue(goal, v, yRange)}
               </text>
             </g>
-          );
-        })}
+          ))}
 
-        {/* Aim line (dashed, orange) */}
-        <line x1={aimX1} y1={aimY1} x2={aimX2} y2={aimY2} stroke="#F5A623" strokeWidth={2} strokeDasharray="8 4" />
+          {/* X axis ticks */}
+          {xTickDays.map((d, i) => (
+            <g key={i}>
+              <line x1={dayX(d)} y1={MT + CH} x2={dayX(d)} y2={MT + CH + 6} stroke={CHART.axis} strokeWidth={1} />
+              <text x={dayX(d)} y={MT + CH + 24} textAnchor="middle" fontSize={14} fill={CHART.ink}>
+                {dayToIso(d).slice(5)} {/* MM-DD */}
+              </text>
+            </g>
+          ))}
 
-        {/* Trend line (solid, red) */}
-        <clipPath id={`chart-clip-${goal.id}`}>
-          <rect x={ML} y={MT} width={CW} height={CH} />
-        </clipPath>
-        <g clipPath={`url(#chart-clip-${goal.id})`}>
-          {trendLineEl}
-        </g>
+          {/* Baseline */}
+          <line x1={ML} y1={MT + CH} x2={ML + CW} y2={MT + CH} stroke={CHART.axis} strokeWidth={1} />
 
-        {/* Today marker */}
-        {todayInRange && (
-          <g>
-            <line x1={dayX(todayDay)} y1={MT} x2={dayX(todayDay)} y2={MT + CH} stroke="#5a6a7a" strokeWidth={1} strokeDasharray="4 3" />
-            <text x={dayX(todayDay) + 3} y={MT + CH - 4} fontSize={10} fill="#5a6a7a">today</text>
+          {/* Phase change vertical lines */}
+          {phases.map(phase => {
+            const d = dateToDay(phase.changed_at);
+            if (d < 0 || d > totalDays) return null;
+            const x = dayX(d);
+            return (
+              <g key={phase.id}>
+                <line x1={x} y1={MT} x2={x} y2={MT + CH} stroke={CHART.ink} strokeWidth={1.5} strokeDasharray="4 3" />
+                <text x={x + 6} y={MT + 16} fontSize={14} fontWeight={600} fill={CHART.trend}>
+                  {phase.label.slice(0, 14)}
+                </text>
+                <title>{`Phase change on ${phase.changed_at}: ${phase.label}`}</title>
+              </g>
+            );
+          })}
+
+          {/* Aim line (dashed) */}
+          <line x1={aimX1} y1={aimY1} x2={aimX2} y2={aimY2} stroke={CHART.aim} strokeWidth={2} strokeDasharray="8 4" />
+
+          {/* Trend line (solid) */}
+          <clipPath id={`chart-clip-${goal.id}`}>
+            <rect x={ML} y={MT} width={CW} height={CH} />
+          </clipPath>
+          <g clipPath={`url(#chart-clip-${goal.id})`}>
+            {trendLineEl}
           </g>
-        )}
 
-        {/* Data points — auto=circles, manual=squares */}
-        {sorted.map(p => {
-          const d = dateToDay(p.measured_at);
-          const x = dayX(d);
-          const y = valY(Number(p.value));
-          const isManual = p.source === 'manual';
-          return isManual ? (
-            <rect key={p.id || p.measured_at}
-              x={x - 5} y={y - 5} width={10} height={10}
-              fill="#10b981" stroke="#065f46" strokeWidth={1.5}
-              aria-hidden="true"
-            />
-          ) : (
-            <circle key={p.id || p.measured_at}
-              cx={x} cy={y} r={5}
-              fill="#3b82f6" stroke="#1e3a5f" strokeWidth={1.5}
-              aria-hidden="true"
-            />
-          );
-        })}
-
-        {/* Axes labels */}
-        <text x={ML + CW / 2} y={H - 4} textAnchor="middle" fontSize={12} fill="#8a9aaa">Date</text>
-        <text x={14} y={MT + CH / 2} textAnchor="middle" fontSize={12} fill="#8a9aaa"
-          transform={`rotate(-90, 14, ${MT + CH / 2})`}>
-          {MEASURE_REGISTRY[goal.measure]?.label}
-        </text>
-
-        {/* Legend */}
-        <g transform={`translate(${ML + 8}, ${MT + 8})`}>
-          <circle cx={6} cy={6} r={5} fill="#3b82f6" />
-          <text x={15} y={10} fontSize={10} fill="#8a9aaa">Auto probe</text>
-          <rect x={1} y={16} width={10} height={10} fill="#10b981" />
-          <text x={15} y={25} fontSize={10} fill="#8a9aaa">Manual probe</text>
-          <line x1={0} y1={36} x2={20} y2={36} stroke="#F5A623" strokeWidth={2} strokeDasharray="6 3" />
-          <text x={25} y={40} fontSize={10} fill="#8a9aaa">Aim line</text>
-          {trend && sorted.length >= 2 && (
-            <>
-              <line x1={0} y1={48} x2={20} y2={48} stroke="#ef4444" strokeWidth={2} />
-              <text x={25} y={52} fontSize={10} fill="#8a9aaa">Trend</text>
-            </>
+          {/* Today marker */}
+          {todayInRange && (
+            <g>
+              <line x1={dayX(todayDay)} y1={MT} x2={dayX(todayDay)} y2={MT + CH} stroke={CHART.ink} strokeWidth={1} strokeDasharray="2 4" />
+              <text x={dayX(todayDay) + 6} y={MT + CH - 8} fontSize={14} fill={CHART.ink}>today</text>
+            </g>
           )}
-        </g>
-      </svg>
+
+          {/* Data points — auto=circles, manual=squares. A larger invisible
+              circle carries the hover label so the target is easy to hit. */}
+          {sorted.map(p => {
+            const d = dateToDay(p.measured_at);
+            const x = dayX(d);
+            const y = valY(Number(p.value));
+            const isManual = p.source === 'manual';
+            return (
+              <g key={p.id || p.measured_at} className="chart-point">
+                {isManual ? (
+                  <rect x={x - 5} y={y - 5} width={10} height={10} fill={CHART.manual} stroke={CHART.surface} strokeWidth={2} />
+                ) : (
+                  <circle cx={x} cy={y} r={5.5} fill={CHART.auto} stroke={CHART.surface} strokeWidth={2} />
+                )}
+                <circle cx={x} cy={y} r={14} fill="transparent">
+                  <title>{`${p.measured_at}: ${formatValue(goal, Number(p.value), yRange)} (${isManual ? 'manual' : 'auto'} probe), aim ${formatValue(goal, aimValueAt(goal, p.measured_at), yRange)}`}</title>
+                </circle>
+              </g>
+            );
+          })}
+
+          {/* Axes labels */}
+          <text x={ML + CW / 2} y={H - 6} textAnchor="middle" fontSize={14} fill={CHART.ink}>Date</text>
+          <text x={16} y={MT + CH / 2} textAnchor="middle" fontSize={14} fill={CHART.ink}
+            transform={`rotate(-90, 16, ${MT + CH / 2})`}>
+            {MEASURE_REGISTRY[goal.measure]?.label}
+          </text>
+        </svg>
+      </div>
 
       {/* Visually-hidden data table for screen readers */}
-      <table
-        aria-label="Progress data table"
-        style={{
-          position: 'absolute', width: 1, height: 1,
-          overflow: 'hidden', clip: 'rect(0,0,0,0)',
-          whiteSpace: 'nowrap', border: 0,
-        }}
-      >
+      <table className="sr-only" aria-label="Progress data table">
         <thead>
           <tr>
             <th scope="col">Date</th>
@@ -300,47 +320,27 @@ function ProgressChart({ goal, points, phases }) {
 function FlagBanner({ flags, onAck }) {
   if (!flags || flags.length === 0) return null;
   return (
-    <div role="alert" aria-live="assertive" style={{
-      background: 'rgba(251, 113, 133,0.08)',
-      border: '1px solid rgba(251, 113, 133,0.4)',
-      borderRadius: 'var(--radius-sm)',
-      padding: '12px 16px',
-      marginBottom: 20,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <AlertTriangle size={18} style={{ color: 'var(--error)', flexShrink: 0 }} aria-hidden="true" />
-        <strong style={{ color: 'var(--error)', fontSize: 15 }}>
-          {flags.length} Decision Flag{flags.length !== 1 ? 's' : ''}
-        </strong>
-      </div>
+    <Notice
+      tone="error"
+      icon={Flag}
+      title={`${flags.length} decision flag${flags.length !== 1 ? 's' : ''}`}
+      className="section"
+      aria-live="assertive"
+    >
       {flags.map(f => (
-        <div key={f.id} style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: 12, padding: '8px 0', borderTop: '1px solid rgba(251, 113, 133,0.2)',
-        }}>
-          <p style={{ fontSize: 14, color: 'var(--text-primary)', margin: 0, flex: 1 }}>
-            <strong style={{ color: 'var(--error)' }}>{f.rule}</strong>
+        <div key={f.id} className="flag-row">
+          <p>
+            <strong>{f.rule}</strong>
             {' — '}
             {RULE_GUIDANCE[f.rule] || 'Review this goal.'}
-            <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 8 }}>
-              {f.fired_at}
-            </span>
+            <span className="flag-time tabular">{f.fired_at}</span>
           </p>
-          <button
-            onClick={() => onAck(f.id)}
-            aria-label={`Acknowledge ${f.rule} flag from ${f.fired_at}`}
-            style={{
-              padding: '6px 14px', minHeight: 44, minWidth: 100,
-              borderRadius: 'var(--radius-sm)', border: '1px solid rgba(251, 113, 133,0.4)',
-              background: 'transparent', color: 'var(--error)', fontSize: 13,
-              fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', flexShrink: 0,
-            }}
-          >
+          <Button onClick={() => onAck(f.id)} aria-label={`Acknowledge ${f.rule} flag from ${f.fired_at}`}>
             Acknowledge
-          </button>
+          </Button>
         </div>
       ))}
-    </div>
+    </Notice>
   );
 }
 
@@ -397,51 +397,36 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
     }
   };
 
-  const inp = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
-  const lbl = { display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 };
-
   return (
-    <section aria-label="Goal management" style={{ marginBottom: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>GOALS</h3>
-        <button
+    <section aria-labelledby="goals-heading" className="section">
+      <div className="section-head">
+        <h3 id="goals-heading" className="section-title">Goals</h3>
+        <Button
+          icon={PlusCircle}
           onClick={() => setShowForm(f => !f)}
           aria-expanded={showForm}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'none', color: 'var(--accent)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}
         >
-          <PlusCircle size={16} aria-hidden="true" />
-          New Goal {showForm ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
+          New goal {showForm ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}
+        </Button>
       </div>
 
       {/* Existing goals list */}
       {goals && goals.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+        <div className="goal-list">
           {goals.map(g => (
             <button
               key={g.id}
+              type="button"
+              className={`goal-option${selectedGoalId === g.id ? ' selected' : ''}`}
               onClick={() => onGoalSelect(g.id)}
               aria-pressed={selectedGoalId === g.id}
-              style={{
-                padding: '10px 14px', minHeight: 44, textAlign: 'left',
-                background: selectedGoalId === g.id ? 'var(--surface-3)' : 'var(--surface-2)',
-                border: `1px solid ${selectedGoalId === g.id ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 12,
-              }}
             >
-              <Target size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} aria-hidden="true" />
-              <span style={{ flex: 1 }}>
-                <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 14 }}>
-                  {MEASURE_REGISTRY[g.measure]?.label}
-                </span>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 8 }}>
-                  {g.baseline_date} → {g.target_date}
-                </span>
+              <Target size={20} aria-hidden="true" className="goal-option-icon" />
+              <span className="goal-option-text">
+                <span className="goal-option-name">{MEASURE_REGISTRY[g.measure]?.label}</span>
+                <span className="goal-option-dates tabular">{g.baseline_date} → {g.target_date}</span>
               </span>
-              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: g.status === 'active' ? 'rgba(29,158,138,0.15)' : 'var(--surface-3)', color: g.status === 'active' ? 'var(--success)' : 'var(--text-secondary)' }}>
-                {g.status}
-              </span>
+              <StatusPill tone={g.status === 'active' ? 'success' : 'neutral'} label={g.status} />
             </button>
           ))}
         </div>
@@ -449,65 +434,53 @@ function GoalSetupPanel({ studentId, goals, selectedGoalId, onGoalSelect, onGoal
 
       {/* Goal creation form */}
       {showForm && (
-        <div className="card">
-          <h4 style={{ fontWeight: 600, fontSize: '1rem', marginBottom: 16 }}>Create Goal</h4>
-          <form onSubmit={createGoal} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label htmlFor="goal-measure" style={lbl}>Measure</label>
-              <select id="goal-measure" value={measure} onChange={e => setMeasure(e.target.value)} style={inp}>
+        <Panel title="Create a goal" titleId="create-goal-heading" icon={Target}>
+          <form onSubmit={createGoal} className="form-stack">
+            <Field id="goal-measure" label="Measure">
+              <select id="goal-measure" className="field-input" value={measure} onChange={e => setMeasure(e.target.value)}>
                 {Object.entries(MEASURE_REGISTRY).map(([k, v]) => (
                   <option key={k} value={k}>{v.label} — {v.description}</option>
                 ))}
               </select>
+            </Field>
+
+            <div className="form-row">
+              <Field id="goal-baseline-val" label="Baseline value" className="grow">
+                <input id="goal-baseline-val" type="number" step="any" className="field-input"
+                  value={baselineValue} onChange={e => setBaselineValue(e.target.value)} required
+                  placeholder="e.g. 0.20" />
+              </Field>
+              <Button onClick={suggest} disabled={suggestionLoading}
+                aria-label="Suggest baseline from last 14 days of data">
+                {suggestionLoading ? 'Suggesting…' : 'Suggest'}
+              </Button>
             </div>
 
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-              <div style={{ flex: 1 }}>
-                <label htmlFor="goal-baseline-val" style={lbl}>Baseline Value</label>
-                <input id="goal-baseline-val" type="number" step="any" value={baselineValue}
-                  onChange={e => setBaselineValue(e.target.value)} required
-                  placeholder="e.g. 0.20"
-                  style={inp}
-                />
-              </div>
-              <button type="button" onClick={suggest} disabled={suggestionLoading}
-                aria-label="Suggest baseline from last 14 days of data"
-                style={{ padding: '10px 14px', minHeight: 44, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
-                {suggestionLoading ? '...' : 'Suggest'}
-              </button>
-            </div>
+            <Field id="goal-baseline-date" label="Baseline date">
+              <input id="goal-baseline-date" type="date" className="field-input"
+                value={baselineDate} onChange={e => setBaselineDate(e.target.value)} required />
+            </Field>
+
+            <Field id="goal-target-val" label="Target value">
+              <input id="goal-target-val" type="number" step="any" className="field-input"
+                value={targetValue} onChange={e => setTargetValue(e.target.value)} required
+                placeholder="e.g. 0.80" />
+            </Field>
+
+            <Field id="goal-target-date" label="Target date">
+              <input id="goal-target-date" type="date" className="field-input"
+                value={targetDate} onChange={e => setTargetDate(e.target.value)} required />
+            </Field>
+
+            {formError && <p className="form-result error" role="alert">{formError}</p>}
 
             <div>
-              <label htmlFor="goal-baseline-date" style={lbl}>Baseline Date</label>
-              <input id="goal-baseline-date" type="date" value={baselineDate}
-                onChange={e => setBaselineDate(e.target.value)} required style={inp} />
+              <Button type="submit" variant="primary" disabled={createLoading}>
+                {createLoading ? 'Creating…' : 'Create goal'}
+              </Button>
             </div>
-
-            <div>
-              <label htmlFor="goal-target-val" style={lbl}>Target Value</label>
-              <input id="goal-target-val" type="number" step="any" value={targetValue}
-                onChange={e => setTargetValue(e.target.value)} required
-                placeholder="e.g. 0.80"
-                style={inp}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="goal-target-date" style={lbl}>Target Date</label>
-              <input id="goal-target-date" type="date" value={targetDate}
-                onChange={e => setTargetDate(e.target.value)} required style={inp} />
-            </div>
-
-            {formError && (
-              <p style={{ color: 'var(--error)', fontSize: 13, margin: 0 }} role="alert">{formError}</p>
-            )}
-
-            <button type="submit" disabled={createLoading}
-              style={{ padding: '10px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
-              {createLoading ? 'Creating…' : 'Create Goal'}
-            </button>
           </form>
-        </div>
+        </Panel>
       )}
     </section>
   );
@@ -532,36 +505,25 @@ function PhasePanel({ goalId, queryClient }) {
     }
   };
 
-  const inp = { width: '100%', padding: '10px 12px', minHeight: 44, background: 'var(--canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' };
-  const lbl = { display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 };
-
   return (
-    <section aria-label="Add phase change" style={{ marginBottom: 24 }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 12 }}>PHASE CHANGE</h3>
-      <div className="card">
-        <form onSubmit={add} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label htmlFor="phase-label" style={lbl}>What changed?</label>
-            <input id="phase-label" type="text" value={label} onChange={e => setLabel(e.target.value)} required
-              placeholder="e.g. Switched to visual cues" style={inp} />
-          </div>
-          <div>
-            <label htmlFor="phase-date" style={lbl}>Date of change</label>
-            <input id="phase-date" type="date" value={changedAt} onChange={e => setChangedAt(e.target.value)} required style={inp} />
-          </div>
-          <div>
-            <label htmlFor="phase-note" style={lbl}>Note (optional)</label>
-            <input id="phase-note" type="text" value={note} onChange={e => setNote(e.target.value)}
-              placeholder="Additional context" style={inp} />
-          </div>
-          {err && <p style={{ color: 'var(--error)', fontSize: 13, margin: 0 }} role="alert">{err}</p>}
-          <button type="submit"
-            style={{ alignSelf: 'flex-start', padding: '10px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
-            Mark Phase Change
-          </button>
-        </form>
-      </div>
-    </section>
+    <Panel title="Mark a phase change" titleId="phase-heading" icon={Flag} className="section">
+      <form onSubmit={add} className="form-stack">
+        <TextField id="phase-label" label="What changed?" value={label}
+          onChange={e => setLabel(e.target.value)} required
+          placeholder="e.g. Switched to visual cues" />
+        <Field id="phase-date" label="Date of change">
+          <input id="phase-date" type="date" className="field-input"
+            value={changedAt} onChange={e => setChangedAt(e.target.value)} required />
+        </Field>
+        <TextField id="phase-note" label="Note (optional)" value={note}
+          onChange={e => setNote(e.target.value)}
+          placeholder="Additional context" />
+        {err && <p className="form-result error" role="alert">{err}</p>}
+        <div>
+          <Button type="submit" variant="primary">Mark phase change</Button>
+        </div>
+      </form>
+    </Panel>
   );
 }
 
@@ -579,18 +541,15 @@ function GoalActions({ goalId, status, queryClient, onDeselect }) {
   };
   if (status !== 'active') return null;
   return (
-    <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-      <button onClick={() => updateStatus('met')} disabled={!!loading}
-        aria-label="Mark goal as met"
-        style={{ padding: '8px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: '1px solid var(--success)', background: 'transparent', color: 'var(--success)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
-        <CheckCircle2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} aria-hidden="true" />
-        {loading === 'met' ? 'Saving…' : 'Mark Met'}
-      </button>
-      <button onClick={() => updateStatus('discontinued')} disabled={!!loading}
-        aria-label="Mark goal as discontinued"
-        style={{ padding: '8px 16px', minHeight: 44, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
+    <div className="button-row">
+      <Button icon={CheckCircle2} onClick={() => updateStatus('met')} disabled={!!loading}
+        aria-label="Mark goal as met">
+        {loading === 'met' ? 'Saving…' : 'Mark met'}
+      </Button>
+      <Button variant="ghost" onClick={() => updateStatus('discontinued')} disabled={!!loading}
+        aria-label="Mark goal as discontinued">
         {loading === 'discontinued' ? 'Saving…' : 'Discontinue'}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -599,16 +558,11 @@ function GoalActions({ goalId, status, queryClient, onDeselect }) {
 // Uses the existing, already-working GET /api/teacher/analytics endpoint
 // (server/src/db.js getTeacherAnalytics()) — this data has always been
 // computed correctly, it just was never rendered anywhere in the dashboard.
-const thStyle = { textAlign: 'left', padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 600 };
-const tdStyle = { padding: '10px 14px', color: 'var(--text-primary)' };
-
-function SummaryCard({ label, value, accent }) {
-  return (
-    <div className="card" style={{ padding: '14px 16px' }}>
-      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: accent ? 'var(--accent)' : 'var(--text-primary)' }}>{value}</div>
-    </div>
-  );
+function rateTone(s) {
+  if (s.commands === 0) return '';
+  if (s.successRate >= 80) return 'good';
+  if (s.successRate >= 50) return 'fair';
+  return 'low';
 }
 
 function AnalyticsSummary() {
@@ -620,69 +574,61 @@ function AnalyticsSummary() {
   });
 
   if (isLoading) {
-    return <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading class analytics…</p>;
+    return <p className="muted-note section">Loading class analytics…</p>;
   }
   if (error) {
-    return <p style={{ fontSize: 13, color: 'var(--error)' }}>Could not load class analytics: {error.message}</p>;
+    return <Notice tone="error" className="section">Could not load class analytics: {error.message}</Notice>;
   }
 
   const { summary, students } = analytics;
 
   return (
-    <section aria-label="Class success rate summary" style={{ marginBottom: 32 }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 12 }}>
-        SUCCESS RATE — ALL STUDENTS
-      </h3>
+    <section aria-labelledby="class-summary-heading" className="section">
+      <h3 id="class-summary-heading" className="section-title">Success rate, all students</h3>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
-        <SummaryCard label="Success Rate" value={`${summary.successRate}%`} accent />
-        <SummaryCard label="Total Commands" value={summary.totalCommands} />
-        <SummaryCard label="Today" value={summary.todayCommands} />
-        <SummaryCard label="Avg Latency" value={`${summary.avgLatency}ms`} />
-        <SummaryCard label="Students" value={summary.totalStudents} />
+      <div className="stat-grid">
+        <StatTile label="Success rate" value={`${summary.successRate}%`} tone="accent" />
+        <StatTile label="Total commands" value={summary.totalCommands} />
+        <StatTile label="Today" value={summary.todayCommands} />
+        <StatTile label="Average latency" value={`${summary.avgLatency} ms`} />
+        <StatTile label="Students" value={summary.totalStudents} />
       </div>
 
       {students.length === 0 ? (
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+        <p className="muted-note">
           No students added yet — add one above to start tracking success rate.
         </p>
       ) : (
-        <div className="card" style={{ padding: 0, overflow: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <caption className="sr-only" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
+        <div className="table-wrap">
+          <table className="data-table">
+            <caption className="sr-only">
               Per-student success rate, command count, average latency, sessions in the last 7 days, most-used command, and last active time
             </caption>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={thStyle} scope="col">Student</th>
-                <th style={thStyle} scope="col">Success Rate</th>
-                <th style={thStyle} scope="col">Commands</th>
-                <th style={thStyle} scope="col">Avg Latency</th>
-                <th style={thStyle} scope="col">Sessions (7 days)</th>
-                <th style={thStyle} scope="col">Top Command</th>
-                <th style={thStyle} scope="col">Last Active</th>
+              <tr>
+                <th scope="col">Student</th>
+                <th scope="col">Success rate</th>
+                <th scope="col" className="num">Commands</th>
+                <th scope="col" className="num">Average latency</th>
+                <th scope="col" className="num">Sessions (7 days)</th>
+                <th scope="col">Top command</th>
+                <th scope="col">Last active</th>
               </tr>
             </thead>
             <tbody>
               {students.map(s => (
-                <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={tdStyle}>{s.name}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      fontWeight: 600,
-                      color: s.commands === 0 ? 'var(--text-secondary)'
-                        : s.successRate >= 80 ? 'var(--success)'
-                        : s.successRate >= 50 ? 'var(--warning)'
-                        : 'var(--error)',
-                    }}>
+                <tr key={s.id}>
+                  <th scope="row">{s.name}</th>
+                  <td>
+                    <span className={`rate ${rateTone(s)}`}>
                       {s.commands === 0 ? '—' : `${s.successRate}%`}
                     </span>
                   </td>
-                  <td style={tdStyle}>{s.commands}</td>
-                  <td style={tdStyle}>{s.avgLatency ? `${s.avgLatency}ms` : '—'}</td>
-                  <td style={tdStyle}>{s.sessionsThisWeek ?? 0}</td>
-                  <td style={tdStyle}>{s.topCommand}</td>
-                  <td style={tdStyle}>{s.lastActive}</td>
+                  <td className="num">{s.commands}</td>
+                  <td className="num">{s.avgLatency ? `${s.avgLatency} ms` : '—'}</td>
+                  <td className="num">{s.sessionsThisWeek ?? 0}</td>
+                  <td>{s.topCommand}</td>
+                  <td className="tabular">{s.lastActive}</td>
                 </tr>
               ))}
             </tbody>
@@ -750,71 +696,65 @@ function WhoIsHerePanel({ students }) {
   const selected = choice === '' ? null : choice;
 
   return (
-    <section aria-labelledby="who-heading" className="card" style={{ marginBottom: 32 }}>
-      <h3 id="who-heading" className="settings-heading">Who is using this computer</h3>
-      <p className="settings-lead" aria-live="polite">
+    <Panel title="Who is using this computer" titleId="who-heading" icon={Users} className="section"
+      aside={current
+        ? <StatusPill tone="success" label="Recording" />
+        : <StatusPill tone="neutral" label="No student" />}>
+      <p className="panel-lead" aria-live="polite">
         {current
           ? <>Recording for <strong>{current.name}</strong>{since ? ` since ${since}` : ''}. Their voice commands count toward their progress.</>
           : 'No student chosen. Voice commands are not added to anyone\'s progress until you choose one.'}
       </p>
 
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
-        <div style={{ flex: '1 1 220px' }}>
-          <label htmlFor="who-select" className="settings-label">Student at this computer</label>
-          <select id="who-select" className="settings-input" value={choice} onChange={e => setChoice(e.target.value)}>
-            <option value="">— choose a student —</option>
+      <div className="form-row">
+        <Field id="who-select" label="Student at this computer" className="grow">
+          <select id="who-select" className="field-input" value={choice} onChange={e => setChoice(e.target.value)}>
+            <option value="">Choose a student</option>
             {students.map(s => (
               <option key={s.id} value={s.id}>{s.name}{current?.id === s.id ? ' (now)' : ''}</option>
             ))}
           </select>
-        </div>
-        <button type="button" className="settings-btn primary"
+        </Field>
+        <Button variant="primary"
           disabled={!selected || choose.isPending}
           onClick={() => choose.mutate(Number(selected))}>
           {choose.isPending ? 'Starting…' : 'Start their session'}
-        </button>
+        </Button>
         {current && (
-          <button type="button" className="settings-btn quiet"
-            disabled={choose.isPending}
-            onClick={() => choose.mutate(null)}>
+          <Button disabled={choose.isPending} onClick={() => choose.mutate(null)}>
             End session
-          </button>
+          </Button>
         )}
       </div>
 
       <form
         onSubmit={e => { e.preventDefault(); if (newName.trim()) add.mutate(newName.trim()); }}
-        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}
+        className="form-row"
       >
-        <div style={{ flex: '1 1 220px' }}>
-          <label htmlFor="who-new" className="settings-label">Add a student</label>
-          <input id="who-new" className="settings-input" value={newName} maxLength={80}
-            onChange={e => setNewName(e.target.value)} placeholder="First name, or initials" autoComplete="off" />
-        </div>
-        <button type="submit" className="settings-btn quiet" disabled={!newName.trim() || add.isPending}>
+        <TextField id="who-new" label="Add a student" className="grow" value={newName} maxLength={80}
+          onChange={e => setNewName(e.target.value)} placeholder="First name, or initials" autoComplete="off" />
+        <Button type="submit" icon={PlusCircle} disabled={!newName.trim() || add.isPending}>
           {add.isPending ? 'Adding…' : 'Add student'}
-        </button>
+        </Button>
       </form>
 
       {students.length > 0 && (
-        <details style={{ marginTop: 16 }}>
-          <summary style={{ cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
-            Remove a student ({students.length})
-          </summary>
-          <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <details className="disclosure">
+          <summary>Remove a student ({students.length})</summary>
+          <ul className="remove-list">
             {students.map(s => (
-              <li key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ flex: 1, color: 'var(--text-primary)' }}>{s.name}</span>
+              <li key={s.id}>
+                <span className="remove-list-name">{s.name}</span>
                 {confirmRemove === s.id ? (
                   <>
-                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Their goals stay; their name goes.</span>
-                    <button type="button" className="settings-btn danger" disabled={remove.isPending}
-                      onClick={() => remove.mutate(s.id)}>Remove {s.name}</button>
-                    <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(null)}>Keep</button>
+                    <span className="muted-note">Their goals stay; their name goes.</span>
+                    <Button variant="danger" disabled={remove.isPending}
+                      onClick={() => remove.mutate(s.id)}>Remove {s.name}</Button>
+                    <Button onClick={() => setConfirmRemove(null)}>Keep</Button>
                   </>
                 ) : (
-                  <button type="button" className="settings-btn quiet" onClick={() => setConfirmRemove(s.id)}
-                    aria-label={`Remove ${s.name}`}>Remove</button>
+                  <Button variant="ghost" onClick={() => setConfirmRemove(s.id)}
+                    aria-label={`Remove ${s.name}`}>Remove</Button>
                 )}
               </li>
             ))}
@@ -822,34 +762,27 @@ function WhoIsHerePanel({ students }) {
         </details>
       )}
 
-      <p className={`settings-result ${result?.tone || ''}`} role="status" aria-live="polite">
+      <p className={`form-result ${result?.tone || ''}`} role="status" aria-live="polite">
         {result?.text || ''}
       </p>
-    </section>
+    </Panel>
   );
 }
 
 // ── Usage Context Strip (secondary) ──
-function UsageStrip({ studentId }) {
+function UsageStrip() {
   const { data: stats } = useQuery({
     queryKey: ['commandStats'],
     queryFn: api.getCommandStats,
     staleTime: 30000,
   });
   return (
-    <section aria-label="Usage context" style={{
-      borderTop: '1px solid var(--border)',
-      paddingTop: 12,
-      marginTop: 24,
-      display: 'flex',
-      gap: 24,
-      flexWrap: 'wrap',
-    }}>
-      <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>
-        <strong style={{ color: 'var(--text-secondary)' }}>Usage (context only):</strong>
-        {' '}{stats?.today ?? '—'} commands today
-        {stats?.avgLatency ? ` · ${stats.avgLatency}ms avg` : ''}
-        {' '}&mdash; progress data above is the primary clinical measure.
+    <section aria-label="Usage context" className="usage-strip">
+      <p>
+        <strong>Usage (context only):</strong>
+        {' '}<span className="tabular">{stats?.today ?? '—'}</span> commands today
+        {stats?.avgLatency ? <>, <span className="tabular">{stats.avgLatency}</span> ms average</> : ''}.
+        {' '}The progress data above is the main measure.
       </p>
     </section>
   );
@@ -909,13 +842,10 @@ export default function Teacher() {
   };
 
   return (
-    <div>
+    <div className="teacher-page">
       <header className="page-header">
-        <h2 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <TrendingUp size={24} aria-hidden="true" style={{ color: 'var(--accent)' }} />
-          Progress Monitoring
-        </h2>
-        <p>Tier 2 — goal-referenced progress monitoring for individual students</p>
+        <h2><TrendingUp size={28} aria-hidden="true" /> Progress monitoring</h2>
+        <p>Tier 2 goal-based progress monitoring for individual students.</p>
       </header>
 
       <WhoIsHerePanel students={students} />
@@ -923,23 +853,21 @@ export default function Teacher() {
       <AnalyticsSummary />
 
       {/* Student selector */}
-      <section aria-label="Student selection" style={{ marginBottom: 24 }}>
-        <label htmlFor="teacher-student-select" style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
-          View a student's progress
-        </label>
-        <select
-          id="teacher-student-select"
-          value={studentId || ''}
-          onChange={handleStudentChange}
-          aria-label="Select a student to view progress"
-          style={{ width: '100%', maxWidth: 360, padding: '10px 12px', minHeight: 44, background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
-        >
-          <option value="">— select a student —</option>
-          {students.map(s => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        {studentsLoading && <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 6 }}>Loading students…</p>}
+      <section aria-label="Student selection" className="section">
+        <Field id="teacher-student-select" label="View a student's progress" className="narrow"
+          hint={studentsLoading ? 'Loading students…' : undefined}>
+          <select
+            id="teacher-student-select"
+            className="field-input"
+            value={studentId || ''}
+            onChange={handleStudentChange}
+          >
+            <option value="">Select a student</option>
+            {students.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </Field>
       </section>
 
       {studentId && (
@@ -951,28 +879,25 @@ export default function Teacher() {
 
           {/* 2. Progress chart (when goal is selected and has valid dates) */}
           {selectedGoal && (
-            <section aria-label="Progress chart" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  PROGRESS — {MEASURE_REGISTRY[selectedGoal.measure]?.label?.toUpperCase()}
+            <section aria-labelledby="progress-heading" className="section">
+              <div className="section-head">
+                <h3 id="progress-heading" className="section-title">
+                  <LineChart size={22} aria-hidden="true" /> Progress: {MEASURE_REGISTRY[selectedGoal.measure]?.label?.toLowerCase()}
                 </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                <span className="muted-note tabular">
                   {points.length} point{points.length !== 1 ? 's' : ''} · {phases.length} phase{phases.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <Panel as="div" level={1}>
                 <ProgressChart goal={selectedGoal} points={points} phases={phases} />
-              </div>
+              </Panel>
 
-              {/* Goal actions */}
-              <div style={{ marginTop: 12 }}>
-                <GoalActions
-                  goalId={goalId}
-                  status={selectedGoal.status}
-                  queryClient={queryClient}
-                  onDeselect={() => { setGoalId(null); queryClient.invalidateQueries({ queryKey: ['goals', studentId, 'all'] }); }}
-                />
-              </div>
+              <GoalActions
+                goalId={goalId}
+                status={selectedGoal.status}
+                queryClient={queryClient}
+                onDeselect={() => { setGoalId(null); queryClient.invalidateQueries({ queryKey: ['goals', studentId, 'all'] }); }}
+              />
 
               {/* Phase quick-add */}
               <PhasePanel goalId={goalId} queryClient={queryClient} />
@@ -997,7 +922,7 @@ export default function Teacher() {
           />
 
           {/* 5. Secondary usage strip */}
-          <UsageStrip studentId={studentId} />
+          <UsageStrip />
         </>
       )}
     </div>
