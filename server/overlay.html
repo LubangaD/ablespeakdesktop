@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AbleSpeak Overlay</title>
 <style>
-  /* Colours, type and states follow docs/design/DESIGN.md ("Voice State Bar"). */
+  /* Student voice overlay — Stitch "8 States Side by Side" (AbleSpeak Redesign
+     System). One state = one colour + one icon + one word. */
   @font-face {
     font-family: 'Inter Variable';
     src: url('fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
@@ -20,19 +21,28 @@
   }
 
   :root {
+    --surface-0: #060e1b;
     --surface-1: #0a1628;
     --surface-2: #102038;
-    --surface-3: #172c4c;
     --text-title: #ffffff;
     --text-primary: #e2e8f0;
     --text-secondary: #94a3b8;
     --accent: #f5a623;
     --teal: #1d9e8a;
-    --success: #34d399;
-    --warning: #fbbf24;
     --error: #fb7185;
     --font-display: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
     --font-body: 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
+    /* State colours (checked for contrast on the panel) */
+    --state-idle: #94a3b8;
+    --state-listening: #68d9c3;
+    --state-hearing: #f5a623;
+    --state-working: #a78bfa;
+    --state-done: #34d399;
+    --state-failed: #fb7185;
+    --state-speaking: #38bdf8;
+    --state-dictating: #fbbf24;
+    --state-sleeping: #94a3b8;
+    --state-offline: #f97316;
   }
 
   /* ── Reset & Base ── */
@@ -56,6 +66,7 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
+    .level-bars i { transform: scaleY(0.5) !important; }
   }
 
   /* ── Container ── */
@@ -69,22 +80,32 @@
     padding: 8px;
   }
 
-  /* ── Floating panel (level 3: a voice dialog above other apps) ── */
+  /* ── Floating panel ── */
   .pill {
+    --state: var(--state-idle);
+    position: relative;
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 8px;
-    background: rgba(23, 44, 76, 0.97);
-    border: 1.5px solid rgba(255, 255, 255, 0.25);
+    width: 100%;
+    background: rgba(10, 22, 40, 0.97);
     border-radius: 24px;
-    padding: 10px 16px 12px;
-    min-width: 240px;
-    max-width: 100%;
-    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
+    padding: 12px 14px 14px;
+    box-shadow:
+      inset 0 0 0 2px color-mix(in srgb, var(--state) 60%, transparent),
+      0 8px 24px -4px rgba(0, 0, 0, 0.6);
     animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     transform-origin: bottom center;
   }
+  .pill[data-state="listening"] { --state: var(--state-listening); }
+  .pill[data-state="hearing"] { --state: var(--state-hearing); }
+  .pill[data-state="working"] { --state: var(--state-working); }
+  .pill[data-state="done"] { --state: var(--state-done); }
+  .pill[data-state="failed"] { --state: var(--state-failed); }
+  .pill[data-state="speaking"] { --state: var(--state-speaking); }
+  .pill[data-state="dictating"] { --state: var(--state-dictating); }
+  .pill[data-state="sleeping"] { --state: var(--state-sleeping); }
+  .pill[data-state="offline"] { --state: var(--state-offline); }
 
   @keyframes slideUp {
     from { opacity: 0; transform: translateY(16px); }
@@ -100,84 +121,133 @@
     to   { opacity: 0; transform: translateY(12px); }
   }
 
-  /* ── Top row: voice state + shortcut ── */
-  .overlay-top {
+  /* ── State row: icon tile, state word, live mic level ── */
+  .state-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .state-tile {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-wrap: wrap;
-    gap: 6px 12px;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--state) 16%, transparent);
+    color: var(--state);
   }
-
-  /* The state never relies on colour alone: each has its own icon and word */
-  .state-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 28px;
-    padding: 2px 12px 2px 10px;
-    border-radius: 9999px;
-    border: 1.5px solid currentColor;
-    background: var(--surface-1);
-    color: var(--text-secondary);
-    font-family: var(--font-display);
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    white-space: nowrap;
-  }
-  .state-icon { display: inline-flex; align-items: center; }
-  .state-icon svg {
-    width: 16px;
-    height: 16px;
+  .state-tile svg {
+    width: 26px;
+    height: 26px;
     fill: none;
     stroke: currentColor;
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
-  .state-chip[data-state="listening"] { color: var(--teal); box-shadow: 0 0 0 3px rgba(29, 158, 138, 0.25); }
-  .state-chip[data-state="processing"] { color: var(--warning); }
-  .state-chip[data-state="processing"] svg { animation: spin 2.4s linear infinite; }
-  .state-chip[data-state="speaking"] { color: var(--accent); background: rgba(245, 166, 35, 0.15); }
-  .state-chip[data-state="dictating"] { color: var(--warning); }
+  .pill[data-state="working"] .state-tile svg { animation: spin 2.4s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  .bars { display: inline-flex; align-items: center; gap: 2px; height: 16px; }
-  .bars i {
+  .state-words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .state-word {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    color: var(--state);
+  }
+  .state-sub {
+    font-size: 14px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Live microphone level: follows the real input, not a canned animation */
+  .level-bars {
+    --level: 0;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 32px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: var(--surface-0);
+    color: var(--state);
+  }
+  .level-bars[hidden] { display: none; }
+  .level-bars i {
     display: block;
-    width: 3px;
+    width: 4px;
     height: 100%;
     border-radius: 2px;
     background: currentColor;
-    animation: bar 1.6s ease-in-out infinite;
+    transform-origin: center;
+    transition: transform 0.08s linear;
   }
-  .bars i:nth-child(2) { animation-delay: -0.4s; }
-  .bars i:nth-child(3) { animation-delay: -0.8s; }
-  .bars i:nth-child(4) { animation-delay: -1.2s; }
+  .level-bars i:nth-child(1) { transform: scaleY(calc(0.2 + var(--level) * 0.5)); }
+  .level-bars i:nth-child(2) { transform: scaleY(calc(0.2 + var(--level) * 0.8)); }
+  .level-bars i:nth-child(3) { transform: scaleY(calc(0.2 + var(--level) * 0.95)); }
+  .level-bars i:nth-child(4) { transform: scaleY(calc(0.2 + var(--level) * 0.7)); }
+  .level-bars i:nth-child(5) { transform: scaleY(calc(0.2 + var(--level) * 0.4)); }
 
-  /* Slow and smooth: nothing flashes */
-  @keyframes bar {
-    0%, 100% { transform: scaleY(0.35); }
-    50% { transform: scaleY(1); }
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .shortcut-hint {
+  /* ── Whose session this is ── */
+  .who {
     font-size: 14px;
     color: var(--text-secondary);
+    text-align: center;
   }
 
-  .shortcut-hint kbd {
-    font-family: var(--font-body);
-    font-weight: 700;
-    color: var(--accent);
+  .who[hidden] {
+    display: none;
   }
+
+  /* ── Last command: what was heard and how it ended (always on screen) ── */
+  .last-command {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: var(--surface-0);
+  }
+
+  .last-command[hidden] {
+    display: none;
+  }
+
+  .last-heard {
+    font-size: 15px;
+    color: var(--text-title);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .last-outcome {
+    font-size: 15px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .last-outcome[data-state="working"] { color: var(--state-working); }
+  .last-outcome[data-state="done"] { color: var(--state-done); }
+  .last-outcome[data-state="failed"] { color: var(--state-failed); }
+  .last-outcome[data-state="waiting"] { color: var(--state-dictating); }
+  .last-outcome[data-state="ignored"] { color: var(--text-secondary); font-weight: 400; }
 
   /* ── Transcript / Status Area ── */
   .transcript-area {
     width: 100%;
     min-height: 0;
-    max-height: 96px;
+    max-height: 72px;
     overflow-y: auto;
     text-align: center;
   }
@@ -194,83 +264,41 @@
     overflow-wrap: break-word;
   }
 
-  .transcript-text.response {
-    color: var(--text-title);
-  }
-
-  .transcript-text.error {
-    color: var(--error);
-    font-size: 14px;
-  }
-
+  .transcript-text.response { color: var(--text-title); }
+  .transcript-text.error { color: var(--state-failed); font-size: 14px; }
   /* HFI-2: distinct from .error — nothing broke, the mic just didn't catch it */
-  .transcript-text.not-heard {
-    color: var(--warning);
-    font-size: 14px;
-  }
+  .transcript-text.not-heard { color: var(--state-dictating); font-size: 14px; }
+  .transcript-text.listening-label { color: var(--text-secondary); font-size: 14px; }
+  .transcript-text.interim { color: var(--text-secondary); font-style: italic; }
 
-  .transcript-text.listening-label {
-    color: var(--text-secondary);
-    font-size: 14px;
-  }
-
-  .transcript-text.interim {
-    color: var(--text-secondary);
-    font-style: italic;
-  }
-
-  /* ── Last command: what was heard and how it ended (always on screen) ── */
-  .last-command {
-    width: 100%;
+  /* ── Voice hint (never a keyboard shortcut) ── */
+  .hint {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 2px;
-    padding: 6px 12px;
-    border-radius: 12px;
-    background: var(--surface-1);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .last-command[hidden] {
-    display: none;
-  }
-
-  .last-heard {
+    justify-content: center;
+    gap: 6px;
+    min-height: 24px;
     font-size: 14px;
     color: var(--text-primary);
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .last-outcome {
-    font-size: 15px;
-    font-weight: 600;
     text-align: center;
   }
-
-  .last-outcome[data-state="working"] { color: var(--warning); }
-  .last-outcome[data-state="done"] { color: var(--success); }
-  .last-outcome[data-state="failed"] { color: var(--error); }
-  .last-outcome[data-state="waiting"] { color: var(--warning); }
-  .last-outcome[data-state="ignored"] { color: var(--text-secondary); font-weight: 400; }
-
-  /* ── Whose session this is ── */
-  .who {
-    font-size: 14px;
-    color: var(--text-secondary);
+  .hint svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: var(--state);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
-
-  .who[hidden] {
-    display: none;
-  }
+  .hint strong { color: var(--text-title); }
 
   /* ── Button Row (12px apart) ── */
   .btn-row {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 12px;
   }
 
@@ -321,23 +349,21 @@
   }
 
   .btn-mic.listening {
-    background: rgba(29, 158, 138, 0.22);
-    border: 2px solid var(--teal);
+    background: color-mix(in srgb, var(--state) 20%, var(--surface-2));
+    border: 2px solid var(--state);
     color: var(--text-title);
-    box-shadow: 0 0 0 4px rgba(29, 158, 138, 0.25);
   }
 
   .btn-mic.processing {
-    background: rgba(251, 191, 36, 0.14);
-    border: 2px solid var(--warning);
-    color: var(--warning);
+    background: color-mix(in srgb, var(--state-working) 16%, var(--surface-2));
+    border: 2px solid var(--state-working);
+    color: var(--state-working);
   }
 
   .btn-mic.dictating {
-    background: rgba(251, 191, 36, 0.14);
-    border: 2px solid var(--warning);
+    background: color-mix(in srgb, var(--state-dictating) 16%, var(--surface-2));
+    border: 2px solid var(--state-dictating);
     color: var(--text-title);
-    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.2);
   }
 
   /* ── Speaking state — the mic becomes a stop button (octagon icon) ── */
@@ -349,7 +375,7 @@
 
   /* ── Continuous-listening toggle ── */
   .btn.loop-on {
-    background: rgba(29, 158, 138, 0.22);
+    background: color-mix(in srgb, var(--teal) 22%, var(--surface-2));
     border-color: var(--teal);
     color: var(--text-title);
   }
@@ -357,16 +383,16 @@
 </head>
 <body>
 <div class="overlay-root" role="application" aria-label="AbleSpeak Voice Overlay">
-  <div class="pill" id="pill">
-    <!-- Voice state (the mic button's label says the same thing to screen readers) -->
-    <div class="overlay-top" aria-hidden="true">
-      <div class="state-chip" id="stateChip" data-state="idle">
-        <span class="state-icon" id="stateIcon"></span>
-        <span id="stateLabel">MIC OFF</span>
+  <div class="pill" id="pill" data-state="idle">
+    <!-- Voice state: one colour + one icon + one word (the mic button's
+         label says the same thing to screen readers) -->
+    <div class="state-row" aria-hidden="true">
+      <span class="state-tile" id="stateIcon"></span>
+      <div class="state-words">
+        <span class="state-word" id="stateLabel">MIC OFF</span>
+        <span class="state-sub" id="stateSub">The microphone is off</span>
       </div>
-      <div class="shortcut-hint">
-        Dictate <kbd>Ctrl + Shift + A</kbd>
-      </div>
+      <span class="level-bars" id="levelBars" hidden><i></i><i></i><i></i><i></i><i></i></span>
     </div>
 
     <!-- Whose progress this computer is recording -->
@@ -382,6 +408,9 @@
     <div class="transcript-area" id="transcriptArea" aria-live="assertive" aria-atomic="true" role="status">
       <div class="transcript-text" id="transcriptText"></div>
     </div>
+
+    <!-- What to say next (never a keyboard shortcut) -->
+    <div class="hint" id="hint" aria-hidden="true"></div>
 
     <!-- Button row -->
     <div class="btn-row" role="toolbar" aria-label="Voice controls">
@@ -570,6 +599,7 @@ if (!window.electronAPI) {
     if (!turnOpen) return;
     turnOpen = false;
     showOutcome(kind, text);
+    noteResult(kind);
   }
 
   // How to listen for the student now at the computer: a quiet speaker
@@ -628,40 +658,110 @@ if (!window.electronAPI) {
     return said;
   }
 
-  // ── Voice state chip (DESIGN.md "Voice State Bar") ──
-  // State changes happen in many places (TTS, sleep, dictation, recovery), so
-  // the chip is refreshed from the UI helpers below and on a short timer.
-  const stateChip = document.getElementById('stateChip');
+  // ── Voice state (Stitch "8 States Side by Side") ──
+  // State changes happen in many places (TTS, sleep, dictation, recovery,
+  // reconnects), so the panel is refreshed from the UI helpers below and on a
+  // short timer. Every state comes from something real: the connection, the
+  // mic level, the last command's result, speech output, dictation or sleep.
   const stateIcon = document.getElementById('stateIcon');
   const stateLabel = document.getElementById('stateLabel');
+  const stateSub = document.getElementById('stateSub');
+  const levelBars = document.getElementById('levelBars');
+  const hintEl = document.getElementById('hint');
   const svg = paths => `<svg viewBox="0 0 24 24">${paths}</svg>`;
-  const STATE_CHIP = {
-    idle: { label: 'MIC OFF', icon: svg('<line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/>') },
-    listening: { label: 'LISTENING', icon: '<span class="bars"><i></i><i></i><i></i><i></i></span>' },
-    processing: { label: 'PROCESSING', icon: svg('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>') },
-    speaking: { label: 'SPEAKING', icon: svg('<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>') },
-    dictating: { label: 'DICTATING', icon: svg('<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/>') },
-    sleeping: { label: 'SLEEPING', icon: svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>') },
+  const ICON = {
+    mic: svg('<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>'),
+    micOff: svg('<line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/>'),
+    audio: svg('<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/>'),
+    loader: svg('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>'),
+    check: svg('<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>'),
+    alert: svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
+    volume: svg('<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>'),
+    pen: svg('<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/>'),
+    moon: svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'),
+    wifiOff: svg('<path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/>'),
+    bulb: svg('<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>'),
   };
+  // Hints name only phrases the server acts on (fast-commands.js, ws-proxy.js)
+  const TRY = ['scroll down', 'open a new tab', 'go back', 'start dictation', 'go to sleep'];
+  const say = phrase => `Say <strong>“${phrase}”</strong>`;
+  const STATES = {
+    idle: { word: 'MIC OFF', sub: 'The microphone is off', icon: ICON.micOff, hints: ['Press the microphone button to start'] },
+    listening: { word: 'LISTENING', sub: 'Say a command', icon: ICON.mic, bars: true, hints: TRY.map(p => `Try saying <strong>“${p}”</strong>`) },
+    hearing: { word: 'HEARING', sub: 'Pause when you have finished', icon: ICON.audio, bars: true, hints: ['Keep talking — I am listening'] },
+    working: { word: 'WORKING', sub: 'Doing what you asked', icon: ICON.loader, hints: [`${say('stop')} to cancel`] },
+    done: { word: 'DONE', sub: 'That worked', icon: ICON.check, hints: [`Wrong one? ${say('undo that')}`] },
+    failed: { word: "DIDN'T WORK", sub: 'Try saying it another way', icon: ICON.alert, hints: ['Say it again, a little differently'] },
+    speaking: { word: 'SPEAKING', sub: 'Reading the answer aloud', icon: ICON.volume, hints: [`${say('stop')} or press the stop button`] },
+    dictating: { word: 'DICTATING', sub: 'Typing what you say', icon: ICON.pen, bars: true, hints: [`${say('stop dictating')} when you are done`] },
+    sleeping: { word: 'SLEEPING', sub: 'Not acting on commands', icon: ICON.moon, hints: [say('wake up')] },
+    offline: { word: 'OFFLINE', sub: 'Reconnecting to AbleSpeak…', icon: ICON.wifiOff, hints: ['It reconnects by itself'] },
+  };
+  const RESULT_MS = 4000;   // how long DONE / DIDN'T WORK stays up
+  const HEARING_MS = 700;   // speech this recent counts as "hearing"
+  let lastHeardAt = 0;
+  let resultState = null;   // { kind: 'done' | 'failed', until }
   let shownState = null;
+  let shownHint = null;
+
+  // Called by the recording loop with the current mic level
+  function noteMicLevel(avg) {
+    if (avg >= SPEECH_THRESHOLD) lastHeardAt = Date.now();
+    const level = Math.max(0, Math.min(1, avg / (SPEECH_THRESHOLD * 1.6)));
+    levelBars.style.setProperty('--level', level.toFixed(2));
+  }
+
+  function noteResult(kind) {
+    if (kind === 'done' || kind === 'failed') resultState = { kind, until: Date.now() + RESULT_MS };
+    refreshStateChip();
+  }
 
   function currentStateKind() {
+    const now = Date.now();
+    if (!wsConnected) return 'offline';
     if (ttsActive) return 'speaking';
-    if (state === 'processing') return 'processing';
-    if (state === 'listening') return sleeping ? 'sleeping' : dictationMode ? 'dictating' : 'listening';
+    if (state === 'processing') return 'working';
+    const listening = state === 'listening';
+    if (listening && !sleeping && now - lastHeardAt < HEARING_MS) return dictationMode ? 'dictating' : 'hearing';
+    if (resultState && now < resultState.until) return resultState.kind;
+    if (listening) return sleeping ? 'sleeping' : dictationMode ? 'dictating' : 'listening';
     return 'idle';
   }
 
   function refreshStateChip() {
-    const kind = currentStateKind();
-    if (kind === shownState) return;
-    shownState = kind;
-    stateChip.dataset.state = kind;
-    stateIcon.innerHTML = STATE_CHIP[kind].icon;
-    stateLabel.textContent = STATE_CHIP[kind].label;
+    let kind;
+    try { kind = currentStateKind(); } catch { return; } // still starting up
+    const def = STATES[kind];
+    const hint = def.hints[Math.floor(Date.now() / 6000) % def.hints.length];
+    if (kind !== shownState) {
+      shownState = kind;
+      pill.dataset.state = kind;
+      stateIcon.innerHTML = def.icon;
+      stateLabel.textContent = def.word;
+      stateSub.textContent = def.sub;
+      levelBars.hidden = !def.bars;
+      if (!def.bars) levelBars.style.setProperty('--level', '0');
+    }
+    if (hint !== shownHint) {
+      shownHint = hint;
+      hintEl.innerHTML = ICON.bulb + `<span>${hint}</span>`;
+    }
   }
-  refreshStateChip();
+  setTimeout(refreshStateChip, 0);
   setInterval(refreshStateChip, 400);
+
+  // Clicks outside the panel go to the app underneath
+  if (window.electronAPI.setClickThrough) {
+    let overPanel = null;
+    window.electronAPI.setClickThrough(true);
+    document.addEventListener('mousemove', (e) => {
+      const over = !!e.target.closest('#pill');
+      if (over !== overPanel) {
+        overPanel = over;
+        window.electronAPI.setClickThrough(!over);
+      }
+    });
+  }
 
   function setListeningUI() {
     state = 'listening';
@@ -1241,6 +1341,7 @@ if (!window.electronAPI) {
         if (elapsed > maxRecordMs()) { recorder.stop(); return; }
         levels.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        noteMicLevel(avg);
         if (avg >= SPEECH_THRESHOLD) {
           hasSpeechDetected = true;
           lastSpeechAt = now;

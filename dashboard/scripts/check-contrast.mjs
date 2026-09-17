@@ -36,6 +36,15 @@ const pairs = [
   ['on-accent', 'teal', 4.5],      // text on a selected chip
 ];
 
+// The student overlay has its own colours (server/overlay.html): each state
+// colour is used for words and outcome text on the panel, so it needs 4.5:1.
+const overlay = readFileSync(new URL('../../server/overlay.html', import.meta.url), 'utf8');
+const overlayRoot = overlay.match(/:root\s*\{([\s\S]*?)\n\s*\}/)[1];
+for (const [, name, hex] of overlayRoot.matchAll(/--(state-[a-z]+):\s*(#[0-9a-f]{6})\b/gi)) {
+  tokens[`overlay-${name}`] = hex.toLowerCase();
+  pairs.push([`overlay-${name}`, 'surface-1', 4.5]);
+}
+
 let failed = 0;
 for (const [fg, bg, min] of pairs) {
   if (!tokens[fg] || !tokens[bg]) {

@@ -407,7 +407,7 @@ function createOverlay() {
 
   // Position at bottom-center of screen
   const overlayW = 420;
-  const overlayH = 280; // room for the state row, last-command lines and live text at 14px+
+  const overlayH = 340; // state row, last command, live text, hint and buttons; clicks outside the panel pass through
   const x = Math.round((screenW - overlayW) / 2);
   const y = screenH - overlayH - 20;
 
@@ -747,6 +747,15 @@ function setupOverlayIPC() {
   ipcMain.on('overlay-show', () => {
     if (overlayWindow && !overlayWindow.isVisible()) {
       showOverlayWindow();
+    }
+  });
+
+  // The transparent area around the panel passes clicks to the app below.
+  // `forward` keeps mouse-move events coming, so the overlay can take clicks
+  // again as soon as the pointer is over the panel.
+  ipcMain.on('overlay-click-through', (event, ignore) => {
+    if (overlayWindow && !overlayWindow.isDestroyed() && event.sender === overlayWindow.webContents) {
+      overlayWindow.setIgnoreMouseEvents(!!ignore, { forward: true });
     }
   });
 

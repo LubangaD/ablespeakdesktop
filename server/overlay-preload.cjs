@@ -87,4 +87,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showDashboard: () => {
     ipcRenderer.send('show-dashboard');
   },
+
+  // Let clicks outside the panel reach the app underneath (true) or not (false)
+  setClickThrough: (ignore) => {
+    ipcRenderer.send('overlay-click-through', !!ignore);
+  },
 });
