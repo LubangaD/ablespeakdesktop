@@ -296,8 +296,13 @@ The page structure and the student overlay follow the Stitch project "AbleSpeak 
 ### Dashboard structure (Stitch "Home & Live Health")
 - Six sections: Home, Students, Speech profile, Test console, Developer hub (Prompt, Tools, Context and Logs as tabs), Settings. The older addresses redirect.
 - A top bar shows the student in session and the voice state reported by `/api/status` (listening, asleep, hidden, privacy mode).
-- Home shows only real data: the session, live health for the gateway, speech model, Chrome helper and voice control, today's numbers, a live feed of what was said and what ran, and one-click listening sensitivity. "Pause voice" sends "go to sleep", exactly as if it was said.
-- Shown in the Stitch screen but left out, because the app has no real data for them yet: the gateway IP and daemon restart, the microphone device and input gain, token rate, acoustic confidence, the mirrored overlay preview, and the facilitator profile.
+- Home follows the Stitch screen's own order and card anatomy: session hero → live system health → today's numbers → the intent pipeline beside the speech engine controls (the 7 / 5 split).
+  - **Five health cards** — gateway, speech brain, Chrome helper, voice control, screen reading. Each is an icon, a status pill, a label, one big value, two facts, and one full-width action: open logs, change model, see web tools, pause or resume voice, stop or allow screen reading. The pause and privacy buttons send "go to sleep", "wake up", "privacy mode" and "vision on" over the dashboard WebSocket, exactly as if they had been said.
+  - **Four number tiles** — commands today (with the all-time total and the most-used command), success rate across students with a bar, average latency today, and either the student's first-time rate with a bar or the number of students.
+  - **The intent pipeline** keeps what was said, the tools that ran and how long it took, since the page opened. It can be filtered to what didn't work, and exported to a JSON file for a test run; the full history is the Developer hub's log.
+  - **Speech engine controls** are the three real sensitivity presets and the student's saved words, with a link to their speech profile.
+  - The sidebar's gateway box shows how long the server takes to answer, measured in the dashboard rather than reported by the server.
+- Shown in the Stitch screen but left out, because the app has no real data for them yet: the gateway IP and daemon restart, the microphone device and input gain, token rate, acoustic confidence, gaze rate and buffer mode, the overlay lock toggle, the mirrored overlay preview, and the facilitator profile and avatar.
 
 ### Where each rule lives
 - Tokens: `:root` in `dashboard/src/index.css`. The overlay has its own `:root` at the top of its `<style>`.

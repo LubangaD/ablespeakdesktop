@@ -137,6 +137,32 @@ function SessionBar() {
   );
 }
 
+// How long the gateway takes to answer, measured here rather than reported
+function GatewayFooter({ connected }) {
+  const { data: roundTrip } = useQuery({
+    queryKey: ['gatewayPing'],
+    queryFn: async () => {
+      const started = performance.now();
+      await api.getHealth();
+      return Math.round(performance.now() - started);
+    },
+    refetchInterval: 10000,
+    enabled: connected,
+  });
+
+  return (
+    <div className="sidebar-footer">
+      <span className="sidebar-footer-label" id="gateway-label">AbleSpeak gateway</span>
+      {connected
+        ? <StatusPill tone="success" icon={Plug} label="Connected" aria-describedby="gateway-label" />
+        : <StatusPill tone="error" icon={Unplug} label="Offline" aria-describedby="gateway-label" />}
+      {connected && roundTrip != null && (
+        <span className="sidebar-footer-note">Answers in <span className="tabular">{roundTrip} ms</span></span>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [connected, setConnected] = useState(false);
 
@@ -170,12 +196,7 @@ export default function App() {
           </div>
 
           {/* Is the dashboard talking to the AbleSpeak server? */}
-          <div className="sidebar-footer">
-            <span className="sidebar-footer-label" id="gateway-label">AbleSpeak gateway</span>
-            {connected
-              ? <StatusPill tone="success" icon={Plug} label="Connected" aria-describedby="gateway-label" />
-              : <StatusPill tone="error" icon={Unplug} label="Offline" aria-describedby="gateway-label" />}
-          </div>
+          <GatewayFooter connected={connected} />
         </nav>
         <main id="main-content" className="main-content" role="main">
           <SessionBar />
