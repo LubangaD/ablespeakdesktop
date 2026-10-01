@@ -10,6 +10,7 @@
 import { runPowerShell, listVisibleWindows } from './system-tools.js';
 import { pickWindow } from './app-names.js';
 import { logResolution } from './db.js';
+import { readOfficeContext, describeOfficeContext } from './office-uia.js';
 
 const CACHE_MS = 4000;
 const REF_RE = /^-?\d+(\.-?\d+)*$/;
@@ -103,12 +104,15 @@ export async function screenContextForAgent({ extensionConnected = false, limit 
     if (extensionConnected && BROWSERS.has(String(win.process).toLowerCase())) return null;
     const model = await getScreenModel({ target: win, maxElements: 150 });
     if (model.status !== 'success' || !model.elements.length) return null;
+    // Excel and Word also say what is in the cell or word the student is on.
+    const office = describeOfficeContext(await readOfficeContext(win).catch(() => null));
     return {
       window: model.window,
       app: model.app,
       total: model.total,
       truncated: model.total > limit,
       summary: describeElements(model, limit),
+      ...(office ? { office } : {}),
     };
   })().catch(() => null);
   const late = new Promise(resolve => setTimeout(() => resolve(null), timeoutMs));

@@ -12,6 +12,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolveAppName, pickWindow } from './app-names.js';
 import { SCREEN_MODEL_CS } from './uia/screen-model-cs.js';
+import { OFFICE_UIA_CS } from './uia/office-uia-cs.js';
 
 const execAsync = promisify(exec);
 
@@ -1045,6 +1046,14 @@ try {
         [System.Windows.Rect].Assembly.Location)
 } catch {
     [Console]::Error.WriteLine("ScreenModel did not compile: " + $_.Exception.Message)
+}
+$officeUiaSource = @'
+${OFFICE_UIA_CS}
+'@
+try {
+    Add-Type -TypeDefinition $officeUiaSource -ErrorAction Stop -ReferencedAssemblies System.Drawing
+} catch {
+    [Console]::Error.WriteLine("OfficeUia did not compile: " + $_.Exception.Message)
 }
 function Get-TargetWindow([string]$app) {
     if ($app) {
