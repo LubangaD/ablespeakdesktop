@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   classifyConsequential,
   isAffirmative,
+  isEchoOf,
   detectHallucination,
 } from './safety.js';
 
@@ -165,4 +166,20 @@ test('a real command is not mistaken for an echo of unrelated TTS', () => {
     detectHallucination('scroll down', { lastTTS: 'Opening Gmail in a new tab now' }).hallucination,
     false,
   );
+});
+
+// ── isEchoOf: the confirmation question heard back through the mic ──
+const CLOSE_PROMPT = 'Close this window? Any unsaved work could be lost. Say yes to confirm or anything else to cancel.';
+
+test('the question coming back through the mic is an echo, not an answer', () => {
+  // Both heard on 2026-10-01 while closing Word.
+  assert.ok(isEchoOf('Say yes to confirm or anything else to cancel.', CLOSE_PROMPT));
+  assert.ok(isEchoOf('lost\nYes to confirm or anything else to cancel\nYes to confirm', CLOSE_PROMPT));
+  assert.ok(isEchoOf('any unsaved work could be lost', CLOSE_PROMPT));
+});
+
+test('real answers are never taken for an echo', () => {
+  for (const answer of ['yes', 'Yes.', 'no', 'yes close it', 'Yes, close the document.', 'Yes, close this window', 'no leave it open', 'cancel']) {
+    assert.ok(!isEchoOf(answer, CLOSE_PROMPT), answer);
+  }
 });

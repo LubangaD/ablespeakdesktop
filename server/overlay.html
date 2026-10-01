@@ -515,7 +515,14 @@ if (!window.electronAPI) {
   let ttsActive = false;         // True while TTS audio is playing (mutes the mic — Gap 3)
   const TTS_COOLDOWN_MS = 2500;  // Wait after TTS finishes before re-opening the mic
   let ttsWatchdog = null;        // Failsafe: force-clears ttsActive if 'done' is ever lost
-  const TTS_MAX_MS = 10000;      // Max plausible TTS duration — shorter to prevent mic deadlock
+  // The mic re-opens on the main process's 'done'. If that is ever lost, these
+  // failsafes re-open it — timed from when the audio starts, and long enough
+  // for the sentence: a fixed 10 s from the request used to re-open the mic
+  // mid-question, so AbleSpeak heard "…yes to confirm or anything else to
+  // cancel" and took its own words as the student's answer.
+  const TTS_START_MAX_MS = 25000; // making the audio (up to 10 s) and starting the player
+  const ttsPlayMaxMs = (text) => Math.min(60000, 4000 + String(text || '').length * 90);
+  let ttsTexts = [];              // sentences waiting to play, oldest first, for the playing failsafe
 
   // SVG icons — swapped on the mic button depending on state
   const MIC_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
@@ -527,6 +534,16 @@ if (!window.electronAPI) {
   // Browser speechSynthesis fails silently in transparent Electron windows.
   // Route through the main process instead.
 
+  function armTtsWatchdog(ms) {
+    if (ttsWatchdog) clearTimeout(ttsWatchdog);
+    ttsWatchdog = setTimeout(() => {
+      console.warn('[TTS] Watchdog fired — no done event; re-enabling mic');
+      ttsActive = false;
+      ttsTexts = [];
+      if (active && state !== 'listening') { setIdleUI(); startListening(); }
+    }, ms);
+  }
+
   function speak(text) {
     if (!text) return null;
 
@@ -537,14 +554,11 @@ if (!window.electronAPI) {
     if (window.electronAPI && window.electronAPI.speak) {
       console.log(`[TTS] Speaking via Electron TTS: "${text.slice(0, 50)}..."`);
       ttsActive = true;
+      if (!ttsActive) ttsTexts = []; // nothing is playing: anything left over was stopped
+      ttsTexts.push(text);
       // Failsafe: if the main process never sends 'tts-state' 'done' (e.g. the
       // window is destroyed mid-speech), force-clear so the mic can't deadlock.
-      if (ttsWatchdog) clearTimeout(ttsWatchdog);
-      ttsWatchdog = setTimeout(() => {
-        console.warn('[TTS] Watchdog fired — no done event; re-enabling mic');
-        ttsActive = false;
-        if (active && state !== 'listening') { setIdleUI(); startListening(); }
-      }, TTS_MAX_MS);
+      armTtsWatchdog(TTS_START_MAX_MS + ttsPlayMaxMs(ttsTexts.join(' ')));
       window.electronAPI.speak(text);
       return null;
     }
@@ -1576,6 +1590,8 @@ if (!window.electronAPI) {
     window.electronAPI.onTTSState((s) => {
       if (s === 'speaking') {
         ttsActive = true;
+        // The audio is starting: give it as long as the sentence needs.
+        armTtsWatchdog(ttsPlayMaxMs(ttsTexts[0]));
         // Turn the mic button into a stop button so the user can interrupt
         btnMic.innerHTML = STOP_SVG;
         btnMic.className = 'btn btn-mic speaking';
@@ -1589,6 +1605,7 @@ if (!window.electronAPI) {
         }
       } else if (s === 'done') {
         ttsActive = false;
+        ttsTexts.shift(); // that sentence has finished
         // Restore the mic button
         btnMic.innerHTML = MIC_SVG;
         if (ttsWatchdog) { clearTimeout(ttsWatchdog); ttsWatchdog = null; }

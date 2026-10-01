@@ -4,10 +4,11 @@ import { insertCommand, updateCommandOutcome, upsertHealthCheck, logVoiceTurn } 
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
-import { isAffirmative, isNegative } from './safety.js';
+import { isAffirmative, isNegative, isEchoOf } from './safety.js';
 import { normaliseProfile, listeningSettings, expandAlias, findMacro } from './student-profile.js';
 import { toolFailed, aiCommandFailed } from './tool-outcome.js';
 import { TaskAgent, needsPlan } from './agent.js';
+import { spokenWindowName } from './app-names.js';
 
 // Phrases that resume normal operation from sleep OR bring the overlay back
 // from a voice "dismiss" (HFI-1) — shared so the two recovery paths never drift.
@@ -1235,10 +1236,11 @@ export class WsProxy {
         console.log(`[Voice] ✏️ Dictation mode ${this._dictationMode ? 'ON' : 'OFF'}`);
 
         // Capture/clear the target window HWND
+        let target = null;
         if (this._dictationMode) {
           try {
             const { captureDictationTarget } = await import('./system-tools.js');
-            await captureDictationTarget();
+            target = await captureDictationTarget();
           } catch (err) {
             console.error('[Voice] Failed to capture dictation target:', err.message);
           }
@@ -1252,9 +1254,11 @@ export class WsProxy {
         this._broadcastDashboard({
           type: 'dictation_mode',
           enabled: this._dictationMode,
+          // Say where the words will go, so a wrong window is caught at once.
           say: this._dictationMode
-            ? 'Dictation mode on.'
+            ? (spokenWindowName(target?.title) ? `Dictation mode on. Typing into ${spokenWindowName(target.title)}.` : 'Dictation mode on.')
             : 'Dictation mode off. Back to commands.',
+          ...(this._dictationMode && target?.title ? { target: target.title } : {}),
           timestamp: new Date().toISOString(),
         });
 
@@ -1632,6 +1636,14 @@ export class WsProxy {
    */
   async _resolvePendingConfirmation(text, startTime = Date.now()) {
     if (!this._pendingConfirmation) return false;
+    // The microphone heard the question itself ("…yes to confirm or anything
+    // else to cancel"): keep waiting for the student's own answer.
+    if (isEchoOf(text, this._pendingConfirmation.prompt)) {
+      console.log(`[Voice] 🔇 Heard our own question back — still waiting for yes or no: "${text.slice(0, 60)}"`);
+      this._markTurn('filtered');
+      this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+      return true;
+    }
     const pending = this._pendingConfirmation;
     this._pendingConfirmation = null;
     const commandId = uuidv4();

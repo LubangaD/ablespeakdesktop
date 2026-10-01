@@ -85,3 +85,14 @@ export function pickWindow(windows, spoken) {
     || candidates.find(w => words.every(word => title(w).includes(word)))
     || null;
 }
+
+/**
+ * A window title short enough to say aloud: "Essay - Word" → "Essay in Word",
+ * "notepad - Read-Only - Last saved by user - Word" → "notepad in Word".
+ */
+export function spokenWindowName(title) {
+  const parts = String(title || '').split(/\s+[-—–]\s+/).map(p => p.replace(/[‪-‮]/g, '').trim()).filter(Boolean);
+  if (!parts.length) return '';
+  const name = parts.length > 1 ? `${parts[0]} in ${parts[parts.length - 1]}` : parts[0];
+  return name.length > 60 ? `${name.slice(0, 57)}...` : name;
+}

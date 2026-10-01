@@ -6,7 +6,7 @@
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { findElement, defaultAction, describeElements } from './screen-model.js';
+import { findElement, defaultAction, describeElements, TEXT_SCOPES, findDocument, isCacheFresh } from './screen-model.js';
 import { classifyConsequential } from './safety.js';
 import { ToolRegistry } from './tool-registry.js';
 
@@ -62,6 +62,42 @@ test('the summary gives the model refs, actions and state', () => {
   assert.equal(lines[6], '7 Button "Next page" [invoke] (disabled)');
 });
 
+test('a slider shows the number on screen and its position on the app\'s own scale', () => {
+  // As Word shows its zoom: 100% is position 1000 of 0-2000.
+  const zoom = { ref: '9', type: 'Slider', name: 'Zoom', rect: [0, 0, 10, 10], actions: ['set_range'], value: '100', range: [1000, 0, 2000] };
+  assert.equal(describeElements({ elements: [zoom] }), '9 Slider "Zoom" [set_range] (value "100", position 1000 of 0–2000)');
+});
+
+test('"read this" means the focused text, else the document, else a field', () => {
+  const doc = { ref: 'd', type: 'Document', name: 'Essay', actions: ['scroll', 'read_text'] };
+  const field = { ref: 'f', type: 'Edit', name: 'Search', actions: ['set_value', 'read_text'] };
+  const button = { ref: 'b', type: 'Button', name: 'Save', actions: ['invoke'], focused: true };
+  assert.equal(findDocument({ elements: [button, field, doc] }).ref, 'd', 'a focused button is not text');
+  assert.equal(findDocument({ elements: [doc, { ...field, focused: true }] }).ref, 'f');
+  assert.equal(findDocument({ elements: [button, field] }).ref, 'f');
+  assert.equal(findDocument({ elements: [button] }), null);
+});
+
+test('a cached read is reused only while it is recent and focus has not moved', () => {
+  const win = { hwnd: '10', title: 'Essay - Word' };
+  const cached = { hwnd: '10', title: 'Essay - Word', at: 1000, focusChanges: 7, model: { elements: [{}, {}], total: 2 } };
+  assert.ok(isCacheFresh(cached, win, { now: 2000 }), 'recent, focus not checked yet');
+  assert.ok(isCacheFresh(cached, win, { now: 2000, focusChanges: 7 }), 'focus has not moved');
+  assert.ok(!isCacheFresh(cached, win, { now: 2000, focusChanges: 8 }), 'focus moved: read again');
+  assert.ok(!isCacheFresh(cached, win, { now: 9000, focusChanges: 7 }), 'too old, even with focus still');
+  assert.ok(!isCacheFresh(cached, { ...win, title: 'Other - Word' }, { now: 2000 }), 'another window');
+  assert.ok(isCacheFresh(cached, win, { now: 2000, focusChanges: -1 }), 'no watch: timing alone');
+  assert.ok(isCacheFresh({ ...cached, focusChanges: -1 }, win, { now: 2000, focusChanges: 9 }), 'read before the watch began: timing alone');
+  const partial = { ...cached, model: { elements: [{}, {}], total: 5 } };
+  assert.ok(!isCacheFresh(partial, win, { now: 2000, maxElements: 50 }), 'fewer controls kept than now wanted');
+  assert.ok(!isCacheFresh(null, win));
+});
+
+test('read_text knows how much of a document to read', () => {
+  for (const scope of ['all', 'selection', 'word', 'line', 'paragraph', 'page']) assert.ok(TEXT_SCOPES.has(scope), scope);
+  assert.ok(!TEXT_SCOPES.has('sentence'), 'UI Automation has no sentence unit');
+});
+
 test('pressing a Delete or Send control through uia_act asks first', () => {
   assert.equal(classifyConsequential('uia_act', { name: 'Delete' })?.id, 'delete');
   assert.equal(classifyConsequential('uia_act', { name: 'Send', action: 'invoke' })?.id, 'send');
@@ -98,6 +134,21 @@ test('the C# reader compiles and answers for a window that does not exist', { sk
   assert.ok(['NO_WINDOW', 'READ_FAILED'].includes(snapshot.error), JSON.stringify(snapshot));
   const act = JSON.parse(await runPowerShell(`[ScreenModel]::Act([long]1, '1.2', 'invoke', '')`, 20000));
   assert.ok(['NO_WINDOW', 'NOT_FOUND'].includes(act.error), JSON.stringify(act));
+});
+
+test('the worker listens for focus changes', { skip: process.platform !== 'win32' }, async () => {
+  const { runPowerShell } = await import('./system-tools.js');
+  // Registering runs in the background and can take several seconds.
+  let changes = -1;
+  for (let waited = 0; changes < 0 && waited < 30000; waited += 500) {
+    changes = parseInt(await runPowerShell('[ScreenModel]::FocusChanges()', 60000), 10);
+    if (changes < 0) await new Promise(r => setTimeout(r, 500));
+  }
+  const why = await runPowerShell('[ScreenModel]::FocusWatchError', 5000);
+  assert.ok(changes >= 0, `the watch is running (got ${changes}${why ? `: ${why}` : ''})`);
+  const last = JSON.parse(await runPowerShell('[ScreenModel]::LastFocus()', 20000));
+  assert.equal(last.changes >= changes, true);
+  assert.equal(typeof last.name, 'string');
 });
 
 test('text from speech reaches PowerShell intact and cannot break out of its quotes', { skip: process.platform !== 'win32' }, async () => {

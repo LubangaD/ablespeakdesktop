@@ -147,6 +147,29 @@ export function isAffirmative(text) {
   return AFFIRMATIVES.test(String(text || '').trim());
 }
 
+/**
+ * Whether what was heard is AbleSpeak's own question coming back through the
+ * microphone ("…yes to confirm or anything else to cancel"), not the
+ * student's answer. Needs four of the question's words in their order, and
+ * mostly its words: "yes", "yes close it" and "yes, close this window" are
+ * answers, because the question never says them in that order. An echo of
+ * a question about deleting must never count as a yes, nor as a no.
+ */
+export function isEchoOf(heard, spoken) {
+  const words = text => String(text || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
+  const said = words(spoken);
+  const got = words(heard);
+  if (got.length < 4 || said.length < 4) return false;
+  const saidText = ` ${said.join(' ')} `;
+  let inOrder = false;
+  for (let i = 0; i + 4 <= got.length && !inOrder; i++) {
+    inOrder = saidText.includes(` ${got.slice(i, i + 4).join(' ')} `);
+  }
+  if (!inOrder) return false;
+  const vocabulary = new Set(said);
+  return got.filter(w => vocabulary.has(w)).length / got.length >= 0.7;
+}
+
 // ── 2. Hallucination / noise / echo detection ─────────────────────────────
 
 export const HALLUCINATION_PHRASES = [

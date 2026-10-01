@@ -86,7 +86,10 @@ class PSWorker {
     // prints a sentinel after each. (NOTE: `powershell -Command -` is NOT
     // usable here — it buffers stdin until EOF instead of streaming.)
     this.workerFile = join(tmpdir(), 'ablespeak_psworker.ps1');
+    // Only this long-lived worker listens for focus changes (the screen
+    // model's cache uses them); one-off fallback processes do not.
     const workerLoop = `
+try { [ScreenModel]::StartFocusWatch() | Out-Null } catch {}
 Write-Output "PSWORKER_READY"
 while ($true) {
     $line = [Console]::In.ReadLine()
@@ -810,7 +813,7 @@ let _dictationTarget = null; // { hwnd, pid, title }
 export async function captureDictationTarget() {
   _dictationTarget = await userWindow();
   console.log(`[Dictation] Target: ${_dictationTarget ? `"${_dictationTarget.title}" (${_dictationTarget.hwnd})` : 'none'}`);
-  return _dictationTarget ? Number(_dictationTarget.hwnd) : null;
+  return _dictationTarget; // { hwnd, title, ... } or null
 }
 
 export function clearDictationTarget() {
@@ -999,7 +1002,13 @@ public class Win32Input {
         uint fgThread = GetWindowThreadProcessId(fg, out pid);
         uint myThread = GetCurrentThreadId();
         if (fgThread != myThread) AttachThreadInput(myThread, fgThread, true);
+        // An Alt press lets this process take the foreground. A bare Alt
+        // release would open the menu keys in the app (Office's ribbon then
+        // takes focus from the document), so an unassigned key (0xE8) is
+        // tapped in between, as AutoHotkey does.
         keybd_event(0x12, 0, 0, 0);
+        keybd_event(0xE8, 0, 0, 0);
+        keybd_event(0xE8, 0, 2, 0);
         keybd_event(0x12, 0, 2, 0);
         bool ok = SetForegroundWindow(hWnd);
         if (!ok) { BringWindowToTop(hWnd); SwitchToThisWindow(hWnd, true); ok = true; }

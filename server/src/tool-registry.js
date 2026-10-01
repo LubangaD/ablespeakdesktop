@@ -784,7 +784,7 @@ const TOOLS = [
   // ── Desktop UI Automation — see and click anything in ANY desktop app ──
   {
     name: 'uia_query',
-    description: "Read the controls in a desktop app window through Windows accessibility — fast, no screenshot needed. Returns each control's ref, type, name, position, state (focused, toggled, expanded, selected, current value) and the actions it supports: invoke, set_value, toggle, expand_collapse, select, scroll, scroll_into_view, read_text. Use this first to understand any desktop app, then act with uia_act using a ref. Omit app_name for the window the student is using.",
+    description: "Read the controls in a desktop app window through Windows accessibility — fast, no screenshot needed. Returns each control's ref, type, name, position, state (focused, toggled, expanded, selected, current value, slider position) and the actions it supports: invoke, set_value, toggle, expand_collapse, select, scroll, scroll_into_view, read_text, set_range. Use this first to understand any desktop app, then act with uia_act using a ref. Omit app_name for the window the student is using.",
     parameters: {
       type: 'object',
       properties: {
@@ -816,7 +816,7 @@ const TOOLS = [
   },
   {
     name: 'uia_act',
-    description: "Act on a control in a desktop app through its own accessibility action — press a button (invoke), switch a checkbox (toggle), pick a list or tab item (select), open or close a menu or tree item (expand / collapse), replace a field's text (set_value, with value), scroll a pane (scroll_up / scroll_down / scroll_left / scroll_right), bring a control into view (scroll_into_view), read a document's text (read_text) or move focus (focus). Give the ref from uia_query, or the control's name. Leave action out to press it. Prefer this to clicking screen coordinates.",
+    description: "Act on a control in a desktop app through its own accessibility action — press a button (invoke), switch a checkbox (toggle), pick a list or tab item (select), open or close a menu or tree item (expand / collapse), replace a field's text (set_value, with value), scroll a pane (scroll_up / scroll_down / scroll_left / scroll_right), bring a control into view (scroll_into_view), move a slider or spinner (set_range, with value a position on the min–max scale uia_query shows; that scale is the app's own and may not be the number on screen, so check what the result says it now shows and move again if needed), read a document's text (read_text; value picks how much: selection, word, line, paragraph, page, or all by default; with no ref or name it reads the document the student is in, at their cursor) or move focus (focus). Give the ref from uia_query, or the control's name. Leave action out to press it. Prefer this to clicking screen coordinates.",
     parameters: {
       type: 'object',
       properties: {
@@ -825,16 +825,17 @@ const TOOLS = [
         app_name: { type: 'string', description: 'The app containing it. Omit for the window the student is using.' },
         action: {
           type: 'string',
-          enum: ['invoke', 'toggle', 'select', 'expand', 'collapse', 'set_value', 'focus', 'scroll_into_view', 'scroll_up', 'scroll_down', 'scroll_left', 'scroll_right', 'read_text'],
+          enum: ['invoke', 'toggle', 'select', 'expand', 'collapse', 'set_value', 'focus', 'scroll_into_view', 'scroll_up', 'scroll_down', 'scroll_left', 'scroll_right', 'read_text', 'set_range'],
           description: 'What to do. Omit to press the control.',
         },
-        value: { type: 'string', description: 'Text for set_value.' },
+        value: { type: 'string', description: 'Text for set_value; a number for set_range; for read_text, how much: selection, word, line, paragraph, page or all.' },
         type: { type: 'string', description: 'Only match controls of this type (e.g. "Button", "Edit") when using name.' },
       },
     },
     selector: {},
     execute: async (args, wsHub) => {
-      if (!args.ref && !args.name) return { status: 'error', message: "Give a ref from uia_query or the control's name." };
+      // read_text alone reads the document in front ("read this paragraph").
+      if (!args.ref && !args.name && args.action !== 'read_text') return { status: 'error', message: "Give a ref from uia_query or the control's name." };
       const { actOnElement } = await import('./screen-model.js');
       return actOnElement({ ...args, app: args.app_name, studentId: studentOf(wsHub) });
     },

@@ -343,7 +343,13 @@ export class AIEngine {
     const mediaCount = context.pageContext?.mediaElements?.length || 0;
     const activeUrl = context.activeTab?.url || 'none';
     const hasScreenshot = !!context.screenshot;
-    console.log(`[AIEngine] Context: ${vpCount} viewport elements, ${mediaCount} media, active: ${activeUrl}${hasScreenshot ? ', +screenshot' : ''}`);
+    // The desktop window the student is in, when it is not the browser: the
+    // browser's tab is always reported, so without this every command looked
+    // as if the AI thought the student was in Chrome.
+    const desk = context.screenModel?.window
+      ? `, desktop: "${String(context.screenModel.window).slice(0, 60)}" (${context.screenModel.summary ? `${context.screenModel.total} controls` : 'controls not read in time'}${context.screenModel.office ? ', +office' : ''})`
+      : '';
+    console.log(`[AIEngine] Context: ${vpCount} viewport elements, ${mediaCount} media, browser tab: ${activeUrl}${desk}${hasScreenshot ? ', +screenshot' : ''}`);
 
     // Add user message to history
     this.conversationHistory.push({ role: 'user', content: userText });
@@ -566,7 +572,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '',
       '### Desktop UI Control — through each app\'s own controls (like having hands)',
       '- **Read the window first**: `uia_query` lists the controls in a desktop window through Windows accessibility — ref, type, name, state and the actions each supports. The controls of the window the student is using are often already listed below under "Controls in".',
-      '- **Act through the control**: `uia_act` with a ref presses buttons (invoke), switches checkboxes (toggle), picks tabs and list items (select), opens menus (expand), types into a field (set_value), scrolls a pane, or reads a document (read_text). This is reliable and does not move the mouse.',
+      '- **Act through the control**: `uia_act` with a ref presses buttons (invoke), switches checkboxes (toggle), picks tabs and list items (select), opens menus (expand), types into a field (set_value), scrolls a pane, moves a slider to a number (set_range), or reads a document (read_text, with value "selection", "line", "paragraph" etc. for "read what I selected" / "read this paragraph"). This is reliable and does not move the mouse.',
       '- **By name**: `click_desktop_element` with the visible name also works in every Windows app — it uses the same accessibility actions.',
       '- **Screen positions are the fallback**: only when a control is not in the uia_query list (some apps draw their own controls), use the SCREENSHOT to find it and call `click_desktop_element` with x and y.',
       '- **Read a window**: `read_desktop_window`, or `uia_act` with action "read_text" on a Document control.',
@@ -683,12 +689,22 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
     }
 
     // ── Screen model (Stage 2): the desktop window's controls, when known ──
-    if (context.screenModel?.elements?.length) {
+    // (screenContextForAgent sends a summary, not the elements themselves.)
+    if (context.screenModel?.summary) {
       const model = context.screenModel;
       parts.push('', `## Controls in "${model.window}" (${model.app}) — the window the student is using`);
       parts.push('Format: ref Type "name" [actions] (state). Act with `uia_act` using the ref. If what the student wants is not here, use the screenshot and click_desktop_element with x and y.');
       parts.push(model.summary);
       if (model.truncated) parts.push(`(${model.total} controls in total; call uia_query with a name to find others.)`);
+      if (model.office) parts.push('', '### Where the student is in the document', model.office);
+    } else if (context.screenModel?.window) {
+      // The controls were too slow to read, but which app is in front is known.
+      const model = context.screenModel;
+      parts.push('', `## The student is using "${model.window}" (${model.app})`);
+      parts.push('Its controls were not read in time: call uia_query to see them, then act with uia_act.');
+    }
+    if (context.screenModel?.window) {
+      parts.push(`"This", "here" and "the zoom" mean ${context.screenModel.app}, not the browser: browser tools (zoom_tab, click_element, scroll_page and the like) only act on a Chrome tab. Use them only if the student names the browser or a website.`);
     }
 
     // ── Extension status — be honest with the user when browser control is unavailable ──

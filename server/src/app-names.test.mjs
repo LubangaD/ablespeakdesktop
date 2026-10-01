@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveAppName, pickWindow } from './app-names.js';
+import { resolveAppName, pickWindow, spokenWindowName } from './app-names.js';
 import { matchFastCommand } from './fast-commands.js';
 
 // Front-to-back, as listVisibleWindows() returns them.
@@ -74,4 +74,12 @@ test('page and option phrases keep their own meaning', () => {
   assert.equal(matchFastCommand('go to settings').tool, 'navigate_dashboard');
   assert.equal(matchFastCommand('Go to the top').tool, 'scroll_to_top');
   assert.equal(matchFastCommand('Switch to dark mode').tool, 'select_option');
+});
+
+test('a window is named briefly enough to say aloud', () => {
+  assert.equal(spokenWindowName('Essay - Word'), 'Essay in Word');
+  assert.equal(spokenWindowName('notepad  -  Read-Only  -  Last saved by user - Word'), 'notepad in Word');
+  assert.equal(spokenWindowName('Untitled - Notepad'), 'Untitled in Notepad');
+  assert.equal(spokenWindowName('Spotify Premium'), 'Spotify Premium');
+  assert.equal(spokenWindowName(''), '');
 });

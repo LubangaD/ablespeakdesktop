@@ -16,8 +16,11 @@ const CACHE_MS = 4000;
 const REF_RE = /^-?\d+(\.-?\d+)*$/;
 const ACTIONS = new Set([
   'invoke', 'toggle', 'select', 'expand', 'collapse', 'set_value', 'focus',
-  'scroll_into_view', 'scroll_up', 'scroll_down', 'scroll_left', 'scroll_right', 'read_text',
+  'scroll_into_view', 'scroll_up', 'scroll_down', 'scroll_left', 'scroll_right', 'read_text', 'set_range',
 ]);
+
+// How much of a document read_text reads: the value given with it.
+export const TEXT_SCOPES = new Set(['all', 'selection', 'word', 'line', 'paragraph', 'page']);
 
 let cache = null; // { hwnd, title, at, model }
 
@@ -47,9 +50,12 @@ export async function getScreenModel({ app, fresh = false, maxElements = 150, ta
   if (!win) {
     return { status: 'error', message: app ? `I couldn't find an open window for "${app}".` : 'There is no window to read.' };
   }
-  const reuse = !fresh && cache && cache.hwnd === win.hwnd && cache.title === win.title
-    && Date.now() - cache.at < CACHE_MS && cache.model.elements.length >= Math.min(maxElements, cache.model.total);
-  if (reuse) return cache.model;
+  // Within the time limit, a read is reused only if focus has not moved
+  // since (one cheap call instead of reading the whole window again).
+  if (!fresh && isCacheFresh(cache, win, { maxElements })) {
+    const changes = await focusChanges();
+    if (isCacheFresh(cache, win, { maxElements, focusChanges: changes })) return cache.model;
+  }
 
   const started = Date.now();
   const limit = Math.max(1, Math.min(400, Math.floor(maxElements)));
@@ -86,8 +92,34 @@ ${snapshot}`
     readMs: parsed.readMs,
     ms: Date.now() - started,
   };
-  cache = { hwnd: win.hwnd, title: win.title, at: Date.now(), model };
+  cache = { hwnd: win.hwnd, title: win.title, at: Date.now(), focusChanges: parsed.focusChanges ?? -1, model };
   return model;
+}
+
+/**
+ * Whether a cached read still describes the window: the same window, read
+ * recently, with enough controls, and (when the worker is watching focus,
+ * so focusChanges >= 0) keyboard focus has not moved since. Focus can only
+ * make a read stale early, never keep one longer: typing changes a field
+ * without moving focus.
+ */
+export function isCacheFresh(cached, win, { maxElements = 150, focusChanges = undefined, now = Date.now() } = {}) {
+  if (!cached || cached.hwnd !== win.hwnd || cached.title !== win.title) return false;
+  if (now - cached.at >= CACHE_MS) return false;
+  if (cached.model.elements.length < Math.min(maxElements, cached.model.total)) return false;
+  if (focusChanges === undefined) return true; // not asked yet
+  if (focusChanges < 0 || cached.focusChanges < 0) return true; // no watch: timing only
+  return focusChanges === cached.focusChanges;
+}
+
+/** How often focus has moved, from the worker's watch; -1 if unknown. */
+async function focusChanges() {
+  try {
+    const n = parseInt(await runPowerShell('[ScreenModel]::FocusChanges()', 3000), 10);
+    return Number.isFinite(n) ? n : -1;
+  } catch {
+    return -1;
+  }
 }
 
 const BROWSERS = new Set(['chrome', 'msedge', 'brave', 'firefox', 'opera']);
@@ -98,10 +130,15 @@ const BROWSERS = new Set(['chrome', 'msedge', 'brave', 'firefox', 'opera']);
  * page itself. Never waits long: a slow read is dropped, not waited for.
  */
 export async function screenContextForAgent({ extensionConnected = false, limit = 60, timeoutMs = 1500 } = {}) {
+  const started = Date.now();
+  let win;
+  try { win = await resolveTargetWindow(); } catch { return null; }
+  if (!win) return null;
+  if (extensionConnected && BROWSERS.has(String(win.process).toLowerCase())) return null;
+  // Which app is in front is always worth saying, even when its controls
+  // take too long to read: without it the AI assumes the browser.
+  const inFront = { window: win.title, app: win.process, summary: null };
   const read = (async () => {
-    const win = await resolveTargetWindow();
-    if (!win) return null;
-    if (extensionConnected && BROWSERS.has(String(win.process).toLowerCase())) return null;
     const model = await getScreenModel({ target: win, maxElements: 150 });
     if (model.status !== 'success' || !model.elements.length) return null;
     // Excel and Word also say what is in the cell or word the student is on.
@@ -115,8 +152,9 @@ export async function screenContextForAgent({ extensionConnected = false, limit 
       ...(office ? { office } : {}),
     };
   })().catch(() => null);
-  const late = new Promise(resolve => setTimeout(() => resolve(null), timeoutMs));
-  return Promise.race([read, late]);
+  const left = Math.max(0, timeoutMs - (Date.now() - started));
+  const late = new Promise(resolve => setTimeout(() => resolve(null), left));
+  return (await Promise.race([read, late])) || inFront;
 }
 
 /** One line per control, for the model's prompt. */
@@ -129,6 +167,7 @@ export function describeElements(model, limit = 60) {
       e.expanded ? e.expanded : '',
       e.selected ? 'selected' : '',
       e.value ? `value "${e.value.slice(0, 40)}"` : '',
+      e.range ? `position ${e.range[0]} of ${e.range[1]}–${e.range[2]}` : '',
     ].filter(Boolean).join(', ');
     const actions = e.actions.length ? ` [${e.actions.join(', ')}]` : '';
     return `${e.ref} ${e.type} "${e.name}"${actions}${state ? ` (${state})` : ''}`;
@@ -168,6 +207,18 @@ export function findElement(model, name, { type } = {}) {
   return best;
 }
 
+/**
+ * The text the student means by "read this": the focused control that can be
+ * read, else the window's document, else its first readable field.
+ */
+export function findDocument(model) {
+  const readable = model.elements.filter(e => e.actions.includes('read_text'));
+  return readable.find(e => e.focused)
+    || readable.find(e => e.type === 'Document')
+    || readable.find(e => e.type === 'Edit')
+    || null;
+}
+
 /** What "press it" means for this control. */
 export function defaultAction(element) {
   const has = a => element.actions.includes(a);
@@ -193,12 +244,16 @@ export async function actOnElement({ app, ref, name, type, action, value, studen
 
   const element = ref
     ? model.elements.find(e => e.ref === ref)
-    : findElement(model, name, { type });
+    : name ? findElement(model, name, { type })
+    : action === 'read_text' ? findDocument(model)
+    : null;
   if (!element) {
     record({ app: model.app, method: 'not_found', action, started, studentId });
     return {
       status: 'error',
-      message: `I couldn't find "${name || ref}" in ${model.window}.`,
+      message: name || ref
+        ? `I couldn't find "${name || ref}" in ${model.window}.`
+        : `There is no document to read in ${model.window}.`,
       notFound: true,
     };
   }
@@ -206,6 +261,13 @@ export async function actOnElement({ app, ref, name, type, action, value, studen
   const chosen = action || defaultAction(element);
   if (!ACTIONS.has(chosen)) return { status: 'error', message: `Unknown action "${chosen}"` };
   if (!REF_RE.test(element.ref)) return { status: 'error', message: 'That control cannot be reached' };
+
+  if (chosen === 'set_range' && !Number.isFinite(Number(value))) {
+    return { status: 'error', message: 'Give the number to set it to, as value.' };
+  }
+  if (chosen === 'read_text' && value && !TEXT_SCOPES.has(value)) {
+    return { status: 'error', message: `read_text reads ${[...TEXT_SCOPES].join(', ')}.` };
+  }
 
   const raw = await runPowerShell(
     `[ScreenModel]::Act([long]${Number(model.hwnd)}, ${psQuote(element.ref)}, ${psQuote(chosen)}, ${psQuote(value)})`,
@@ -229,15 +291,19 @@ export async function actOnElement({ app, ref, name, type, action, value, studen
   record({ app: model.app, method: 'uia', action: chosen, started, studentId, found: true, ok: true });
   return {
     status: 'success',
-    message: describeDone(chosen, element, value),
+    // A slider stops at its ends, so say where it actually went.
+    message: describeDone(chosen, element, result.value !== undefined ? result.value : value, result.shown),
     action: chosen,
     element: { ref: element.ref, type: element.type, name: element.name },
     window: model.window,
     ...(result.text !== undefined ? { text: result.text } : {}),
+    ...(result.scope !== undefined ? { scope: result.scope } : {}),
+    ...(result.value !== undefined ? { value: result.value, min: result.min, max: result.max } : {}),
+    ...(result.shown !== undefined ? { shown: result.shown } : {}),
   };
 }
 
-function describeDone(action, element, value) {
+function describeDone(action, element, value, shown) {
   const label = element.name || element.type;
   switch (action) {
     case 'invoke': return `Pressed "${label}"`;
@@ -247,7 +313,8 @@ function describeDone(action, element, value) {
     case 'collapse': return `Closed "${label}"`;
     case 'set_value': return `Typed "${String(value ?? '').slice(0, 60)}" into "${label}"`;
     case 'focus': return `Moved to "${label}"`;
-    case 'read_text': return `Read "${label}"`;
+    case 'read_text': return value && value !== 'all' ? `Read the ${value} in "${label}"` : `Read "${label}"`;
+    case 'set_range': return `Moved "${label}" to position ${value}${shown ? `; it now shows "${shown}"` : ''}`;
     default: return `${action.replace(/_/g, ' ')} on "${label}"`;
   }
 }

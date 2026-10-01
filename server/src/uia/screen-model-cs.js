@@ -15,6 +15,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Windows.Automation;
+using System.Windows.Automation.Text;
 
 public static class ScreenModel {
     static readonly AutomationProperty[] Available = {
@@ -58,6 +59,10 @@ public static class ScreenModel {
         request.Add(ExpandCollapsePattern.ExpandCollapseStateProperty);
         request.Add(SelectionItemPattern.Pattern);
         request.Add(SelectionItemPattern.IsSelectedProperty);
+        request.Add(RangeValuePattern.Pattern);
+        request.Add(RangeValuePattern.ValueProperty);
+        request.Add(RangeValuePattern.MinimumProperty);
+        request.Add(RangeValuePattern.MaximumProperty);
         return request;
     }
 
@@ -77,6 +82,11 @@ public static class ScreenModel {
             else json.Append(c);
         }
         json.Append('"');
+    }
+
+    static string Num(double value) {
+        if (double.IsNaN(value) || double.IsInfinity(value)) return "0";
+        return Math.Round(value, 2).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     static string Error(string code, string message) {
@@ -103,6 +113,8 @@ public static class ScreenModel {
     // The window's controls, front to back in reading order, as JSON.
     public static string Snapshot(long hwnd, int maxElements) {
         Stopwatch timer = Stopwatch.StartNew();
+        // Taken before reading, so a move during the read marks it stale.
+        long focusBefore = FocusChanges();
         if (IsIconic(new IntPtr(hwnd))) return Error("MINIMIZED", "The window is minimized");
         AutomationElement root;
         string windowName;
@@ -185,6 +197,14 @@ public static class ScreenModel {
             }
             object selected = Cached(element, SelectionItemPattern.IsSelectedProperty);
             if (selected is bool && (bool)selected) json.Append(",\"selected\":true");
+            // A slider or spinner: where it is, and how far it goes.
+            object rangeValue = Cached(element, RangeValuePattern.ValueProperty);
+            object rangeMin = Cached(element, RangeValuePattern.MinimumProperty);
+            object rangeMax = Cached(element, RangeValuePattern.MaximumProperty);
+            if (rangeValue is double && rangeMin is double && rangeMax is double) {
+                json.Append(",\"range\":[").Append(Num((double)rangeValue)).Append(',')
+                    .Append(Num((double)rangeMin)).Append(',').Append(Num((double)rangeMax)).Append(']');
+            }
             json.Append('}');
 
             if (actions.Count > 0) actionable.Add(json.ToString()); else readable.Add(json.ToString());
@@ -204,6 +224,7 @@ public static class ScreenModel {
         result.Append(",\"actionable\":").Append(actionable.Count);
         result.Append(",\"truncated\":").Append(actionable.Count + readable.Count > kept.Count ? "true" : "false");
         result.Append(",\"readMs\":").Append(readMs);
+        result.Append(",\"focusChanges\":").Append(focusBefore);
         result.Append(",\"ms\":").Append(timer.ElapsedMilliseconds);
         result.Append(",\"elements\":[").Append(string.Join(",", kept.ToArray())).Append("]}");
         return result.ToString();
@@ -296,11 +317,40 @@ public static class ScreenModel {
                     else pattern.ScrollHorizontal(forward);
                     break;
                 }
+                case "set_range": {
+                    RangeValuePattern pattern = (RangeValuePattern)element.GetCurrentPattern(RangeValuePattern.Pattern);
+                    if (pattern.Current.IsReadOnly) return Error("READ_ONLY", "That control cannot be changed");
+                    double wanted;
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out wanted)) {
+                        return Error("BAD_VALUE", "set_range needs a number");
+                    }
+                    wanted = Math.Max(pattern.Current.Minimum, Math.Min(pattern.Current.Maximum, wanted));
+                    pattern.SetValue(wanted);
+                    // The position is on the app's own scale (Word's zoom runs
+                    // 0-2000 for 10-500%), so also report what the control shows.
+                    Thread.Sleep(150);
+                    string shown = null;
+                    object valuePattern;
+                    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out valuePattern)) {
+                        try { shown = ((ValuePattern)valuePattern).Current.Value; } catch { }
+                    }
+                    StringBuilder json = new StringBuilder("{\"ok\":true,\"action\":\"set_range\",\"name\":");
+                    Str(json, name);
+                    json.Append(",\"value\":").Append(Num(pattern.Current.Value));
+                    json.Append(",\"min\":").Append(Num(pattern.Current.Minimum));
+                    json.Append(",\"max\":").Append(Num(pattern.Current.Maximum));
+                    if (!string.IsNullOrEmpty(shown)) { json.Append(",\"shown\":"); Str(json, shown); }
+                    return json.Append('}').ToString();
+                }
                 case "read_text": {
                     TextPattern pattern = (TextPattern)element.GetCurrentPattern(TextPattern.Pattern);
-                    string text = pattern.DocumentRange.GetText(4000);
+                    string scope = string.IsNullOrEmpty(value) ? "all" : value;
+                    string text = ReadText(pattern, scope);
+                    if (text == null) return Error("BAD_VALUE", "read_text reads all, selection, word, line, paragraph or page");
                     StringBuilder json = new StringBuilder("{\"ok\":true,\"action\":\"read_text\",\"name\":");
                     Str(json, name);
+                    json.Append(",\"scope\":");
+                    Str(json, scope);
                     json.Append(",\"text\":");
                     Str(json, text);
                     return json.Append('}').ToString();
@@ -326,6 +376,104 @@ public static class ScreenModel {
         Str(done, name);
         done.Append(",\"finished\":").Append(finished ? "true" : "false");
         return done.Append('}').ToString();
+    }
+
+    // Part of a document's text: all of it, what is selected, or the word,
+    // line, paragraph or page the cursor is in. Null for an unknown scope.
+    static string ReadText(TextPattern pattern, string scope) {
+        if (scope == "all") return pattern.DocumentRange.GetText(4000);
+        TextPatternRange[] selection = pattern.GetSelection();
+        if (scope == "selection") {
+            StringBuilder text = new StringBuilder();
+            foreach (TextPatternRange range in selection) {
+                if (text.Length > 0) text.Append('\n');
+                text.Append(range.GetText(4000 - text.Length));
+                if (text.Length >= 4000) break;
+            }
+            return text.ToString();
+        }
+        TextUnit unit;
+        switch (scope) {
+            case "word": unit = TextUnit.Word; break;
+            case "line": unit = TextUnit.Line; break;
+            case "paragraph": unit = TextUnit.Paragraph; break;
+            case "page": unit = TextUnit.Page; break;
+            default: return null;
+        }
+        // The cursor is the (possibly empty) selection; with none, the start.
+        TextPatternRange around = selection.Length > 0 ? selection[0].Clone() : pattern.DocumentRange.Clone();
+        if (selection.Length == 0) around.MoveEndpointByRange(TextPatternRangeEndpoint.End, around, TextPatternRangeEndpoint.Start);
+        around.ExpandToEnclosingUnit(unit);
+        return around.GetText(4000);
+    }
+
+    // ── Focus events ──
+    // UI Automation tells listeners when keyboard focus moves, so a cached
+    // read can be checked for staleness without reading the window again.
+    // The handler runs on a UIA thread: it only counts and notes what took
+    // focus, nothing slow.
+    static long focusChanges = 0;
+    static int focusPid = 0;
+    static string focusName = "";
+    static string focusType = "";
+    static long focusAt = 0;
+    static AutomationFocusChangedEventHandler focusHandler;
+
+    // Registered from a background MTA thread, as Microsoft advises for UIA
+    // clients: PowerShell's own thread is STA and sits blocked reading input.
+    // Registering can take several seconds (it reaches every top-level
+    // window), so nothing waits for it: until it is done FocusChanges() is
+    // -1 and the cache goes by time alone. Returns false if already starting.
+    static int focusWatchStarting = 0;
+    public static string FocusWatchError = "";
+
+    public static bool StartFocusWatch() {
+        if (focusHandler != null || Interlocked.Exchange(ref focusWatchStarting, 1) == 1) return false;
+        Thread thread = new Thread(delegate () {
+            try {
+                AutomationFocusChangedEventHandler handler = new AutomationFocusChangedEventHandler(OnFocusChanged);
+                Automation.AddAutomationFocusChangedEventHandler(handler);
+                focusHandler = handler;
+            } catch (Exception e) {
+                FocusWatchError = e.GetType().Name + ": " + e.Message;
+                focusWatchStarting = 0; // let a later call try again
+            }
+        });
+        thread.SetApartmentState(ApartmentState.MTA);
+        thread.IsBackground = true;
+        thread.Start();
+        return true;
+    }
+
+    static void OnFocusChanged(object sender, AutomationFocusChangedEventArgs e) {
+        Interlocked.Increment(ref focusChanges);
+        focusAt = DateTime.UtcNow.Ticks;
+        AutomationElement element = sender as AutomationElement;
+        if (element == null) return;
+        try {
+            focusPid = element.Current.ProcessId;
+            focusName = element.Current.Name ?? "";
+            focusType = element.Current.ControlType == null ? "" : element.Current.ControlType.ProgrammaticName.Replace("ControlType.", "");
+        } catch { }
+    }
+
+    /** -1 while no watch is running, so callers fall back to timing. */
+    public static long FocusChanges() {
+        return focusHandler == null ? -1 : Interlocked.Read(ref focusChanges);
+    }
+
+    /** What last took focus, as JSON. */
+    public static string LastFocus() {
+        StringBuilder json = new StringBuilder("{\"changes\":");
+        json.Append(FocusChanges());
+        json.Append(",\"pid\":").Append(focusPid);
+        json.Append(",\"type\":");
+        Str(json, focusType);
+        json.Append(",\"name\":");
+        Str(json, focusName.Length > 120 ? focusName.Substring(0, 120) : focusName);
+        long ageMs = focusAt == 0 ? -1 : (DateTime.UtcNow.Ticks - focusAt) / TimeSpan.TicksPerMillisecond;
+        json.Append(",\"ageMs\":").Append(ageMs);
+        return json.Append('}').ToString();
     }
 
     public static long Foreground() {
