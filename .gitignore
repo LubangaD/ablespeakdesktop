@@ -26,6 +26,13 @@ banner_to_pdf.js
 *.local
 *.db
 
+# People's data on this computer: the database and the encrypted sign-in (account.bin)
+server/data/
+account.bin
+
+# Local Claude Code settings
+.claude/
+
 # OS files
 .DS_Store
 Thumbs.db
