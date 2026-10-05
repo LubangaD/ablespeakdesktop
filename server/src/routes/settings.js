@@ -6,6 +6,8 @@
  *   PUT    /api/settings/keys/:provider   check a key with its provider, then save it
  *   DELETE /api/settings/keys/:provider   remove a key
  *   POST   /api/settings/provider         switch provider/model and remember the choice
+ *   GET    /api/settings/shared-computer  is this device marked as a shared/lab PC?
+ *   PUT    /api/settings/shared-computer  turn that marking on or off
  *
  * Saved keys apply immediately: the AI engine and voice transcription read
  * process.env on every call, and this router updates process.env after the
@@ -22,6 +24,7 @@ import { Router } from 'express';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { maskSecret, readEnvFile, removeEnvValue, setEnvValue, writeEnvFile } from '../env-file.js';
+import { isSharedComputer, setSharedComputer, isGuestAccountName, currentWindowsAccountName } from '../shared-computer.js';
 
 const SERVER_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -32,25 +35,19 @@ export function defaultEnvPath() {
 
 // Speech-to-text always uses Gemini, whichever chat provider is active (voice-handler.js).
 const VOICE_KEY = 'GEMINI_API_KEY';
-const AZURE_ENDPOINT = 'AZURE_OPENAI_ENDPOINT';
-const AZURE_DEPLOYMENT = 'AZURE_OPENAI_DEPLOYMENT';
 
 const KEY_RE = /^[A-Za-z0-9._~+/-]{8,512}$/;
 const MODEL_RE = /^[A-Za-z0-9._:/-]{1,128}$/;
-const DEPLOYMENT_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
 const KEY_PAGES = {
   gemini: 'https://aistudio.google.com/apikey',
   openai: 'https://platform.openai.com/api-keys',
   anthropic: 'https://console.anthropic.com/settings/keys',
-  groq: 'https://console.groq.com/keys',
-  azure: 'https://portal.azure.com/',
 };
 
 const CHECKS = {
   gemini: key => ({ url: `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(key)}` }),
   openai: key => ({ url: 'https://api.openai.com/v1/models', headers: { Authorization: `Bearer ${key}` } }),
-  groq: key => ({ url: 'https://api.groq.com/openai/v1/models', headers: { Authorization: `Bearer ${key}` } }),
   anthropic: key => ({
     url: 'https://api.anthropic.com/v1/models?limit=1',
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
@@ -80,30 +77,43 @@ const LOOPBACK_IPS = new Set(['127.0.0.1', '::1']);
 const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 
-export function localOnly(req, res, next) {
+/** The request came from this computer, by its own address and page. */
+export function isFromThisComputer(req) {
   const ip = (req.socket.remoteAddress || '').replace('::ffff:', '');
   const origin = req.headers.origin;
-  const fromThisComputer = LOOPBACK_IPS.has(ip)
+  return LOOPBACK_IPS.has(ip)
     && LOOPBACK_HOST.test(req.headers.host || '')
     && (origin === undefined || LOOPBACK_ORIGIN.test(origin));
-  if (!fromThisComputer) {
+}
+
+export function localOnly(req, res, next) {
+  if (!isFromThisComputer(req)) {
     return res.status(403).json({ error: 'Settings can only be changed from the AbleSpeak dashboard on this computer.' });
   }
   next();
 }
 
-function isHttpsUrl(value) {
-  if (/[\s#"'\\]/.test(value)) return false;
-  try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export function createSettingsRouter({ aiEngine, envPath = defaultEnvPath, verifyKey = checkKeyWithProvider }) {
   const router = Router();
   router.use(localOnly);
+
+  // ── Shared computer (Phase 2 Step 1) ──
+  // An admin marks a school lab PC as shared, once, from Settings. On a
+  // shared device the Windows account name is never used to open or create a
+  // profile (student-session.js), so two learners sharing a login never share
+  // data. guestAccount tells the dashboard whether THIS run's Windows account
+  // already looks generic (Guest, Student0…), which is a hint worth a prompt
+  // even before anyone has ticked the box.
+  router.get('/shared-computer', (req, res) => {
+    res.json({ shared: isSharedComputer(), guestAccount: isGuestAccountName(currentWindowsAccountName()) });
+  });
+
+  router.put('/shared-computer', (req, res) => {
+    const { shared } = req.body || {};
+    if (typeof shared !== 'boolean') return res.status(400).json({ error: 'shared must be true or false' });
+    setSharedComputer(shared);
+    res.json({ shared: isSharedComputer(), guestAccount: isGuestAccountName(currentWindowsAccountName()) });
+  });
 
   const resolvePath = () => (typeof envPath === 'function' ? envPath() : envPath);
 
@@ -140,9 +150,6 @@ export function createSettingsRouter({ aiEngine, envPath = defaultEnvPath, verif
       active: id === status.provider,
       usedForVoice: p.envKey === VOICE_KEY,
       keyPage: KEY_PAGES[id] || null,
-      ...(id === 'azure'
-        ? { endpoint: process.env[AZURE_ENDPOINT] || '', deployment: process.env[AZURE_DEPLOYMENT] || '' }
-        : {}),
     }));
     providers.sort((a, b) => Number(b.usedForVoice) - Number(a.usedForVoice));
     return {
@@ -165,19 +172,6 @@ export function createSettingsRouter({ aiEngine, envPath = defaultEnvPath, verif
       return res.status(400).json({ error: "That doesn't look like an API key. Paste the whole key, with no spaces." });
     }
     const updates = { [config.envKey]: key };
-
-    if (id === 'azure') {
-      const endpoint = String(req.body?.endpoint ?? '').trim();
-      const deployment = String(req.body?.deployment ?? '').trim();
-      if (!isHttpsUrl(endpoint)) {
-        return res.status(400).json({ error: 'Azure OpenAI also needs its endpoint, starting with https://' });
-      }
-      if (deployment && !DEPLOYMENT_RE.test(deployment)) {
-        return res.status(400).json({ error: 'The deployment name can only use letters, numbers, dots, dashes and underscores.' });
-      }
-      updates[AZURE_ENDPOINT] = endpoint;
-      updates[AZURE_DEPLOYMENT] = deployment || null;
-    }
 
     const check = await verifyKey(id, key, config.name);
     if (check.verified === false) {
@@ -213,7 +207,6 @@ export function createSettingsRouter({ aiEngine, envPath = defaultEnvPath, verif
     const [id, config] = entry;
 
     const updates = { [config.envKey]: null };
-    if (id === 'azure') Object.assign(updates, { [AZURE_ENDPOINT]: null, [AZURE_DEPLOYMENT]: null });
     const wasActive = aiEngine.getStatus().provider === id;
     try {
       persist(updates);

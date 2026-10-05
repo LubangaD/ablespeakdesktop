@@ -1,21 +1,24 @@
 import { Router } from 'express';
 import { readFileSync, existsSync } from 'fs';
+import { hostname } from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import {
   getCommands, getCommandStats, getSessions, getLogEvents, getLatestHealthChecks, getHealthAlerts,
   getTeacherAnalytics, getStudents, addStudent, deleteStudent,
   insertGoal, getGoals, updateGoalStatus, upsertProgressPoint, getProgressPoints,
   insertPhaseChange, getPhaseChanges, insertDecisionFlag, getDecisionFlags, acknowledgeFlag,
-  getCommandsForStudentDate, getRecognitionStats, getFilteredTurns, getResolutionStats,
-  getStudentProfileRow, getRetriesAround,
+  getCommandsForStudentDate, getRecognitionStats, getStudentProgress, getFilteredTurns, getResolutionStats,
+  getStudentProfileRow, getRetriesAround, renameStudent,
 } from '../db.js';
 import { computeProbeValue, computeProbesForDate, evaluateAndFlag } from '../probe-computer.js';
 import { MEASURE_REGISTRY } from '../progress-rules.js';
 import { buildToolCatalog } from '../tool-catalog.js';
 import { getActiveStudent, setActiveStudent } from '../student-session.js';
-import { localOnly } from './settings.js';
+import { localOnly, isFromThisComputer } from './settings.js';
 import { localDate, addDays, localDateTime } from '../local-time.js';
 import { getProfile, saveProfile, normaliseProfile } from '../student-profile.js';
+
+const AGENT_VERSION = '2.0.0';
 
 export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath, aiEngine }) {
   const router = Router();
@@ -38,7 +41,14 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
   // ── Status ──
   router.get('/status', (req, res) => {
     const status = wsProxy.getStatus();
-    res.json(status);
+    // The dashboard's sidebar and top bar name this computer and the gateway;
+    // the computer's name is only told to this computer.
+    res.json({
+      ...status,
+      version: AGENT_VERSION,
+      port: req.socket.localPort,
+      computer: isFromThisComputer(req) ? hostname() : null,
+    });
   });
 
   // ── Commands ──
@@ -287,21 +297,35 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     res.json(file);
   });
 
-  // Body: an exported file. Restores into the student with the same name,
-  // adding them if this computer does not have them yet.
+  // Body: an exported file. With ?into=<id> (a person loading their own
+  // profile on this computer) it goes into that profile, which takes the
+  // file's name: their profile from home, on a school's guest account, still
+  // greets them by name. Without it (an admin), it restores into the user
+  // with the same name, adding them if this computer does not have them yet.
   router.post('/students/profile/import', (req, res) => {
     const file = req.body || {};
     if (file.kind !== 'ablespeak-student-profile' || !file.profile) {
-      return res.status(400).json({ error: 'That is not an AbleSpeak student profile file.' });
+      return res.status(400).json({ error: 'That is not an AbleSpeak profile file.' });
     }
     const name = typeof file.student?.name === 'string' ? file.student.name.trim() : '';
-    if (!name || name.length > 80) return res.status(400).json({ error: 'The file has no usable student name.' });
+    if (!name || name.length > 80) return res.status(400).json({ error: 'The file has no usable name.' });
     const { errors } = normaliseProfile(file.profile);
     if (errors.length) return res.status(400).json({ error: errors.join('; '), errors });
 
-    let student = getStudents().find(s => s.name.toLowerCase() === name.toLowerCase());
-    const created = !student;
-    if (!student) student = addStudent({ name });
+    let student;
+    let created = false;
+    if (req.query.into != null) {
+      student = findStudent(req.query.into);
+      if (!student) return res.status(404).json({ error: 'User not found' });
+      if (student.name !== name) {
+        student = renameStudent(student.id, name);
+        wsProxy.broadcastToDashboard?.({ type: 'active_student', ...getActiveStudent(), timestamp: new Date().toISOString() });
+      }
+    } else {
+      student = getStudents().find(s => s.name.toLowerCase() === name.toLowerCase());
+      created = !student;
+      if (!student) student = addStudent({ name });
+    }
     const profile = saveProfile(student.id, file.profile);
     if (getActiveStudent().student?.id === student.id) wsProxy.broadcastListeningSettings?.();
     res.status(created ? 201 : 200).json({ student, created, profile });
@@ -309,6 +333,15 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
 
   // ── How well the student is being heard (Stage 1) ──
   // GET /api/students/:id/recognition?days=7
+  // GET /api/students/:id/progress?days=30 — one user's own progress (My progress)
+  router.get('/students/:id/progress', (req, res) => {
+    const student = findStudent(req.params.id);
+    if (!student) return res.status(404).json({ error: 'User not found' });
+    const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+    const since = `${addDays(localDate(), -(days - 1))} 00:00:00`;
+    res.json({ days, ...getStudentProgress(student.id, { since }) });
+  });
+
   router.get('/students/:id/recognition', (req, res) => {
     const student = findStudent(req.params.id);
     if (!student) return res.status(404).json({ error: 'Student not found' });
@@ -318,7 +351,8 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
     res.json({
       days,
       ...getRecognitionStats(student.id, { since }),
-      recentlyFiltered: getFilteredTurns(student.id, { limit: 10 }),
+      // The same days as the counts above; `filtered` is how many there were in all.
+      recentlyFiltered: getFilteredTurns(student.id, { limit: 10, since }),
       // Did the speech settings help? Retries per task, two weeks either side.
       sinceSettingsChanged: settingsChanged ? getRetriesAround(student.id, { at: settingsChanged }) : null,
     });

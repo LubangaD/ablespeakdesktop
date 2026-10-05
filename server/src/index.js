@@ -21,6 +21,13 @@ import { VoiceHandler } from './voice-handler.js';
 
 import { initDatabase, closeDatabase } from './db.js';
 import { startDeviceSession, endDeviceSession, commandAttribution, getActiveStudent } from './student-session.js';
+import { userInfo } from 'os';
+
+/** The Windows account signed in, or null (tests set ABLESPEAK_NO_WINDOWS_USER). */
+function windowsAccount() {
+  if (process.env.ABLESPEAK_NO_WINDOWS_USER === '1') return null;
+  try { return process.env.USERNAME || userInfo().username || null; } catch { return null; }
+}
 import { getProfile, learnAlias, LEARN_AFTER } from './student-profile.js';
 import { recordCorrection } from './db.js';
 import { screenContextForAgent, getScreenModel } from './screen-model.js';
@@ -31,6 +38,30 @@ import { LogTailer } from './log-tailer.js';
 import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
 import { createSettingsRouter } from './routes/settings.js';
+import { createAdminGate } from './admin-pin.js';
+import { adminAccountStatus, setAdminAccount } from './admin-account.js';
+import { createAccount, createAccountRouter, createAuthCallbackRouter, createSecureStore } from './account.js';
+
+/** After Google sign-in in the browser, bring the AbleSpeak window back to the front. */
+async function bringAppForward() {
+  const electron = await import('electron').catch(() => null);
+  const BrowserWindow = electron?.BrowserWindow || electron?.default?.BrowserWindow;
+  const win = BrowserWindow?.getAllWindows().find(w => !w.isDestroyed()
+    && w.webContents.getURL().startsWith(`http://localhost:${PORT}`)); // the dashboard, not the voice bar (a file:// page)
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** Open a web address in the person's default browser (Google sign-in). */
+async function openInBrowser(url) {
+  const electron = await import('electron').catch(() => null);
+  const shell = electron?.shell || electron?.default?.shell;
+  if (shell?.openExternal) return shell.openExternal(url);
+  const { spawn } = await import('child_process');
+  spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore' }).unref();
+}
 import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -60,8 +91,9 @@ await initDatabase(DB_PATH);
 console.log('[DB] SQLite initialized');
 
 // ── Who is using this computer (AT-50) ──
-const { student: activeStudent } = startDeviceSession();
-console.log(`[Students] ${activeStudent ? `Recording for ${activeStudent.name}` : 'No student chosen — pick one on the Teacher page'}`);
+// Whoever is signed in to Windows is the user: their own profile opens.
+const { student: activeStudent } = startDeviceSession({ windowsAccount: windowsAccount() });
+console.log(`[User] ${activeStudent ? `Signed in as ${activeStudent.name}` : 'No user signed in'}`);
 process.once('exit', () => {
   endDeviceSession();
   closeDatabase(); // writes the file; the 2 s auto-save may not have run yet
@@ -181,6 +213,35 @@ const logTailer = new LogTailer({
   }
 });
 logTailer.start().then(() => console.log('[LogTailer] Started'));
+
+// ── Admin PIN: developer routes are for the teacher/developer, not the student ──
+// Mounted before the routers it guards. /api/logs/health, /api/screen and
+// /api/context stay open because the teacher's Home page uses them.
+// ── AbleSpeak account: email + code or Google sign-in through Supabase (account.js) ──
+// The session is kept encrypted next to the database; the dashboard never sees it.
+const account = createAccount({
+  url: process.env.SUPABASE_URL,
+  key: process.env.SUPABASE_PUBLISHABLE_KEY,
+  store: createSecureStore(join(dirname(DB_PATH), 'account.bin')),
+  // Google: sign in in the person's own browser, which comes back to this address
+  callbackUrl: `http://127.0.0.1:${PORT}/auth/callback`,
+  openUrl: openInBrowser,
+});
+// Renew the saved sign-in now; this also picks up a role set in Supabase
+account.refresh().catch(() => {});
+
+// On the admin's own Windows account, or when an account with the admin role
+// (set in Supabase) is signed in, every page is open without a PIN
+const adminGate = createAdminGate({
+  adminAccount: { status: () => adminAccountStatus(), set: on => setAdminAccount(on) },
+  accountRole: () => account.role(),
+});
+app.use('/api/admin', adminGate.router);
+app.use('/api/account', createAccountRouter(account));
+app.use(createAuthCallbackRouter(account, { onSignedIn: bringAppForward }));
+app.use(['/api/settings', '/api/ai/switch', '/api/ai/providers', '/api/tools', '/api/library', '/api/config'],
+  adminGate.requireAdmin);
+app.get(['/api/logs', '/api/logs/recent'], adminGate.requireAdmin);
 
 // ── API Routes ──
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
@@ -318,8 +379,8 @@ app.post('/api/voice/transcribe', async (req, res) => {
 const overlayHtml = join(__dirname, '..', 'overlay.html');
 if (existsSync(overlayHtml)) {
   app.get('/overlay', (req, res) => res.sendFile(overlayHtml));
-  // The overlay's bundled fonts, at the same relative path it uses from disk
-  app.use('/fonts', express.static(join(__dirname, '..', 'fonts')));
+  // Its plain-language messages, loaded by the page as overlay-messages.js
+  app.get('/overlay-messages.js', (req, res) => res.sendFile(join(__dirname, '..', 'overlay-messages.js')));
 }
 
 // POST /api/overlay/reload — Reload the Electron overlay BrowserWindow from disk.
@@ -428,7 +489,6 @@ server.listen(PORT, () => {
     console.log('   OPENAI_API_KEY=sk-...');
     console.log('   GEMINI_API_KEY=...');
     console.log('   ANTHROPIC_API_KEY=...');
-    console.log('   GROQ_API_KEY=...');
     console.log('');
   }
 

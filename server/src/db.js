@@ -127,7 +127,8 @@ function migrate() {
   // ── Every voice turn, for the recognition readout (Stage 1) ──
   // outcome: 'no_speech' (nothing usable heard), 'filtered' (heard, but
   // treated as noise, music or echo), 'command', 'dictation', 'control'
-  // (sleep, stop, …) or 'error' (the recogniser failed).
+  // (sleep, stop, …), 'error' (the recogniser failed) or 'offline' (no
+  // internet; not counted against the person's recognition).
   db.run(`CREATE TABLE IF NOT EXISTS voice_turns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT DEFAULT (datetime('now','localtime')),
@@ -359,10 +360,84 @@ export function addStudent({ name, session_prefix }) {
   return queryOne('SELECT * FROM students WHERE id = last_insert_rowid()');
 }
 
+/**
+ * One user's own progress since `since` (a local "YYYY-MM-DD HH:MM:SS"):
+ * commands and successes per day, the totals, and what they say most. The
+ * same counting rule as the analytics: tries a retry replaced don't count,
+ * and a command worked if it did first time or after a retry.
+ */
+export function getStudentProgress(studentId, { since }) {
+  const counted = `student_id = ? AND (outcome IS NULL OR outcome != 'superseded')`;
+  const worked = `SUM(CASE WHEN outcome IN ('success','repaired') THEN 1 ELSE 0 END)`;
+  const days = query(
+    `SELECT date(created_at) AS day, COUNT(*) AS total, ${worked} AS succeeded
+     FROM commands WHERE ${counted} AND created_at >= ? GROUP BY date(created_at) ORDER BY day ASC`,
+    [studentId, since],
+  ).map(d => ({ day: d.day, total: d.total || 0, succeeded: d.succeeded || 0 }));
+  const period = queryOne(
+    `SELECT COUNT(*) AS total, ${worked} AS succeeded, ROUND(AVG(latency_ms), 0) AS avg_ms
+     FROM commands WHERE ${counted} AND created_at >= ?`,
+    [studentId, since],
+  ) || {};
+  const allTime = queryOne(
+    `SELECT COUNT(*) AS total, ${worked} AS succeeded, MIN(created_at) AS first_at
+     FROM commands WHERE ${counted}`,
+    [studentId],
+  ) || {};
+
+  // What they say most, from their recent commands' words
+  const counts = new Map();
+  for (const row of query(`SELECT payload FROM commands WHERE ${counted} AND created_at >= ? ORDER BY id DESC LIMIT 1000`, [studentId, since])) {
+    let text = '';
+    try { text = String(JSON.parse(row.payload || '{}').text || ''); } catch { /* not JSON */ }
+    const key = text.toLowerCase().replace(/[.!?,]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (key) counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const topCommands = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([text, count]) => ({ text, count }));
+
+  return {
+    days,
+    period: { total: period.total || 0, succeeded: period.succeeded || 0, avgLatency: period.avg_ms || null },
+    allTime: { total: allTime.total || 0, succeeded: allTime.succeeded || 0, since: allTime.first_at || null },
+    topCommands,
+  };
+}
+
+export function renameStudent(id, name) {
+  run('UPDATE students SET name = ? WHERE id = ?', [name, id]);
+  return getStudent(id);
+}
+
+/**
+ * Remove a person and every row of theirs, everywhere (Phase 2 Step 1,
+ * section 4 of the accounts plan). Deleting used to leave their commands,
+ * voice turns, sessions, goals and progress behind — a real privacy bug, and
+ * a problem for "delete my account" once accounts exist. Goals have their own
+ * child rows (phase_changes, decision_flags) keyed by goal_id, not student_id,
+ * so those are deleted by first finding this student's goal ids.
+ */
 export function deleteStudent(id) {
-  run('DELETE FROM students WHERE id = ?', [id]);
-  run('DELETE FROM student_profiles WHERE student_id = ?', [id]);
+  const goalIds = query('SELECT id FROM goals WHERE student_id = ?', [id]).map(g => g.id);
+  for (const goalId of goalIds) {
+    run('DELETE FROM phase_changes WHERE goal_id = ?', [goalId]);
+    run('DELETE FROM decision_flags WHERE goal_id = ?', [goalId]);
+  }
+  run('DELETE FROM goals WHERE student_id = ?', [id]);
+  run('DELETE FROM progress_points WHERE student_id = ?', [id]);
+  run('DELETE FROM commands WHERE student_id = ?', [id]);
+  run('DELETE FROM voice_turns WHERE student_id = ?', [id]);
+  run('DELETE FROM sessions WHERE student_id = ?', [id]);
   run('DELETE FROM correction_pairs WHERE student_id = ?', [id]);
+  run('DELETE FROM resolution_log WHERE student_id = ?', [id]);
+  run('DELETE FROM student_profiles WHERE student_id = ?', [id]);
+  run('DELETE FROM students WHERE id = ?', [id]);
+
+  // device_state entries that point at this student: the active-user choice,
+  // and any Windows account still linked to them (student-session.js).
+  if (Number(getDeviceState('active_student_id')) === id) setDeviceState('active_student_id', null);
+  for (const row of query(`SELECT key FROM device_state WHERE key LIKE 'windows_user:%' AND value = ?`, [String(id)])) {
+    setDeviceState(row.key, null);
+  }
 }
 
 export function getTeacherAnalytics() {
@@ -407,8 +482,14 @@ export function getTeacherAnalytics() {
   const totalCommands = queryOne('SELECT COUNT(*) as count FROM commands');
   const todayCommands = queryOne(`SELECT COUNT(*) as count FROM commands WHERE date(created_at)=date('now','localtime')`);
   const classAvgLatency = queryOne(`SELECT ROUND(AVG(latency_ms), 0) as avg_ms FROM commands WHERE latency_ms IS NOT NULL`);
-  const classSuccessTotal = queryOne(`SELECT COUNT(*) as count FROM commands`);
-  const classSuccessOk = queryOne(`SELECT COUNT(*) as count FROM commands WHERE result NOT LIKE '%error%' AND result NOT LIKE '%Error%'`);
+  // The same rule as each student's rate, over every student's commands:
+  // those that worked, first time or after a retry, out of all tries except
+  // the ones a retry replaced.
+  const classSuccess = queryOne(
+    `SELECT SUM(CASE WHEN outcome != 'superseded' THEN 1 ELSE 0 END) AS total,
+            SUM(CASE WHEN outcome IN ('success','repaired') THEN 1 ELSE 0 END) AS succeeded
+     FROM commands WHERE outcome IS NOT NULL AND student_id IS NOT NULL`
+  );
 
   // Daily trend (last 7 days)
   const dailyTrend = query(`
@@ -428,8 +509,8 @@ export function getTeacherAnalytics() {
     LIMIT 10
   `);
 
-  const totalCount = classSuccessTotal?.count || 0;
-  const okCount = classSuccessOk?.count || 0;
+  const totalCount = classSuccess?.total || 0;
+  const okCount = classSuccess?.succeeded || 0;
 
   return {
     summary: {
@@ -619,11 +700,17 @@ export function getRetriesAround(studentId, { at, days = 14 }) {
 }
 
 /** The most recent turns that were heard but set aside as noise, for review. */
-export function getFilteredTurns(studentId, { limit = 20 } = {}) {
-  return query(
-    `SELECT created_at, transcript FROM voice_turns WHERE student_id = ? AND outcome = 'filtered' ORDER BY id DESC LIMIT ?`,
-    [studentId, limit]
-  );
+/** The latest phrases set aside as background talk, since `since` when given. */
+export function getFilteredTurns(studentId, { limit = 20, since = null } = {}) {
+  return since
+    ? query(
+      `SELECT created_at, transcript FROM voice_turns WHERE student_id = ? AND outcome = 'filtered' AND created_at >= ? ORDER BY id DESC LIMIT ?`,
+      [studentId, since, limit]
+    )
+    : query(
+      `SELECT created_at, transcript FROM voice_turns WHERE student_id = ? AND outcome = 'filtered' ORDER BY id DESC LIMIT ?`,
+      [studentId, limit]
+    );
 }
 
 // ── Desktop target resolution (Stage 2) ──

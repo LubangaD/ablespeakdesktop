@@ -16,8 +16,7 @@ import { AIEngine } from './ai-engine.js';
 import { createSettingsRouter, defaultEnvPath } from './routes/settings.js';
 
 const MANAGED = [
-  'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GROQ_API_KEY',
-  'AZURE_OPENAI_API_KEY', 'AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_DEPLOYMENT',
+  'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
   'LLM_PROVIDER', 'LLM_MODEL',
 ];
 const saved = Object.fromEntries(MANAGED.map(k => [k, process.env[k]]));
@@ -91,7 +90,7 @@ test('lists every provider that needs a key, Gemini first, with nothing set', as
   assert.equal(body.voiceReady, false);
   assert.equal(body.providers[0].id, 'gemini');
   assert.equal(body.providers[0].usedForVoice, true);
-  assert.deepEqual(body.providers.map(p => p.id).sort(), ['anthropic', 'azure', 'gemini', 'groq', 'openai']);
+  assert.deepEqual(body.providers.map(p => p.id).sort(), ['anthropic', 'gemini', 'openai']);
   assert.ok(body.providers.every(p => p.configured === false && p.masked === null));
 });
 
@@ -151,15 +150,12 @@ test('malformed keys are refused, including attempts to inject settings', async 
   assert.equal(envText(), '');
 });
 
-test('Azure needs an https endpoint and saves it with the key', async () => {
-  const bad = await request('PUT', '/api/settings/keys/azure', { body: { key: '0123456789abcdef0123' } });
-  assert.equal(bad.status, 400);
-  const ok = await request('PUT', '/api/settings/keys/azure', {
-    body: { key: '0123456789abcdef0123', endpoint: 'https://example.openai.azure.com', deployment: 'gpt-4o-mini' },
-  });
-  assert.equal(ok.status, 200);
-  assert.ok(envText().includes('AZURE_OPENAI_ENDPOINT=https://example.openai.azure.com\n'));
-  assert.ok(envText().includes('AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini\n'));
+test('only OpenAI, Gemini and Anthropic keys can be saved', async () => {
+  for (const id of ['azure', 'groq', 'ollama']) {
+    const { status } = await request('PUT', `/api/settings/keys/${id}`, { body: { key: '0123456789abcdef0123' } });
+    assert.equal(status, 404, id);
+  }
+  assert.equal(envText(), '');
 });
 
 test('removing a key clears the file and the running process', async () => {
@@ -173,24 +169,35 @@ test('removing a key clears the file and the running process', async () => {
 });
 
 test('switching provider is applied and remembered', async () => {
-  process.env.GROQ_API_KEY = 'gsk_test000000000000';
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY000000001234';
   const { status, body } = await request('POST', '/api/settings/provider', {
-    body: { provider: 'groq', model: 'llama-3.3-70b-versatile' },
+    body: { provider: 'gemini', model: 'gemini-2.5-flash-lite' },
   });
   assert.equal(status, 200);
   assert.equal(body.saved, true);
-  assert.equal(engine.provider, 'groq');
-  assert.ok(envText().includes('LLM_PROVIDER=groq\n'));
-  assert.ok(envText().includes('LLM_MODEL=llama-3.3-70b-versatile\n'));
+  assert.equal(engine.provider, 'gemini');
+  assert.ok(envText().includes('LLM_PROVIDER=gemini\n'));
+  assert.ok(envText().includes('LLM_MODEL=gemini-2.5-flash-lite\n'));
 });
 
 test('switching to a provider with no key, or an unknown one, is refused', async () => {
   const noKey = await request('POST', '/api/settings/provider', { body: { provider: 'anthropic' } });
   assert.equal(noKey.status, 400);
   assert.equal(noKey.body.error, 'Add your Anthropic Claude key first.');
-  const unknown = await request('POST', '/api/settings/provider', { body: { provider: 'nope' } });
-  assert.equal(unknown.status, 400);
+  for (const provider of ['nope', 'groq', 'azure', 'ollama']) {
+    const unknown = await request('POST', '/api/settings/provider', { body: { provider } });
+    assert.equal(unknown.status, 400, provider);
+  }
   assert.equal(engine.provider, 'openai');
+});
+
+test('a saved provider that is no longer offered falls back to one with a key', () => {
+  process.env.LLM_PROVIDER = 'groq';
+  process.env.LLM_MODEL = 'llama-3.3-70b-versatile';
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY000000001234';
+  const fresh = new AIEngine({ toolRegistry: { getToolsForContext: () => [] }, wsHub: null });
+  assert.equal(fresh.provider, 'gemini');
+  assert.equal(fresh.model, 'gemini-2.5-flash');
 });
 
 test('requests from other websites are refused', async () => {

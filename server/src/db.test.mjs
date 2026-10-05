@@ -87,3 +87,21 @@ test('a session_id that does not share the prefix is not misattributed to an unr
   const row = students.find(s => s.id === student.id);
   assert.equal(row.commands, 0);
 });
+
+test('the class success rate uses the same rule as each student\'s rate', () => {
+  const student = addStudent({ name: 'Rate Student', session_prefix: 'rate-student' });
+  const base = { direction: 'user_to_ai', payload: '{}', latency_ms: 50, student_id: student.id };
+  insertCommand({ ...base, id: 'rate-1', type: 'voice_fast', result: '{"status":"error"}', outcome: 'superseded' });
+  insertCommand({ ...base, id: 'rate-2', type: 'voice_fast', result: '{}', outcome: 'repaired' });
+  insertCommand({ ...base, id: 'rate-3', type: 'voice', result: '{}', outcome: 'error' });
+  // Typed on the Chat page: no outcome, so it doesn't count either way.
+  insertCommand({ ...base, id: 'rate-4', type: 'chat', result: '{"text":"Error handling explained"}' });
+
+  const { summary, students } = getTeacherAnalytics();
+  const row = students.find(s => s.id === student.id);
+  assert.equal(row.successRate, 50); // repaired counts, the superseded try doesn't
+  const everyone = students.filter(s => s.commands > 0);
+  const tried = everyone.reduce((n, s) => n + s.commands, 0);
+  const worked = everyone.reduce((n, s) => n + Math.round(s.successRate * s.commands / 100), 0);
+  assert.equal(summary.successRate, Math.round((worked / tried) * 100));
+});
