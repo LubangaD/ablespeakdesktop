@@ -38,7 +38,7 @@ after(() => {
 test('an empty profile gets the standard settings', () => {
   const { profile, errors } = normaliseProfile({});
   assert.deepEqual(errors, []);
-  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 1.5 });
+  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 1.5, needsName: false });
   assert.deepEqual(profile.vocabulary, []);
 });
 
@@ -67,7 +67,7 @@ test('saving merges changes into what is already saved', () => {
   saveProfile(student.id, { listening: { pauseSeconds: 2.5 } });
   const profile = getProfile(student.id);
   assert.deepEqual(profile.vocabulary, ['Joy']);
-  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 2.5 });
+  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 2.5, needsName: false });
   assert.throws(() => saveProfile(student.id, { listening: { sensitivity: 'shouty' } }), /sensitivity/);
 });
 
@@ -80,11 +80,11 @@ test('a quiet speaker gets lower levels; a slow speaker a longer pause', () => {
   assert.equal(standard.dictationPauseMs, 1800, 'dictation never waits less than before');
 });
 
-test('a noisy room turns off automatic gain and the "say it louder" prompt; soft speakers keep gain', () => {
+test('a noisy room drops the "say it louder" prompt, and every profile keeps automatic gain', () => {
   const noisy = listeningSettings(normaliseProfile({ listening: { sensitivity: 'noisy' } }).profile);
   const quiet = listeningSettings(normaliseProfile({ listening: { sensitivity: 'quiet' } }).profile);
   const standard = listeningSettings(normaliseProfile({}).profile);
-  assert.equal(noisy.autoGain, false, 'distant voices are not turned up');
+  assert.equal(noisy.autoGain, true, 'without it a laptop mic never heard the person at all');
   assert.equal(noisy.quietThreshold, noisy.speechThreshold, 'no "too quiet" band for background talk');
   assert.equal(quiet.autoGain, true);
   assert.equal(standard.autoGain, true);

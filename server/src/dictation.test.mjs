@@ -48,7 +48,8 @@ test('"<text>. Dictate." starts dictation with the sentence before it', () => {
 });
 
 test('a sentence that only mentions dictation does not start it', () => {
-  for (const phrase of ['I want to dictate', 'Let me dictate.', 'This is the end of dictation', 'Hello world dictation', "Please don't dictate", 'I will not dictate']) {
+  // ("I want to dictate" and "Let me dictate" are requests, so they DO start it — fast-commands.test.mjs)
+  for (const phrase of ['This is the end of dictation', 'Hello world dictation', "Please don't dictate", 'I will not dictate']) {
     assert.equal(matchFastCommand(phrase), null, `"${phrase}"`);
   }
 });

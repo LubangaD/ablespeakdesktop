@@ -9,6 +9,7 @@ import { normaliseProfile, listeningSettings, expandAlias, findMacro } from './s
 import { toolFailed, aiCommandFailed } from './tool-outcome.js';
 import { TaskAgent, needsPlan } from './agent.js';
 import { spokenWindowName } from './app-names.js';
+import { gateByName, NAME_WORD, NAME_WINDOW_MS } from './wake-name.js';
 
 // Phrases that resume normal operation from sleep OR bring the overlay back
 // from a voice "dismiss" (HFI-1) — shared so the two recovery paths never drift.
@@ -992,8 +993,10 @@ export class WsProxy {
     console.log(`[Voice] Received audio (${Math.round(msg.audio.length / 1024)}KB)`);
 
     // Transcribe with Gemini, expecting this student's own words
+    // (and AbleSpeak's own name, when phrases must start with it)
+    const needsName = !!this._profile().listening?.needsName;
     const transcript = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm', {
-      vocabulary: this._profile().vocabulary,
+      vocabulary: needsName ? [...this._profile().vocabulary, NAME_WORD] : this._profile().vocabulary,
     });
     const { error } = transcript;
     let text = transcript.text;
@@ -1013,6 +1016,35 @@ export class WsProxy {
       return;
     }
     if (this._turnLog) this._turnLog.transcript = text;
+
+    // ── "Say AbleSpeak first" (noisy places, wake-name.js) ──
+    // Only phrases that start with the name are acted on; other people, TV
+    // and music are dropped quietly, before anything is shown. Dictated text
+    // and the answer to a yes/no question need no name.
+    if (needsName && !this._dictationMode && !this._pendingConfirmation) {
+      const gate = gateByName(text, { inWindow: Date.now() < (this._nameHeardUntil || 0) });
+      if (gate.action === 'ignore') {
+        console.log(`[Voice] 🔇 Not for AbleSpeak (no name): "${text.slice(0, 50)}"`);
+        this._markTurn('filtered');
+        ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+        return;
+      }
+      this._nameHeardUntil = 0;
+      if (gate.action === 'listen') {
+        // Just the name: "Yes?" — the next phrase needs no name
+        this._nameHeardUntil = Date.now() + NAME_WINDOW_MS;
+        this._markTurn('control');
+        this._broadcastDashboard({ type: 'voice_transcription', text, latency: Date.now() - startTime, timestamp: new Date().toISOString() });
+        this._broadcastDashboard({
+          type: 'chat_assistant_message', id: uuidv4(), text: 'Yes?', error: false,
+          provider: 'fast', model: 'name', source: 'voice', timestamp: new Date().toISOString(),
+        });
+        this._lastTTSText = 'Yes?';
+        this._lastTTSTime = Date.now();
+        return;
+      }
+      text = gate.text;
+    }
 
     // Send transcription to dashboard
     this._broadcastDashboard({

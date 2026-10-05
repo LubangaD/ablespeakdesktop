@@ -84,22 +84,44 @@ const SEARCH_PAGE = /^https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\
  * search happens on the current page or as a new Google search.
  */
 export function matchFastCommand(text, { activeUrl = '' } = {}) {
-  const t = cleanTranscription(text);
+  // A short stammer before the command ("st start dictating") is dropped
+  const t = cleanTranscription(text).replace(/^[a-z]{1,3}[\s,.-]+(?=(start|starts|begin|stop|end)\b)/, '');
 
   // ── Dictation Mode Toggle ──
-  if (/^(start\s+)?(dictat(e|ed|ing|ion)|typ(e|ing))(\s+mode)?$/i.test(t) || /^(type|write)\s+(for me|mode)$/i.test(t) || /^(start\s+)?(typing|writing)$/i.test(t)) {
+  // "start dictation", "starts typing", "begin dictating", "let's start writing",
+  // "turn on dictation", "dictation mode", "type for me"
+  const START_DICTATION = /^(?:(?:let'?s|please|ok(?:ay)?)\s+)?(?:(?:start|starts|begin|turn\s+on)\s+)?(?:dictat(?:e|ed|ing|ion)|typ(?:e|ing)|writing)(?:\s+mode)?$/i;
+  // …and the everyday ways of asking: "write this sentence", "type what I say",
+  // "can you type for me", "I want to dictate", "take a note", "voice typing"
+  const ASK_TO_TYPE = [
+    /^(?:(?:can|could|will)\s+you\s+)?(?:type|write)\s+(?:for\s+me|mode|what\s+i\s+say|what\s+i'?m\s+saying|as\s+i\s+(?:speak|talk)|this(?:\s+down)?|these(?:\s+sentences?)?|this\s+sentence|the\s+following|down)$/i,
+    /^(?:can|could|will)\s+you\s+(?:type|write|take\s+dictation)$/i, // "for me" is stripped as filler
+    /^i\s+(?:want|would\s+like|need)\s+to\s+(?:dictate|type|write)(?:\s+something)?$/i,
+    /^let\s+me\s+(?:dictate|type|write)(?:\s+something)?$/i,
+    /^(?:take|start)\s+(?:a\s+)?notes?$/i,
+    /^(?:note|jot)\s+this(?:\s+down)?$/i,
+    /^voice\s+typing$/i,
+  ];
+  if (START_DICTATION.test(t) || ASK_TO_TYPE.some(re => re.test(t))) {
     return { tool: 'dictation_mode', args: { enabled: true }, silent: false };
   }
   // Text to type is taken from what was said, not from `t`, which is
   // lower-cased and has filler words like "please" removed.
-  const said = String(text || '').trim();
+  const said = String(text || '').trim().replace(/^[a-z]{1,3}[\s,.-]+(?=(start|starts|begin)\b)/i, '');
 
-  // "dictate My name is Derek..." — activate AND type the trailing text
-  const dictateFirst = said.match(/^(?:start\s+)?dictat(?:e|ed|ing)[\s,.:;-]+([\s\S]{5,})$/i);
+  // "dictate My name is Derek...", "start typing, My name is Derek...",
+  // "begin dictating: ..." — activate AND type the trailing text
+  // "write this: …", "type the following, …", "write this sentence. …",
+  // "take a note: …", "write down …" — the same, in everyday words
+  const dictateFirst = said.match(/^(?:(?:start|starts|begin)\s+)?dictat(?:e|ed|ing)[\s,.:;-]+([\s\S]{5,})$/i)
+    || said.match(/^(?:start|starts|begin)\s+(?:typing|writing)[\s,.:;-]+([\s\S]{5,})$/i)
+    || said.match(/^(?:(?:can|could|will)\s+you\s+)?(?:please\s+)?(?:type|write)\s+(?:this|these|the\s+following)(?:\s+(?:sentences?|words?|text|paragraph|down))?[\s,.:;-]+([\s\S]{3,})$/i)
+    || said.match(/^(?:take\s+a\s+note|note\s+this(?:\s+down)?|jot\s+this\s+down|write\s+down)[\s,.:;-]+([\s\S]{3,})$/i);
   if (dictateFirst) {
     return { tool: 'dictation_mode', args: { enabled: true, initialText: dictateFirst[1].trim() }, silent: false };
   }
-  if (/^(stop|end|exit)\s+(dictat(ing|ion)|typ(ing|e))(\s+mode)?$/i.test(t) || /^command\s+mode$/i.test(t)) {
+  if (/^(stop|end|exit|finish|turn\s+off)\s+(dictat(ing|ion)|typ(ing|e)|writing)(\s+mode)?$/i.test(t)
+    || /^(command\s+mode|done\s+dictating|i'?m\s+done\s+dictating)$/i.test(t)) {
     return { tool: 'dictation_mode', args: { enabled: false }, silent: false };
   }
   // "My name is Derek. Dictate." — the sentence first, then the trigger word,

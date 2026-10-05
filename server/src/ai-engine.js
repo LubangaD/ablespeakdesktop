@@ -365,6 +365,9 @@ export class AIEngine {
       // The same call that already failed in this command fails again: it is
       // not run twice, and the command ends with that failure instead.
       const failedCalls = new Set();
+      // A call that already worked is not run again either ("search Michael
+      // Jackson" was opened three times while nothing was said)
+      const doneCalls = new Set();
       const callKey = tc => `${tc.name}:${JSON.stringify(tc.arguments || {})}`;
       while (currentResult.toolCalls && currentResult.toolCalls.length > 0 && rounds < MAX_ROUNDS) {
         if (currentResult.toolCalls.every(tc => failedCalls.has(callKey(tc)))) {
@@ -376,11 +379,18 @@ export class AIEngine {
         const usedNavigation = currentResult.toolCalls.some(tc => NAVIGATION_TOOLS.has(tc.name));
 
         for (const toolCall of currentResult.toolCalls) {
-          if (failedCalls.has(callKey(toolCall))) continue;
+          const key = callKey(toolCall);
+          if (failedCalls.has(key)) continue;
+          if (doneCalls.has(key)) {
+            console.log(`[AIEngine] Not repeating ${toolCall.name}: already done in this command`);
+            roundResults.push({ tool: toolCall.name, result: { status: 'skipped', message: 'Already done in this command. Do not call it again — tell the person the answer or what happened, in plain spoken words.' } });
+            continue;
+          }
           console.log(`[AIEngine] Tool call (round ${rounds}): ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
           const toolResult = await this.toolRegistry.executeTool(toolCall.name, toolCall.arguments, this.wsHub);
           roundResults.push({ tool: toolCall.name, result: toolResult });
-          if (toolResult?.status === 'error' || toolResult?.error) failedCalls.add(callKey(toolCall));
+          if (toolResult?.status === 'error' || toolResult?.error) failedCalls.add(key);
+          else doneCalls.add(key);
         }
         allToolResults.push(...roundResults);
 
@@ -433,7 +443,7 @@ export class AIEngine {
           content: this._truncateContent(
             `Tool results: ${JSON.stringify(roundResults.map(r => ({ tool: r.tool, status: r.result?.status || 'done', message: r.result?.message || '' })))}${freshContext}
 
-IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP action (like "play [song]" which requires search then click). Do NOT add extra actions the user did not ask for. If the command is complete, respond with a SHORT confirmation or empty text.`
+IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP action (like "play [song]" which requires search then click). Do NOT add extra actions the user did not ask for. If the user asked a QUESTION or for information, ANSWER IT NOW in 2-4 plain spoken sentences (from the page you read, or your own knowledge) — the person may not be able to see the screen. Otherwise, if the command is complete, respond with a SHORT confirmation.`
           )
         });
 
@@ -652,6 +662,15 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **Workflow**: `focus_application` → `uia_query` (if the controls are not already listed below) → `uia_act` with the right ref. Use `system_type_text` to type at the cursor.',
       '- Use the SCREENSHOT to understand the screen, but act through the listed controls whenever the control is listed.',
       '- If the user says "click play" or "click the search bar" in a desktop app, find the control in the list and use `uia_act` with its ref.',
+      '',
+      '## Questions: answer out loud',
+      '- The person may be blind or unable to see the screen: what you SAY is what they get.',
+      '- "Tell me about X", "who is X", "what is X", "explain X", "how does X work": ANSWER in your reply, in 2-4 plain spoken sentences, from your own knowledge. Do NOT open a search page for this.',
+      '- Search the web only when they ask to search or look something up, or the answer needs current information (news, weather, prices, scores, today\'s events). After searching, call `get_page_content` and SAY the answer — never stop at an open results page.',
+      '- Never answer a question with only a tool call or an empty reply.',
+      '',
+      '## Dictation',
+      '- AbleSpeak HAS dictation. If the user asks to dictate, start typing or type for them without giving the text, reply: Say "start dictation", speak, then say "stop dictation". Never say there is no dictation function.',
       '',
       '## IMPORTANT',
       '- Do NOT open new tabs unless explicitly asked.',

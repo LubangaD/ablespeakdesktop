@@ -654,6 +654,7 @@ if (!window.electronAPI) {
   let QUIET_SPEECH_THRESHOLD = 30;
   let autoGain = true;          // automatic gain on the mic (off for the "Noisy room" profile)
   let micNeedsReopen = false;   // set when autoGain changes
+  let nameMode = false;         // "Say AbleSpeak first" (profile listening.needsName)
   const QUIET_SPEECH_MIN_MS = 500;
   const NOT_HEARD_INTERVAL_MS = 30000;
   let lastNotHeardAt = 0;
@@ -937,6 +938,7 @@ if (!window.electronAPI) {
     QUIET_SPEECH_THRESHOLD = settings.quietThreshold;
     SILENCE_DURATION = settings.commandPauseMs;
     DICTATION_SILENCE_MS = settings.dictationPauseMs;
+    nameMode = settings.needsName === true;
     // A change of automatic gain needs the microphone opened again
     const wantGain = settings.autoGain !== false;
     if (wantGain !== autoGain) { autoGain = wantGain; micNeedsReopen = true; }
@@ -1005,7 +1007,9 @@ if (!window.electronAPI) {
     btnMic.title = 'Processing...';
     btnMic.setAttribute('aria-label', 'Microphone — processing your command');
     btnMic.setAttribute('aria-pressed', 'false');
-    if (!dictationMode) setMode(sleeping ? 'sleeping' : 'processing');
+    // "Say AbleSpeak first": stay the small mic until a phrase is accepted, so
+    // background talk (dropped by the server) never flashes "Working…"
+    if (!dictationMode && !nameMode) setMode(sleeping ? 'sleeping' : 'processing');
     startWatchdog();
   }
 
@@ -1151,6 +1155,7 @@ if (!window.electronAPI) {
       // Asleep: the mic still listens for "wake up", but what it hears is not shown,
       // so music or talk never makes AbleSpeak look awake.
       if (sleeping) { feedWatchdog(); return; }
+      if (nameMode && !dictationMode) setMode('processing'); // a phrase was accepted
       setTranscript(data.text || '', 'listening-label');
       if (data.text) showHeard(data.text);
       feedWatchdog();

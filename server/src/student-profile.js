@@ -21,13 +21,14 @@ export const SENSITIVITY = {
   standard: { speech: 45, silence: 15, quiet: 30 },
   quiet: { speech: 28, silence: 10, quiet: 18 },
   // Noisy room: no "say it louder" band (quiet = speech), because there it is
-  // mostly other people talking, and no automatic gain (see listeningSettings).
+  // mostly other people talking. Automatic gain stays on (see listeningSettings).
   noisy: { speech: 60, silence: 22, quiet: 60 },
 };
 
 export const DEFAULT_PROFILE = Object.freeze({
   version: PROFILE_VERSION,
-  listening: Object.freeze({ sensitivity: 'standard', pauseSeconds: 1.5 }),
+  // needsName: only act on phrases that start with "AbleSpeak" (noisy places; wake-name.js)
+  listening: Object.freeze({ sensitivity: 'standard', pauseSeconds: 1.5, needsName: false }),
   vocabulary: Object.freeze([]),
   aliases: Object.freeze([]),
   macros: Object.freeze([]),
@@ -48,7 +49,11 @@ export function normaliseProfile(input = {}) {
 
   const listening = { ...DEFAULT_PROFILE.listening };
   if (source.listening !== undefined) {
-    const { sensitivity, pauseSeconds } = source.listening || {};
+    const { sensitivity, pauseSeconds, needsName } = source.listening || {};
+    if (needsName !== undefined) {
+      if (typeof needsName === 'boolean') listening.needsName = needsName;
+      else errors.push('listening.needsName must be true or false');
+    }
     if (sensitivity !== undefined) {
       if (Object.hasOwn(SENSITIVITY, sensitivity)) listening.sensitivity = sensitivity;
       else errors.push(`listening.sensitivity must be one of: ${Object.keys(SENSITIVITY).join(', ')}`);
@@ -152,16 +157,19 @@ export function saveProfile(studentId, changes) {
 
 /** What the overlay needs to listen well for this student. */
 export function listeningSettings(profile) {
-  const { sensitivity, pauseSeconds } = profile.listening;
+  const { sensitivity, pauseSeconds, needsName } = profile.listening;
   const levels = SENSITIVITY[sensitivity] || SENSITIVITY.standard;
   return {
     sensitivity,
+    needsName: !!needsName,
     speechThreshold: levels.speech,
     silenceThreshold: levels.silence,
     quietThreshold: levels.quiet,
-    // Automatic gain turns quiet sound up, voices outside the room included.
-    // Kept for soft speakers; off in a noisy room so distance counts again.
-    autoGain: sensitivity !== 'noisy',
+    // Automatic gain stays on for every profile. Turning it off in a noisy
+    // room (tried 5 Oct 2026) left the person's own voice below the speech
+    // level on a laptop mic, so nothing was ever heard. For voices nearby,
+    // use "Say AbleSpeak first" (listening.needsName) instead.
+    autoGain: true,
     commandPauseMs: Math.round(pauseSeconds * 1000),
     // Dictation always waits a little longer than a command.
     dictationPauseMs: Math.max(1800, Math.round(pauseSeconds * 1000) + 300),

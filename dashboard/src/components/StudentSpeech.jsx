@@ -168,6 +168,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
 
   const [sensitivity, setSensitivity] = useState('standard');
   const [pause, setPause] = useState(1.5);
+  const [needsName, setNeedsName] = useState(false); // "Say AbleSpeak first" (noisy places)
   const [words, setWords] = useState([]);
   const [newWord, setNewWord] = useState('');
   const [wordNote, setWordNote] = useState('');
@@ -185,6 +186,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
   const fill = (saved) => {
     setSensitivity(saved.listening.sensitivity);
     setPause(saved.listening.pauseSeconds);
+    setNeedsName(!!saved.listening.needsName);
     setWords([...saved.vocabulary]);
     setShortcuts(saved.aliases.map(a => withUid({ ...a })));
     setRoutines(saved.macros.map(m => withUid({ name: m.name, steps: m.steps.join('\n'), open: false })));
@@ -233,7 +235,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
     setResult(null);
     try {
       await api.saveProfile(studentId, {
-        listening: { sensitivity, pauseSeconds: Number(pause) },
+        listening: { sensitivity, pauseSeconds: Number(pause), needsName },
         vocabulary: vocabulary.map(w => w.trim()).filter(Boolean),
         aliases: shortcuts
           .map(({ uid, ...shortcut }) => shortcut)
@@ -381,6 +383,28 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                   );
                 })}
               </div>
+            </div>
+
+            {/* Noisy places: only act on phrases that start with AbleSpeak's name */}
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-white/[0.06] bg-[#18202d] px-4 py-3">
+              <div className="min-w-0">
+                <p id="needs-name-label" className="text-[14px] leading-5 font-medium text-[#dae3f4]">Say “AbleSpeak” first</p>
+                <p id="needs-name-hint" className={MUTED}>
+                  For noisy places. AbleSpeak only acts when {own ? 'you start' : 'they start'} with its name —
+                  “AbleSpeak, open Word” — and ignores other people, TV and music. Saying just “AbleSpeak” makes it listen for the next phrase.
+                </p>
+              </div>
+              <button
+                type="button" role="switch" aria-checked={needsName}
+                aria-labelledby="needs-name-label" aria-describedby="needs-name-hint"
+                onClick={() => { setNeedsName(v => !v); edited(); }}
+                className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[#222a37]"
+              >
+                <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${needsName ? 'bg-[#f5a623] justify-end' : 'bg-[#2d3543] justify-start'}`} aria-hidden="true">
+                  <span className={`w-5 h-5 rounded-full ${needsName ? 'bg-[#3d2600]' : 'bg-[#c9b8a5]'}`} />
+                </span>
+                <span className="text-[14px] leading-5 text-[#dae3f4]">{needsName ? 'On' : 'Off'}</span>
+              </button>
             </div>
 
             <div className="flex flex-col gap-2">
