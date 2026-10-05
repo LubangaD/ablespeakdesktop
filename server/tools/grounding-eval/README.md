@@ -25,10 +25,14 @@ beats the Gemini baseline before you invest in serving a GPU model.
 
 ```
 grounding-eval/
-  annotator.html        # browser tool to author ground-truth cases
+  annotator.html        # browser tool to author ground-truth cases by hand
+  make-dataset.mjs      # build cases automatically from real app windows (UI Automation)
   run-eval.cjs          # the runner: query providers, score, write report
   dataset.sample.json   # example schema (copy to dataset.json)
-  lib/image-size.cjs    # PNG/JPEG dimension reader (no deps)
+  cases-from-screen.test.mjs  # tests for turning a screen read into cases
+  lib/
+    image-size.cjs      # PNG/JPEG dimension reader (no deps)
+    cases-from-screen.mjs  # screen read → cases (used by make-dataset.mjs)
   providers/
     gemini.cjs          # mirrors AbleSpeak's production Gemini call
     molmoweb.cjs        # POSTs to a MolmoWeb /predict endpoint
@@ -37,6 +41,25 @@ grounding-eval/
 ```
 
 ## 1. Build a test set
+
+### Option A — automatically, from real app windows
+
+```bash
+cd server
+node tools/grounding-eval/make-dataset.mjs --app word --app chrome --max 15
+```
+
+For each app it brings the window to the front, reads its controls through
+Windows UI Automation, saves a screenshot to `images/`, and writes "click the
+<name> <kind>" cases — each control's own box is the answer — to `dataset.json`.
+No hand labelling needed.
+
+> **Privacy:** the screenshots show whatever is in those windows. They stay on this
+> computer (`images/` is git-ignored), but `run-eval.cjs` sends them to the AI
+> provider. Use windows with nothing private in them, or a person's screen only
+> with their consent.
+
+### Option B — by hand
 
 Open **`annotator.html`** in a browser. For each case: load a screenshot, drag a box
 around the correct click target, type the instruction (e.g. "click the Wikipedia
@@ -97,7 +120,13 @@ plus a summary table overall and per category. `results.csv` is for spreadsheets
 
 ## Reading the result
 
-If MolmoWeb clearly wins on `desktop` cases (higher hit rate, lower normDist),
-integrating it as a desktop-only grounding provider in `ai-engine.js` is justified.
-If it doesn't, invest in Windows UI Automation element targeting instead — no GPU
-required. Either way, you'll have decided with data, not vibes.
+AbleSpeak now acts on desktop apps mainly through **Windows UI Automation**
+(`server/src/screen-model.js`, `uia_query` / `uia_act`): it presses a control by
+its accessibility reference, with no click point to guess. Screenshot grounding
+is the fallback for controls UI Automation can't see (custom-drawn apps, canvases,
+some games and web views).
+
+So read the results for that fallback: if MolmoWeb clearly wins on `desktop` cases
+(higher hit rate, lower normDist), it is worth adding as the screenshot-click
+provider in `ai-engine.js`; if it doesn't, keep Gemini. Either way, you'll have
+decided with data, not vibes.
