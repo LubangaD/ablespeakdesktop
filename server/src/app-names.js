@@ -8,7 +8,10 @@
 
 const APPS = [
   {
-    app: 'Word', processes: ['winword'], launch: 'start winword',
+    // /w opens a blank document straight away. Without it Word lands on its
+    // Start screen, and the student has to click the "Blank document" tile —
+    // a surface we do not navigate.
+    app: 'Word', processes: ['winword'], launch: 'start winword /w',
     names: /^(?:microsoft |ms )?(?:word|one)(?: documents?| docs?| files?)?$|^(?:documents?|docs?)$/,
   },
   {

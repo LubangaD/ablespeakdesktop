@@ -660,7 +660,7 @@ export async function openApplication(appName) {
     edge: 'start msedge',
     chrome: 'start chrome',
     firefox: 'start firefox',
-    word: 'start winword',
+    word: 'start winword /w', // /w = open a blank document, skipping Word's Start screen
     excel: 'start excel',
     powerpoint: 'start powerpnt',
     outlook: 'start outlook',
