@@ -138,3 +138,65 @@ export function describeOfficeContext(ctx) {
   }
   return lines.join('\n');
 }
+
+// ── Fixing a spelling mistake by voice ──
+
+const psText = value => `'${String(value ?? '').replace(/'/g, "''")}'`;
+
+/**
+ * The PowerShell that asks Word for the spelling mistake at (or nearest) the
+ * cursor, or the one spelled \`word\`, and replaces it with Word's suggestion
+ * number \`choice\` (1 = first). \`choice\` 0 only lists the suggestions.
+ * Looks in the cursor's paragraph first, then the whole document.
+ */
+export function fixSpellingScript({ choice = 1, word = '' } = {}) {
+  const n = Math.max(0, Math.min(9, Math.floor(Number(choice) || 0)));
+  return `
+try { $w = [Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application') } catch { Write-Output '{"error":"NO_WORD"}'; return }
+if ($w.Documents.Count -eq 0) { Write-Output '{"error":"NO_DOCUMENT"}'; return }
+$doc = $w.ActiveDocument
+$sel = $w.Selection
+$want = ${psText(String(word).trim())}
+$pick = $null
+foreach ($scope in @($sel.Paragraphs.Item(1).Range, $doc.Content)) {
+  $best = $null; $bestGap = [int]::MaxValue
+  foreach ($e in $scope.SpellingErrors) {
+    if ($want) { if ($e.Text.Trim() -ieq $want) { $best = $e; break } else { continue } }
+    if ($e.Start -le $sel.Start -and $e.End -ge $sel.Start) { $best = $e; break }
+    $gap = [Math]::Abs($e.Start - $sel.Start)
+    if ($gap -lt $bestGap) { $best = $e; $bestGap = $gap }
+  }
+  if ($best) { $pick = $best; break }
+}
+if (-not $pick) { Write-Output '{"error":"NO_MISTAKE"}'; return }
+$old = $pick.Text.Trim()
+$list = @()
+foreach ($s in $pick.GetSpellingSuggestions()) { $list += $s.Name }
+if ($list.Count -eq 0) { @{ error = 'NO_SUGGESTIONS'; old = $old } | ConvertTo-Json -Compress; return }
+$choice = ${n}
+if ($choice -eq 0) { @{ ok = $true; old = $old; suggestions = @($list) } | ConvertTo-Json -Compress; return }
+if ($choice -gt $list.Count) { @{ error = 'NO_SUCH_SUGGESTION'; old = $old; suggestions = @($list) } | ConvertTo-Json -Compress; return }
+$new = $list[$choice - 1]
+$pick.Text = $new
+@{ ok = $true; old = $old; new = $new; suggestions = @($list) } | ConvertTo-Json -Compress
+`;
+}
+
+/** Fix (or list the suggestions for) a spelling mistake in Word. Returns { status, message, ... }. */
+export async function fixSpelling({ choice = 1, word = '' } = {}) {
+  const raw = await runPowerShell(fixSpellingScript({ choice, word }), 15000);
+  let r;
+  try { r = JSON.parse(raw); } catch { return { status: 'error', message: `Couldn't check the spelling: ${String(raw).slice(0, 120)}` }; }
+  const list = Array.isArray(r.suggestions) ? r.suggestions : r.suggestions ? [r.suggestions] : [];
+  const named = list.slice(0, 5).map((s, i) => `${i + 1}. ${s}`).join(', ');
+  switch (r.error) {
+    case 'NO_WORD': return { status: 'error', message: 'Word isn’t open.' };
+    case 'NO_DOCUMENT': return { status: 'error', message: 'There’s no document open in Word.' };
+    case 'NO_MISTAKE': return { status: 'error', message: word ? `I couldn’t find “${word}” marked as a spelling mistake.` : 'I couldn’t find a spelling mistake near the cursor.' };
+    case 'NO_SUGGESTIONS': return { status: 'error', message: `Word has no suggestions for “${r.old}”.` };
+    case 'NO_SUCH_SUGGESTION': return { status: 'error', message: `There are only ${list.length} suggestions for “${r.old}”: ${named}.`, suggestions: list };
+    default: break;
+  }
+  if (!r.new) return { status: 'success', message: `Suggestions for “${r.old}”: ${named}. Say “use the first one”, or another number.`, suggestions: list };
+  return { status: 'success', message: `Changed “${r.old}” to “${r.new}”.`, old: r.old, new: r.new, suggestions: list };
+}

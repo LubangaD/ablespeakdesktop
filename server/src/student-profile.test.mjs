@@ -80,6 +80,16 @@ test('a quiet speaker gets lower levels; a slow speaker a longer pause', () => {
   assert.equal(standard.dictationPauseMs, 1800, 'dictation never waits less than before');
 });
 
+test('a noisy room turns off automatic gain and the "say it louder" prompt; soft speakers keep gain', () => {
+  const noisy = listeningSettings(normaliseProfile({ listening: { sensitivity: 'noisy' } }).profile);
+  const quiet = listeningSettings(normaliseProfile({ listening: { sensitivity: 'quiet' } }).profile);
+  const standard = listeningSettings(normaliseProfile({}).profile);
+  assert.equal(noisy.autoGain, false, 'distant voices are not turned up');
+  assert.equal(noisy.quietThreshold, noisy.speechThreshold, 'no "too quiet" band for background talk');
+  assert.equal(quiet.autoGain, true);
+  assert.equal(standard.autoGain, true);
+});
+
 test('a shortcut matches the whole phrase, whatever the case or full stop', () => {
   const { profile } = normaliseProfile({ aliases: [{ say: 'my music', means: 'open spotify' }] });
   assert.equal(expandAlias(profile, 'My music.'), 'open spotify');

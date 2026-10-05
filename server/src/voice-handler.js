@@ -13,6 +13,24 @@ const INVENTED_SENTENCES = [
   /going to go ahead and say that .{0,20}not going to be able to make it/i,
 ];
 
+// Codes Node's fetch reports when the computer can't reach Google at all
+// (no network, no DNS, Wi-Fi dropped), as opposed to Google answering badly.
+const NETWORK_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH',
+  'ENETDOWN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT',
+]);
+const REQUEST_TIMEOUT_MS = 12000;
+export const OFFLINE_MESSAGE = 'AbleSpeak needs the internet right now. I’ll reconnect automatically.';
+
+/** Whether a fetch failure means the internet (or Google) can't be reached. */
+export function isNetworkError(err) {
+  if (!err) return false;
+  if (err.name === 'TimeoutError' || err.name === 'AbortError') return true;
+  const code = err.cause?.code || err.code;
+  if (code && NETWORK_CODES.has(code)) return true;
+  return /fetch failed/i.test(err.message || '');
+}
+
 export function isInventedTranscript(text) {
   return INVENTED_SENTENCES.some(pattern => pattern.test(String(text || '')));
 }
@@ -157,6 +175,7 @@ export class VoiceHandler {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), // a half-dead connection must not hang the turn
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -198,6 +217,8 @@ export class VoiceHandler {
           const text = rawText
             .replace(/^\s*silence\b[.,!]?\s*/i, '')
             .replace(/\s*\bsilence\b[.,!]?\s*$/i, '')
+            // Gemini sometimes repeats its own instructions after the words
+            .replace(/\s*\b(transcribe this audio clip|return only the exact words)\b[^\n]*/gi, '')
             .trim();
 
           if (!text) {
@@ -264,11 +285,14 @@ export class VoiceHandler {
         return { text: '', error: `Transcription failed: ${status}` };
 
       } catch (err) {
-        console.error('[VoiceHandler] Transcription error:', err.message);
+        const offline = isNetworkError(err);
+        console.error(`[VoiceHandler] Transcription error${offline ? ' (no connection)' : ''}:`, err.message);
         if (attempt === 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 2000)); // ride out a short blip
           continue;
         }
+        // Say plainly that the connection is down, so nobody repeats themselves for nothing.
+        if (offline) return { text: '', error: 'offline', message: OFFLINE_MESSAGE };
         return { text: '', error: err.message };
       }
     }

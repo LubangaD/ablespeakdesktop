@@ -57,6 +57,10 @@ const RETRY_WINDOW_MS = 60000;
 // another student's session.
 const CORRECTION_WINDOW_MS = 5 * 60000;
 
+// Tabs Chrome won't screenshot for an extension (a new blank tab, browser and
+// extension pages, the Web Store); asking only waits out the timeout.
+const UNCAPTURABLE_TAB = /^(?:about:|chrome:|chrome-extension:|chrome-search:|chrome-untrusted:|devtools:|edge:|view-source:)|^https:\/\/(?:chromewebstore\.google\.com|chrome\.google\.com\/webstore)/i;
+
 export { toolFailed, aiCommandFailed };
 
 function editSimilarity(a, b) {
@@ -394,7 +398,7 @@ export class WsProxy {
             if (await this._runRoutine(text, commandId, startTime)) return;
 
             // FAST PATH
-            const fastMatch = matchFastCommand(text);
+            const fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
             if (fastMatch && fastMatch.tool !== 'dictation_mode') {
               console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
               const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
@@ -1000,8 +1004,12 @@ export class WsProxy {
       return;
     }
     if (error) {
-      this._markTurn('error');
-      ws.send(JSON.stringify({ type: 'voice_error', error, timestamp: new Date().toISOString() }));
+      this._markTurn(error === 'offline' ? 'offline' : 'error');
+      ws.send(JSON.stringify({
+        type: 'voice_error', error,
+        ...(transcript.message ? { message: transcript.message } : {}),
+        timestamp: new Date().toISOString(),
+      }));
       return;
     }
     if (this._turnLog) this._turnLog.transcript = text;
@@ -1017,8 +1025,10 @@ export class WsProxy {
     // ────────────────────────────────────────────
     // ESCAPE HATCH: Critical commands that bypass all filters
     // When music is playing, the mic picks up noise + the user's voice.
-    // Uses browser media_control FIRST (directly pauses video, no mic interference).
-    // Falls back to system media keys only if extension isn't connected.
+    // Pauses whatever is playing in ANY app (Spotify, Chrome, VLC…) through
+    // Windows' media controls, which only ever pause, never start. A browser
+    // tab Windows doesn't list falls back to the extension. The person is told
+    // what was paused, and it counts as a command on their progress.
     // ────────────────────────────────────────────
     if (!this._dictationMode) {
       const lowerForEscape = text.toLowerCase().trim();
@@ -1027,17 +1037,42 @@ export class WsProxy {
 
       if (escapeMatch && wordCount <= 6) {
         console.log(`[Voice] 🚨 Escape command: "${escapeMatch[1]}" in "${text.slice(0, 60)}"`);
+        let paused;
         try {
-          // Browser media_control — directly pauses the video without affecting the mic
-          await this.aiEngine.toolRegistry.executeTool('media_control', { action: 'pause' }, this);
-        } catch {
-          // Fallback: system media key (may also pause the mic — last resort)
-          try {
-            await this.aiEngine.toolRegistry.executeTool('system_media_control', { action: 'play_pause' }, this);
-          } catch {}
+          const { pauseAllMedia } = await import('./system-tools.js');
+          paused = await pauseAllMedia();
+        } catch (err) {
+          paused = { status: 'error', message: err.message };
         }
+        if (paused.status === 'error') console.warn('[Voice] Windows media pause failed:', paused.message);
+
+        let reply;
+        if (paused.status === 'success') {
+          reply = `Paused ${paused.apps.join(' and ')}.`;
+        } else {
+          let tab = null;
+          try { tab = await this.aiEngine.toolRegistry.executeTool('media_control', { action: 'pause' }, this); } catch {}
+          reply = tab?.status === 'success' ? 'Paused.'
+            : paused.status === 'none' ? 'Nothing is playing.'
+            : "I couldn't pause the music.";
+        }
+        console.log(`[Voice] Escape result: ${reply}`);
+        const failed = reply.startsWith("I couldn't");
+        const commandId = uuidv4();
         this._markTurn('control');
-        ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+        this._recordVoiceCommand({
+          id: commandId, type: 'voice_fast', text,
+          payload: { text, fastTool: 'pause_media', source: 'microphone' },
+          result: { status: failed ? 'error' : 'success', message: reply },
+          latency_ms: Date.now() - startTime, failed,
+        });
+        this._broadcastDashboard({
+          type: 'chat_assistant_message', id: commandId, text: reply, error: failed,
+          provider: 'fast', model: 'pattern-match', latency: Date.now() - startTime,
+          source: 'voice', timestamp: new Date().toISOString(),
+        });
+        this._lastTTSText = reply; // the echo guard ignores the mic hearing this
+        this._lastTTSTime = Date.now();
         return;
       }
     }
@@ -1225,7 +1260,7 @@ export class WsProxy {
     // ────────────────────────────────────────────
     // FAST PATH: Match common commands instantly
     // ────────────────────────────────────────────
-    const fastMatch = matchFastCommand(text);
+    const fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
 
     if (fastMatch) {
       console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
@@ -1258,7 +1293,7 @@ export class WsProxy {
           say: this._dictationMode
             ? (spokenWindowName(target?.title) ? `Dictation mode on. Typing into ${spokenWindowName(target.title)}.` : 'Dictation mode on.')
             : 'Dictation mode off. Back to commands.',
-          ...(this._dictationMode && target?.title ? { target: target.title } : {}),
+          ...(this._dictationMode && target?.title ? { target: target.title, targetName: spokenWindowName(target.title) || '' } : {}),
           timestamp: new Date().toISOString(),
         });
 
@@ -1331,10 +1366,17 @@ export class WsProxy {
 
     // Desktop screenshot from overlay, or fallback to extension tab screenshot.
     // Privacy mode disables ALL screen capture — voice control still works.
+    // The tab screenshot is optional: Chrome can't capture a new blank tab or
+    // chrome:// pages, and a slow browser mustn't hold every command for the
+    // extension's full 10-second timeout.
     if (this._privacyMode) screenshot = null;
-    if (!this._privacyMode && !screenshot && this.extensionClients.size > 0) {
+    const tabUrl = this.browserContext.activeTab?.url || '';
+    if (!this._privacyMode && !screenshot && this.extensionClients.size > 0 && !UNCAPTURABLE_TAB.test(tabUrl)) {
       try {
-        const ssResult = await this.sendToolToExtension('take_screenshot', {});
+        const ssResult = await Promise.race([
+          this.sendToolToExtension('take_screenshot', {}),
+          new Promise(r => setTimeout(() => r(null), 3000)),
+        ]);
         if (ssResult && typeof ssResult === 'string' && ssResult.startsWith('data:')) {
           screenshot = ssResult.replace(/^data:image\/\w+;base64,/, '');
         }
@@ -1394,7 +1436,9 @@ export class WsProxy {
       type: 'chat_assistant_message',
       id: commandId,
       text: result.text,
-      error: result.error || false,
+      // Every action failed: the overlay shows "Didn't work" and says why, not "Done"
+      error: result.error || (Array.isArray(result.toolCalls) && result.toolCalls.length > 0
+        && result.toolCalls.every(call => toolFailed(call.result))) || false,
       toolCalls: result.toolCalls,
       provider: result.provider,
       model: result.model,
@@ -1837,7 +1881,7 @@ export class WsProxy {
    * `wrong` is the command it replaces, so the task counts one more prompt.
    */
   async _executeCorrectedCommand(text, startTime = Date.now(), wrong = null) {
-    const fast = matchFastCommand(text);
+    const fast = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
     if (fast && fast.tool !== 'dictation_mode') {
       const r = await this.aiEngine.toolRegistry.executeTool(fast.tool, fast.args, this);
       if (r?.status === 'needs_confirmation') { this._askConfirmation(r.prompt, startTime); return; }

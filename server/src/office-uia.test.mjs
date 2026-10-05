@@ -83,3 +83,14 @@ test('the UIA3 reader compiles and answers for a window that does not exist', { 
   const node = JSON.parse(await runPowerShell(`[OfficeUia]::ReadNode([long]1, 'DrillInPane_EditorCustomProps', ${spec})`, 20000));
   assert.ok(node.error, JSON.stringify(node));
 });
+
+test('fixing a spelling asks Word for the mistake at the cursor or the word named', async () => {
+  const { fixSpellingScript } = await import('./office-uia.js');
+  const first = fixSpellingScript();
+  assert.match(first, /\$choice = 1\b/);
+  assert.match(first, /\$want = ''/);
+  assert.match(fixSpellingScript({ choice: 0 }), /\$choice = 0\b/, '0 only lists the suggestions');
+  assert.match(fixSpellingScript({ choice: 99 }), /\$choice = 9\b/, 'a silly number is kept in range');
+  // A word with a quote cannot break out of the PowerShell string
+  assert.match(fixSpellingScript({ word: "Wanjiku's'; Remove-Item x" }), /\$want = 'Wanjiku''s''; Remove-Item x'/);
+});

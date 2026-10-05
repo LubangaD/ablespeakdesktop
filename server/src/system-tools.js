@@ -267,6 +267,50 @@ export function stopSystemTools() {
  * WITH appName (e.g. "spotify"): focuses that app's window and sends its own
  * in-app shortcut, so the command reliably reaches THAT app.
  */
+/**
+ * "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" → "Spotify", "chrome.exe" →
+ * "Chrome": the app behind a Windows media session, as a name to say.
+ */
+export function mediaAppName(aumid) {
+  const raw = String(aumid || '');
+  const tail = raw.includes('!') ? raw.split('!').pop() : raw.split(/[\\/]/).pop();
+  const name = tail.replace(/\.exe$/i, '').replace(/^msedge$/i, 'Edge').trim();
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'the music';
+}
+
+/**
+ * Pause whatever is playing, in any app, through Windows' own media controls
+ * (the sessions the volume flyout shows). Unlike the play/pause key this only
+ * ever pauses, so "stop" never starts music when nothing was playing.
+ * → { status: 'success', apps: ['Spotify'] } | { status: 'none' } | { status: 'error', message }
+ */
+export async function pauseAllMedia() {
+  const script = `
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
+  function AbleAwait($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op)); $task.Wait(3000) | Out-Null; $task.Result }
+  [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime] | Out-Null
+  $mgr = AbleAwait ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+  $paused = @()
+  foreach ($s in $mgr.GetSessions()) {
+    if ([string]$s.GetPlaybackInfo().PlaybackStatus -eq 'Playing') {
+      if (AbleAwait ($s.TryPauseAsync()) ([bool])) { $paused += $s.SourceAppUserModelId }
+    }
+  }
+  if ($paused.Count -gt 0) { Write-Output ('PAUSED|' + ($paused -join ';')) } else { Write-Output 'NONE' }
+} catch { Write-Output ('ERR|' + $_.Exception.Message) }
+`;
+  const out = String(await psScript(script, 10000) || '').trim();
+  const line = out.split(/\r?\n/).reverse().find(l => /^(PAUSED|NONE|ERR)/.test(l)) || '';
+  if (line.startsWith('PAUSED|')) {
+    const apps = [...new Set(line.slice(7).split(';').filter(Boolean).map(mediaAppName))];
+    return { status: 'success', apps };
+  }
+  if (line === 'NONE') return { status: 'none' };
+  return { status: 'error', message: line.startsWith('ERR|') ? line.slice(4) : (out || 'No answer from Windows media controls') };
+}
+
 export async function systemMediaControl(action, appName) {
   const validActions = ['play_pause', 'next', 'previous', 'stop'];
   if (!validActions.includes(action)) {

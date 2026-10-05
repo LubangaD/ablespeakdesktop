@@ -60,3 +60,20 @@ test('a tool with no parameters still gets a schema the page can show', () => {
   assert.deepEqual(entry.jsonSchema.parameters, { type: 'object', properties: {} });
   assert.equal(entry.description, '');
 });
+
+// ── Opening a link by what the person called it ──
+test('a spoken link name becomes the words to look for', async () => {
+  const { linkWords, spokenPageName } = await import('./tool-registry.js');
+  // Following a link says what is opening, never the address
+  assert.equal(spokenPageName('https://en.wikipedia.org/wiki/Michael_Jackson', 'Michael Jackson Wikipedia'), 'Michael Jackson on Wikipedia');
+  assert.equal(spokenPageName('https://en.wikipedia.org/wiki/Thriller_(album)'), 'Thriller (album) on Wikipedia');
+  assert.equal(spokenPageName('https://en.wikipedia.org/w/index.php?search=jackson'), 'Wikipedia');
+  assert.equal(spokenPageName('https://en.wikipedia.org/wiki/Special:Search'), 'Wikipedia');
+  assert.equal(spokenPageName('https://www.bbc.com/news/123', 'World news'), '“World news”');
+  assert.equal(spokenPageName('https://www.bbc.com/news/123', ''), 'bbc.com');
+  assert.equal(spokenPageName('not a url'), 'the link');
+  assert.deepEqual(linkWords('Michael Jackson Wikipedia'), ['michael', 'jackson', 'wikipedia']);
+  assert.deepEqual(linkWords('the Wikipedia link'), ['wikipedia']);
+  assert.deepEqual(linkWords('Click on the first result please'), ['first']);
+  assert.deepEqual(linkWords(''), []);
+});

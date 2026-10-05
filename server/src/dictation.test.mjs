@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WsProxy, matchDictationPrefixCommand } from './ws-proxy.js';
 import { matchFastCommand } from './fast-commands.js';
-import { VoiceHandler, isInventedTranscript } from './voice-handler.js';
+import { VoiceHandler, isInventedTranscript, isNetworkError } from './voice-handler.js';
 import { AIEngine, cleanReply } from './ai-engine.js';
 
 const INVENTED = "I'm going to go ahead and say that I'm not going to be able to make it to the meeting today.";
@@ -218,6 +218,46 @@ test('transcribe() reports no speech for the invented meeting sentence', async (
   }), { status: 200 }));
   const result = await handler.transcribe('a'.repeat(5000));
   assert.deepEqual(result, { text: '', error: 'no_speech' });
+});
+
+// ── No internet: say so, not "say it again" ────────────────────────────────
+
+function fetchFailed(code) {
+  return Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(code), { code }) });
+}
+
+test('isNetworkError knows a dropped connection from other failures', () => {
+  assert.equal(isNetworkError(fetchFailed('ENOTFOUND')), true);
+  assert.equal(isNetworkError(fetchFailed('ECONNRESET')), true);
+  assert.equal(isNetworkError(Object.assign(new Error('timed out'), { name: 'TimeoutError' })), true);
+  assert.equal(isNetworkError(new SyntaxError('Unexpected token < in JSON')), false);
+  assert.equal(isNetworkError(null), false);
+});
+
+test('transcribe() reports offline, with a plain message, when Google cannot be reached', async (t) => {
+  const handler = new VoiceHandler('test-key');
+  const calls = t.mock.method(globalThis, 'fetch', async () => { throw fetchFailed('ENOTFOUND'); });
+  const result = await handler.transcribe('a'.repeat(5000));
+  assert.equal(result.error, 'offline');
+  assert.match(result.message, /needs the internet/);
+  assert.equal(calls.mock.callCount(), 2); // one retry rides out a short blip
+});
+
+test('transcribe() still reports other failures as they are', async (t) => {
+  const handler = new VoiceHandler('test-key');
+  t.mock.method(globalThis, 'fetch', async () => { throw new SyntaxError('bad reply'); });
+  const result = await handler.transcribe('a'.repeat(5000));
+  assert.equal(result.error, 'bad reply');
+  assert.equal(result.message, undefined);
+});
+
+test('transcribe() drops Gemini repeating its own instructions after the words', async (t) => {
+  const handler = new VoiceHandler('test-key');
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: 'Read the contents of this page.Transcribe this audio clip.' }] } }],
+  }), { status: 200 }));
+  const result = await handler.transcribe('a'.repeat(5000));
+  assert.equal(result.text, 'Read the contents of this page.');
 });
 
 test('cleanReply removes the internal "[executed: …]" note', () => {

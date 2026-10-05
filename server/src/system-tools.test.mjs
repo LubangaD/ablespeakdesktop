@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeForPS, escapeForPSString } from './system-tools.js';
+import { sanitizeForPS, escapeForPSString, mediaAppName } from './system-tools.js';
 
 /**
  * Minimal PowerShell double-quoted-string scanner: backtick escapes the next
@@ -79,4 +79,13 @@ test('sanitizeForPS strips everything a PowerShell subexpression injection needs
 test('sanitizeForPS leaves ordinary alphanumeric key tokens untouched', () => {
   assert.equal(sanitizeForPS('a'), 'a');
   assert.equal(sanitizeForPS('F13'), 'F13');
+});
+
+test('mediaAppName: a Windows media session as a name to say', () => {
+  assert.equal(mediaAppName('SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify'), 'Spotify');
+  assert.equal(mediaAppName('chrome.exe'), 'Chrome');
+  assert.equal(mediaAppName('Chrome'), 'Chrome');
+  assert.equal(mediaAppName('msedge.exe'), 'Edge');
+  assert.equal(mediaAppName(String.raw`C:\Program Files\VideoLAN\VLC\vlc.exe`), 'Vlc');
+  assert.equal(mediaAppName(''), 'the music');
 });

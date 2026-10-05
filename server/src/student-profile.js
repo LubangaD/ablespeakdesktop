@@ -20,7 +20,9 @@ export const SENSITIVITY = {
   // quiet: voice-level sound too soft to count (the "didn't catch that" cue)
   standard: { speech: 45, silence: 15, quiet: 30 },
   quiet: { speech: 28, silence: 10, quiet: 18 },
-  noisy: { speech: 60, silence: 22, quiet: 40 },
+  // Noisy room: no "say it louder" band (quiet = speech), because there it is
+  // mostly other people talking, and no automatic gain (see listeningSettings).
+  noisy: { speech: 60, silence: 22, quiet: 60 },
 };
 
 export const DEFAULT_PROFILE = Object.freeze({
@@ -157,6 +159,9 @@ export function listeningSettings(profile) {
     speechThreshold: levels.speech,
     silenceThreshold: levels.silence,
     quietThreshold: levels.quiet,
+    // Automatic gain turns quiet sound up, voices outside the room included.
+    // Kept for soft speakers; off in a noisy room so distance counts again.
+    autoGain: sensitivity !== 'noisy',
     commandPauseMs: Math.round(pauseSeconds * 1000),
     // Dictation always waits a little longer than a command.
     dictationPauseMs: Math.max(1800, Math.round(pauseSeconds * 1000) + 300),

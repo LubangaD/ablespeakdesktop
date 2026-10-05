@@ -9,6 +9,7 @@
 // provider's API at runtime (listModels). `prefer` is an ordered list of regex
 // patterns used to auto-pick the best available model (autoSelectModel), so
 // the app keeps working when providers retire old models.
+// AbleSpeak offers these three providers only.
 const PROVIDERS = {
   openai: {
     name: 'OpenAI',
@@ -26,14 +27,6 @@ const PROVIDERS = {
     envKey: 'GEMINI_API_KEY',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
   },
-  azure: {
-    name: 'Azure OpenAI',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4'],
-    defaultModel: 'gpt-4o-mini',
-    prefer: [/mini/, /.*/],
-    envKey: 'AZURE_OPENAI_API_KEY',
-    baseUrl: null, // Set via AZURE_OPENAI_ENDPOINT
-  },
   anthropic: {
     name: 'Anthropic Claude',
     models: ['claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022'],
@@ -41,22 +34,6 @@ const PROVIDERS = {
     prefer: [/sonnet/, /haiku/, /^claude-/],
     envKey: 'ANTHROPIC_API_KEY',
     baseUrl: 'https://api.anthropic.com/v1',
-  },
-  ollama: {
-    name: 'Ollama (Local)',
-    models: ['llama3', 'mistral', 'codellama', 'phi3'],
-    defaultModel: 'llama3',
-    prefer: [/llama/, /.*/],
-    envKey: null, // No key needed
-    baseUrl: 'http://localhost:11434/v1',
-  },
-  groq: {
-    name: 'Groq',
-    models: ['llama-3.3-70b-versatile', 'gemma2-9b-it'],
-    defaultModel: 'llama-3.3-70b-versatile',
-    prefer: [/llama-[\d.]+-70b/, /llama.*70b/, /llama/, /.*/],
-    envKey: 'GROQ_API_KEY',
-    baseUrl: 'https://api.groq.com/openai/v1',
   },
 };
 
@@ -96,10 +73,15 @@ export class AIEngine {
     this.toolRegistry = toolRegistry;
     this.wsHub = wsHub;
 
-    // Current provider config
-    this.provider = process.env.LLM_PROVIDER || 'openai';
+    // Current provider config. A saved provider that is no longer offered
+    // (Azure OpenAI, Ollama, Groq) — or none — falls back to the first of the
+    // three that has a key, and that provider's own default model.
+    const saved = (process.env.LLM_PROVIDER || '').trim();
+    const known = !!PROVIDERS[saved];
+    this.provider = known ? saved : (Object.keys(PROVIDERS).find(p => process.env[PROVIDERS[p].envKey]) || 'openai');
+    if (saved && !known) console.warn(`[AIEngine] "${saved}" is no longer offered — using ${PROVIDERS[this.provider].name}`);
     // LLM_MODEL empty or "auto" → resolve dynamically from the provider's live model list
-    const envModel = (process.env.LLM_MODEL || '').trim();
+    const envModel = known ? (process.env.LLM_MODEL || '').trim() : '';
     this.model = (envModel && envModel.toLowerCase() !== 'auto')
       ? envModel
       : PROVIDERS[this.provider]?.defaultModel || 'gpt-4o-mini';
@@ -147,10 +129,8 @@ export class AIEngine {
           const data = await res.json();
           models = (data.data || []).map(m => m.id);
         }
-      } else if (provider === 'azure') {
-        models = [...config.models]; // deployments can't be listed with just an API key
       } else {
-        // OpenAI-compatible: openai, groq, ollama
+        // OpenAI
         const headers = {};
         if (config.envKey && process.env[config.envKey]) {
           headers['Authorization'] = `Bearer ${process.env[config.envKey]}`;
@@ -158,10 +138,7 @@ export class AIEngine {
         const res = await this._fetchWithTimeout(`${config.baseUrl}/models`, { headers }, 10000);
         if (res.ok) {
           const data = await res.json();
-          models = (data.data || []).map(m => m.id);
-          if (provider === 'openai') {
-            models = models.filter(id => /^(gpt-|o\d|chatgpt)/.test(id));
-          }
+          models = (data.data || []).map(m => m.id).filter(id => /^(gpt-|o\d|chatgpt)/.test(id));
         }
       }
     } catch (err) {
@@ -385,15 +362,25 @@ export class AIEngine {
         'create_tab', 'go_back', 'go_forward', 'reload_tab', 'make_tab_active',
       ]);
 
+      // The same call that already failed in this command fails again: it is
+      // not run twice, and the command ends with that failure instead.
+      const failedCalls = new Set();
+      const callKey = tc => `${tc.name}:${JSON.stringify(tc.arguments || {})}`;
       while (currentResult.toolCalls && currentResult.toolCalls.length > 0 && rounds < MAX_ROUNDS) {
+        if (currentResult.toolCalls.every(tc => failedCalls.has(callKey(tc)))) {
+          console.log('[AIEngine] Not repeating a call that already failed');
+          break;
+        }
         rounds++;
         const roundResults = [];
         const usedNavigation = currentResult.toolCalls.some(tc => NAVIGATION_TOOLS.has(tc.name));
 
         for (const toolCall of currentResult.toolCalls) {
+          if (failedCalls.has(callKey(toolCall))) continue;
           console.log(`[AIEngine] Tool call (round ${rounds}): ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
           const toolResult = await this.toolRegistry.executeTool(toolCall.name, toolCall.arguments, this.wsHub);
           roundResults.push({ tool: toolCall.name, result: toolResult });
+          if (toolResult?.status === 'error' || toolResult?.error) failedCalls.add(callKey(toolCall));
         }
         allToolResults.push(...roundResults);
 
@@ -632,8 +619,8 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- User: "read it out" / "read this page" → Use `get_page_content` to read the page, then provide the key content in your response',
       '- User: "what is this page about" → Use `get_page_content` to read the page, then explain what the page is about',
       '',
-      '## CRITICAL: Page Content Commands',
-      '- When the user asks you to "summarize", "read", "tell me about", or "what is on" a page, you MUST:',
+      '## CRITICAL: Page Content Commands (web pages in Chrome — see "Reading the screen" below for other apps)',
+      '- When the user asks you to "summarize", "read", "tell me about", or "what is on" a WEB page in Chrome, you MUST:',
       '  1. Call `get_page_content` to get the page text',
       '  2. Actually provide the summary or content IN YOUR RESPONSE TEXT',
       '  3. NEVER just say "I have summarized/read the content" — the user wants to HEAR the summary',
@@ -704,7 +691,20 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       parts.push('Its controls were not read in time: call uia_query to see them, then act with uia_act.');
     }
     if (context.screenModel?.window) {
-      parts.push(`"This", "here" and "the zoom" mean ${context.screenModel.app}, not the browser: browser tools (zoom_tab, click_element, scroll_page and the like) only act on a Chrome tab. Use them only if the student names the browser or a website.`);
+      const app = context.screenModel.app || context.screenModel.window;
+      const inBrowser = /chrome|edge|firefox|brave|opera|vivaldi/i.test(`${context.screenModel.app} ${context.screenModel.window}`);
+      if (inBrowser) {
+        parts.push('', '## Reading the screen', `The student is looking at a web page in ${app}: for "what's on my screen", "read this" or "read this page", use \`get_page_content\` and say what it holds.`);
+      } else {
+        // The page-content rules above are about Chrome; without this the AI
+        // described a Chrome tab the student was not even looking at.
+        parts.push(`"This", "here" and "the zoom" mean ${app}, not the browser: browser tools (zoom_tab, click_element, scroll_page and the like) only act on a Chrome tab. Use them only if the student names the browser or a website.`);
+        parts.push('', '## Reading the screen',
+          `The student is using ${app}, NOT Chrome. For "what's on my screen", "read this", "read this page" or "what does it say":`,
+          `- a document (Word, a PDF, Notepad, an email): \`uia_act\` with action "read_text" and no ref reads it at their cursor (value "page" or "all" for more);`,
+          `- anything else: describe ${app} from its controls listed above, or the screenshot when attached;`,
+          '- do NOT call `get_page_content` — that reads a Chrome tab the student is not looking at.');
+      }
     }
 
     // ── Extension status — be honest with the user when browser control is unavailable ──
@@ -834,8 +834,12 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       'execute_javascript', 'get_page_state',
     ]);
 
-    const parts = toolResults.map(r => {
+    // Several link-follows in one command: say the first, the link the person asked for
+    const firstLink = toolResults.findIndex(r => r.tool === 'navigate_to_link' && r.result?.status === 'success');
+
+    const parts = toolResults.map((r, i) => {
       const res = r.result;
+      if (r.tool === 'navigate_to_link' && res?.status === 'success' && i !== firstLink) return '';
 
       // Silent action tools: return nothing (no TTS)
       if (SILENT.has(r.tool) && res?.status !== 'error') {
@@ -873,7 +877,8 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       return '';
     }).filter(Boolean);
 
-    return parts.join('\n');
+    // The same message once, however many times it came back
+    return [...new Set(parts)].join('\n');
   }
 
   // ── LLM Dispatch (with retired-model auto-recovery) ──
@@ -886,7 +891,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
   _dispatch(systemPrompt, tools) {
     if (this.provider === 'gemini') return this._callGemini(systemPrompt, tools);
     if (this.provider === 'anthropic') return this._callAnthropic(systemPrompt, tools);
-    // OpenAI-compatible (openai, azure, ollama, groq)
+    // OpenAI
     return this._callOpenAICompatible(systemPrompt, tools);
   }
 
@@ -906,20 +911,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
     }
   }
 
-  // ── OpenAI-Compatible Provider ──
+  // ── OpenAI ──
 
   async _callOpenAICompatible(systemPrompt, tools) {
     const config = PROVIDERS[this.provider];
-    let baseUrl = config.baseUrl;
-    let apiKey = process.env[config.envKey] || '';
-
-    // Azure special handling
-    if (this.provider === 'azure') {
-      const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-      const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || this.model;
-      baseUrl = `${endpoint}/openai/deployments/${deployment}`;
-      apiKey = process.env.AZURE_OPENAI_API_KEY;
-    }
+    const apiKey = process.env[config.envKey] || '';
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -945,19 +941,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       body.tool_choice = 'auto';
     }
 
-    const url = this.provider === 'azure'
-      ? `${baseUrl}/chat/completions?api-version=2024-02-01`
-      : `${baseUrl}/chat/completions`;
-
+    const url = `${config.baseUrl}/chat/completions`;
     const headers = {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
     };
-
-    if (this.provider === 'azure') {
-      headers['api-key'] = apiKey;
-    } else {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
 
     const res = await this._fetchWithRetry(url, {
       method: 'POST',

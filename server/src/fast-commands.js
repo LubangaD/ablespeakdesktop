@@ -12,19 +12,21 @@
 
 import { resolveAppName } from './app-names.js';
 
-// AbleSpeak dashboard pages a student can open by voice ("go to settings")
+// AbleSpeak dashboard pages that can be opened by voice ("go to students")
 const NAV_MAP = {
   dashboard: 'dashboard', home: 'dashboard',
-  students: 'students', teacher: 'students', progress: 'students',
-  'speech profile': 'speech', 'speech settings': 'speech',
-  'test console': 'test', chat: 'chat', voice: 'chat',
-  'developer hub': 'developer', developer: 'developer',
-  tools: 'tools',
-  context: 'context',
-  logs: 'logs',
-  settings: 'settings', preferences: 'settings', options: 'settings',
-  prompt: 'prompt', 'prompt editor': 'prompt',
+  progress: 'progress', 'my progress': 'progress',
+  'speech profile': 'speech', 'speech settings': 'speech', 'voice and words': 'speech', 'my words': 'speech', 'voice settings': 'speech',
 };
+
+// The admin pages (managing users, the test console, Developer Hub, Settings)
+// need the admin PIN (admin-pin.js), so voice never opens them. Their own names get a spoken answer; everyday words
+// that used to open them ("settings", "tools", "logs") go to the AI instead,
+// since a student saying them usually means the app in front of them.
+const ADMIN_PAGE_NAMES = new Set(['developer hub', 'developer', 'admin', 'admin pages', 'prompt editor',
+  'users', 'students', 'teacher', 'teacher page', 'test console', 'chat']);
+const ADMIN_PAGE_WORDS = new Set(['tools', 'context', 'logs', 'settings', 'preferences', 'options', 'prompt']);
+const isDashboardName = name => !!NAV_MAP[name] || ADMIN_PAGE_NAMES.has(name) || ADMIN_PAGE_WORDS.has(name);
 
 // ── Silent commands: these execute without TTS feedback ──
 const SILENT_COMMANDS = new Set([
@@ -74,7 +76,14 @@ function cleanTranscription(text) {
  * Pattern-based fast command matching.
  * Returns { tool, args, silent } or null if no match.
  */
-export function matchFastCommand(text) {
+// Pages with their own search bar, where "search for X" searches again in place
+const SEARCH_PAGE = /^https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\/search|duckduckgo\.com\/|(?:m\.)?youtube\.com\/|[a-z-]+\.wikipedia\.org\/)/i;
+
+/**
+ * `activeUrl` is the browser's active tab, when known; it decides whether a
+ * search happens on the current page or as a new Google search.
+ */
+export function matchFastCommand(text, { activeUrl = '' } = {}) {
   const t = cleanTranscription(text);
 
   // ── Dictation Mode Toggle ──
@@ -156,10 +165,19 @@ export function matchFastCommand(text) {
   // ── Search — "search for X", "google X", "look up X" ──
   const searchMatch = t.match(/^(?:search\s+(?:for\s+)?|google\s+|look\s+up\s+)(.+)$/);
   if (searchMatch) {
-    const query = searchMatch[1].trim();
+    // "search youtube for X", "search for X on YouTube"
+    const youtube = searchMatch[1].match(/^youtube\s+for\s+(.+)$/) || searchMatch[1].match(/^(.+?)\s+(?:on|in)\s+youtube$/);
+    if (youtube) return { tool: 'search_youtube', args: { query: youtube[1].trim() }, silent: true };
+    // "…on Chrome", "…online", "search the web for…" say where to search, not what for
+    const query = searchMatch[1]
+      .replace(/^(?:google|chrome|the\s+(?:web|internet)|online)\s+for\s+/, '')
+      .replace(/\s+(?:on|in|using|with)\s+(?:the\s+)?(?:chrome|google|browser|internet|web)$|\s+online$/, '')
+      .trim();
     if (query) {
-      // Use search_in_page (clears search bar and types new query in-place)
-      return { tool: 'search_in_page', args: { query }, silent: true };
+      // Already on a search page: clear its search bar and search again there.
+      // Anywhere else (a new tab, an ordinary page): a new Google search.
+      const tool = SEARCH_PAGE.test(activeUrl) ? 'search_in_page' : 'search_web';
+      return { tool, args: { query }, silent: true };
     }
   }
 
@@ -313,7 +331,7 @@ export function matchFastCommand(text) {
     let appName = focusAppMatch[1].trim()
       .replace(/\b(tab|browser|window|app|application)\b/gi, '').trim();
     // Only match if it looks like an app name (1-3 words, no complex phrases)
-    if (appName && !NAV_MAP[appName] && appName.split(/\s+/).length <= 3 && !/\b(and|or|then|after|also|this|that)\b/.test(appName)) {
+    if (appName && !isDashboardName(appName) && appName.split(/\s+/).length <= 3 && !/\b(and|or|then|after|also|this|that)\b/.test(appName)) {
       return { tool: 'focus_application', args: { app_name: appName }, silent: true };
     }
   }
@@ -328,9 +346,13 @@ export function matchFastCommand(text) {
   // ── AbleSpeak Dashboard Navigation — "go to settings", "open chat" ──
   const navMatch = t.match(/^(?:go to|open|show|navigate to|switch to)\s+(?:the\s+)?(.+?)(?:\s+page)?$/);
   if (navMatch) {
-    const page = NAV_MAP[navMatch[1].trim()];
+    const name = navMatch[1].trim();
+    const page = NAV_MAP[name];
     if (page) {
       return { tool: 'navigate_dashboard', args: { page }, silent: false };
+    }
+    if (ADMIN_PAGE_NAMES.has(name)) {
+      return { tool: 'answer_question', args: { text: 'That page is for your teacher.' }, silent: false };
     }
   }
 

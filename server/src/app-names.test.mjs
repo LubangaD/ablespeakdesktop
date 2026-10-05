@@ -70,10 +70,26 @@ test('"switch to", "go to" and "focus on" an app bring it to the front', () => {
 });
 
 test('page and option phrases keep their own meaning', () => {
-  assert.equal(matchFastCommand('Show settings').tool, 'navigate_dashboard');
-  assert.equal(matchFastCommand('go to settings').tool, 'navigate_dashboard');
+  assert.equal(matchFastCommand('Show my progress').tool, 'navigate_dashboard');
+  assert.equal(matchFastCommand('go to speech profile').tool, 'navigate_dashboard');
   assert.equal(matchFastCommand('Go to the top').tool, 'scroll_to_top');
   assert.equal(matchFastCommand('Switch to dark mode').tool, 'select_option');
+});
+
+test('admin pages cannot be opened by voice', () => {
+  for (const said of ['open developer hub', 'go to the developer page', 'open admin', 'open prompt editor', 'show users', 'open the test console']) {
+    assert.deepEqual(
+      matchFastCommand(said),
+      { tool: 'answer_question', args: { text: 'That page is for your teacher.' }, silent: false },
+      said,
+    );
+  }
+  // Everyday words go to the AI: not the dashboard, and not an app called "settings"
+  for (const said of ['Show settings', 'go to settings', 'open tools', 'show logs', 'open preferences']) {
+    const match = matchFastCommand(said);
+    assert.notEqual(match?.tool, 'navigate_dashboard', said);
+    assert.notEqual(match?.tool, 'focus_application', said);
+  }
 });
 
 test('a window is named briefly enough to say aloud', () => {

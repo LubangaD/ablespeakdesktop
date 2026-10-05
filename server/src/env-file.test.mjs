@@ -31,9 +31,9 @@ test('a commented-out template line becomes the active line', () => {
 });
 
 test('a new setting is appended and comments survive', () => {
-  const out = setEnvValue(TEMPLATE, 'GROQ_API_KEY', 'gsk_abc');
+  const out = setEnvValue(TEMPLATE, 'ANTHROPIC_API_KEY', 'sk-ant-abc');
   assert.ok(out.startsWith('# AbleSpeak keys\n'));
-  assert.ok(out.endsWith('GROQ_API_KEY=gsk_abc\n'));
+  assert.ok(out.endsWith('ANTHROPIC_API_KEY=sk-ant-abc\n'));
 });
 
 test('a later duplicate is dropped so the saved value is the one that loads', () => {

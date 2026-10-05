@@ -474,26 +474,46 @@ const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        label: { type: 'string', description: 'Text to match against link labels on the page (partial, case-insensitive).' },
+        label: { type: 'string', description: 'What the person called the link, e.g. "Michael Jackson Wikipedia" or "the Wikipedia link". Matched word by word against each link\'s text and its web address, so a site name works too.' },
         index: { type: 'number', description: '0-based index when multiple links match (default: 0 = first match).' },
       },
       required: ['label'],
     },
     selector: { requiresExtension: true },
     execute: async (args, wsHub) => {
-      const escaped = JSON.stringify((args.label || '').toLowerCase());
+      const escaped = JSON.stringify(linkWords(args.label));
+      const phrase = JSON.stringify(String(args.label || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
       const idx = typeof args.index === 'number' ? Math.max(0, args.index) : 0;
 
-      // Step 1: Find the matching link's raw href via content script
+      // Step 1: Find the best matching link's raw href via content script.
+      // Every word said must appear in the link's text or its address
+      // ("Michael Jackson Wikipedia" → en.wikipedia.org/wiki/Michael_Jackson,
+      // whose text runs "Michael JacksonWikipedia…" on Google). The exact
+      // phrase, words in the visible text, and links on screen rank higher.
       const findCode = `(function(){
-        var links = Array.from(document.querySelectorAll('a[href]'));
-        var matches = links.filter(function(a){
-          var t = (a.textContent || a.getAttribute('aria-label') || a.title || '').trim().toLowerCase();
-          return t.includes(${escaped});
+        var words = ${escaped};
+        var phrase = ${phrase};
+        var norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };
+        var scored = [];
+        Array.from(document.querySelectorAll('a[href]')).forEach(function (a) {
+          var href = a.getAttribute('href') || '';
+          if (!href || href.charAt(0) === '#' || /^javascript:/i.test(href)) return;
+          var text = norm((a.textContent || '') + ' ' + (a.getAttribute('aria-label') || '') + ' ' + (a.title || ''));
+          var where = '';
+          try { var u = new URL(a.href); where = norm(u.hostname + ' ' + decodeURIComponent(u.pathname)); } catch (e) {}
+          var hay = text + ' ' + where;
+          if (!words.length || !words.every(function (w) { return hay.indexOf(w) !== -1; })) return;
+          var r = a.getBoundingClientRect();
+          var shown = r.width > 0 && r.height > 0;
+          var score = (phrase && text.indexOf(phrase) !== -1 ? 50 : 0)
+            + words.filter(function (w) { return text.indexOf(w) !== -1; }).length * 10
+            + (shown ? 20 : 0) + (shown && r.top >= 0 && r.top < innerHeight ? 10 : 0)
+            - Math.min(text.length, 200) / 50;
+          scored.push({ href: href, score: score });
         });
-        var el = matches[${idx}];
-        if (el && el.getAttribute('href')) return el.getAttribute('href');
-        return 'NOT_FOUND';
+        scored.sort(function (x, y) { return y.score - x.score; });
+        var best = scored[${idx}];
+        return best ? best.href : 'NOT_FOUND';
       })()`;
 
       const result = await wsHub.sendToolToExtension('javascript', findCode);
@@ -516,7 +536,8 @@ const TOOLS = [
 
       // Step 3: Navigate via open_url (background service worker — no timeout)
       await wsHub.sendToolToExtension('open_url', { url: fullUrl });
-      return { status: 'success', message: `Navigated to: ${fullUrl.substring(0, 80)}` };
+      // Said and shown to the person: what is opening, never the raw address
+      return { status: 'success', message: `Opening ${spokenPageName(fullUrl, args.label)}.`, url: fullUrl };
     },
   },
 
@@ -547,9 +568,12 @@ const TOOLS = [
     },
     selector: { requiresExtension: true },
     execute: async (args, wsHub) => {
+      // The page's own words, not its menus: big sites (Microsoft Learn, news,
+      // docs) start with thousands of characters of navigation, so the first
+      // 5,000 characters of <body> held no article at all.
       const code = args.selector
-        ? `document.querySelector('${args.selector}')?.innerText || 'Element not found'`
-        : `document.body.innerText.substring(0, 5000)`;
+        ? `document.querySelector(${JSON.stringify(String(args.selector))})?.innerText || 'Element not found'`
+        : PAGE_TEXT_SCRIPT;
       return wsHub.sendToolToExtension('javascript', code);
     },
   },
@@ -841,6 +865,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'fix_spelling',
+    description: 'Fix a spelling mistake in Microsoft Word using Word’s own suggestions: the mistake at or nearest the cursor, or the misspelled word the person names. "fix that spelling" or "use the first suggestion" → choice 1; "use the second one" → choice 2; "what are the suggestions?" → choice 0 (lists them, changes nothing). Works without the Editor pane open.',
+    parameters: {
+      type: 'object',
+      properties: {
+        choice: { type: 'number', description: 'Which of Word’s suggestions to use, 1 = first (default). 0 only lists them.' },
+        word: { type: 'string', description: 'The misspelled word, if the person named one. Leave out for the mistake at the cursor.' },
+      },
+    },
+    selector: {},
+    execute: async (args) => {
+      const { fixSpelling } = await import('./office-uia.js');
+      return fixSpelling({ choice: args.choice ?? 1, word: args.word || '' });
+    },
+  },
+  {
     name: 'list_desktop_elements',
     description: 'Scan a desktop application window and list ALL its clickable elements (buttons, menus, inputs, list items) with their names. This is your EYES on desktop apps — use it when you need to know what can be clicked, or when click_desktop_element could not find an element. Omit app_name to scan the window the user is currently using.',
     parameters: {
@@ -968,13 +1008,13 @@ const TOOLS = [
   // ── AbleSpeak Dashboard Control (Accessibility — voice-navigable UI) ──
   {
     name: 'navigate_dashboard',
-    description: 'Navigate the AbleSpeak dashboard to a specific page. Use when the user says "go to settings", "show students", "open speech profile", "open the test console", "open developer hub", "show tools", "show logs", "go to context", "show dashboard", or "open prompt editor".',
+    description: 'Open one of the user\'s own AbleSpeak pages: home ("show dashboard"), their progress ("show my progress") or their voice and words ("open my words"). The admin pages (users, test console, Developer Hub, Settings) need the admin PIN and cannot be opened by voice: if asked for them, answer "That page is for your teacher." A plain "open settings" usually means the Windows or app settings, not this dashboard.',
     parameters: {
       type: 'object',
       properties: {
         page: {
           type: 'string',
-          enum: ['dashboard', 'students', 'speech', 'test', 'developer', 'chat', 'tools', 'context', 'logs', 'settings', 'prompt'],
+          enum: ['dashboard', 'progress', 'speech'],
           description: 'The dashboard page to navigate to.',
         },
       },
@@ -982,21 +1022,16 @@ const TOOLS = [
     },
     selector: {},
     execute: async (args, wsHub) => {
-      // The dashboard's six sections; the older page names open their new home.
+      // The user's own pages; admin pages (users, test console, Developer Hub, Settings) are PIN-only.
       const pageMap = {
         dashboard: '/',
-        students: '/students',
+        progress: '/progress',
         speech: '/speech',
-        test: '/test',
-        chat: '/test',
-        developer: '/developer',
-        prompt: '/developer/prompt',
-        tools: '/developer/tools',
-        context: '/developer/context',
-        logs: '/developer/logs',
-        settings: '/settings',
       };
-      const path = pageMap[args.page] || '/';
+      if (!pageMap[args.page]) {
+        return { status: 'error', message: 'That page is for your teacher.' };
+      }
+      const path = pageMap[args.page];
       wsHub.broadcastToDashboard({
         type: 'dashboard_navigate',
         path,
@@ -1013,7 +1048,7 @@ const TOOLS = [
       properties: {
         provider: {
           type: 'string',
-          enum: ['gemini', 'openai', 'anthropic', 'groq'],
+          enum: ['gemini', 'openai', 'anthropic'],
           description: 'The AI provider to switch to.',
         },
         model: {
@@ -1100,6 +1135,56 @@ const TOOLS = [
     },
   },
 ];
+
+/**
+ * The words that identify a link: what was said, without filler such as
+ * "the", "link", "open" or "click on". "the Wikipedia link" → ["wikipedia"].
+ */
+/**
+ * Runs in the page (get_page_content): the title and the main content —
+ * <main>, <article> or role="main" when it holds real text — with tidy spacing.
+ */
+export const PAGE_TEXT_SCRIPT = `(() => {
+  const picks = ['main article', 'article', 'main', '[role="main"]', '#main-content', '#main', '#content'];
+  let el = null;
+  for (const s of picks) {
+    const found = document.querySelector(s);
+    if (found && (found.innerText || '').trim().length > 200) { el = found; break; }
+  }
+  const text = ((el || document.body).innerText || '')
+    .replace(/[ \\t\\u00a0]+/g, ' ')
+    .replace(/\\s*\\n\\s*(\\n\\s*)+/g, '\\n\\n')
+    .trim();
+  return (document.title ? 'Title: ' + document.title + '\\n\\n' : '') + text.substring(0, 8000);
+})()`;
+
+/**
+ * A web page as a person would say it: "Michael Jackson on Wikipedia", the
+ * link's own words, or the site's name — never "https://en.wikipedia.org/…".
+ */
+export function spokenPageName(url, label = '') {
+  let parsed;
+  try { parsed = new URL(url); } catch { return 'the link'; }
+  const host = parsed.hostname.replace(/^www\./, '');
+  if (/(^|\.)wikipedia\.org$/.test(host)) {
+    const article = parsed.pathname.match(/^\/wiki\/([^/?#]+)/);
+    if (article) {
+      let title = article[1];
+      try { title = decodeURIComponent(title); } catch {}
+      title = title.replace(/_/g, ' ').trim();
+      if (title && !title.includes(':')) return `${title} on Wikipedia`;
+    }
+    return 'Wikipedia';
+  }
+  const words = String(label || '').replace(/\s+/g, ' ').trim();
+  if (words && words.length <= 60 && !/^https?:|^www\./i.test(words)) return `“${words}”`;
+  return host;
+}
+
+export function linkWords(label) {
+  const FILLER = new Set(['the', 'a', 'an', 'link', 'links', 'open', 'click', 'on', 'go', 'to', 'page', 'website', 'site', 'result', 'please', 'one']);
+  return String(label || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w && !FILLER.has(w));
+}
 
 // ── Tool Registry Class ──
 
