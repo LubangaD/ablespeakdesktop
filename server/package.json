@@ -23,7 +23,7 @@
       "src/**/*",
       "electron-main.cjs",
       "overlay.html",
-      "fonts/**/*",
+      "overlay-messages.js",
       "overlay-preload.cjs",
       "overlay-wake.cjs",
       "wake-preload.cjs",
