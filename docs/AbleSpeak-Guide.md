@@ -126,7 +126,7 @@ AbleSpeak closes those gaps by treating voice as the *only* input and engineerin
 **2. The gateway server (Node, port 3001).** The brain. It receives speech, decides what to do, executes actions, and talks to the browser. Key modules:
 
 - `ws-proxy.js` — the WebSocket hub and the heart of the voice pipeline. Routes every utterance, applies safety checks, and broadcasts results to the overlay/dashboard.
-- `ai-engine.js` — multi-provider LLM integration (Gemini, OpenAI, Anthropic, Groq) with a tool-calling loop for commands that need reasoning.
+- `ai-engine.js` — multi-provider LLM integration (Gemini, OpenAI, Anthropic) with a tool-calling loop for commands that need reasoning.
 - `tool-registry.js` — the catalog of every action AbleSpeak can take, and the single chokepoint where the safety gate runs.
 - `system-tools.js` — OS-level actions on Windows via PowerShell and UI Automation (launch apps, type, manage windows, dictate into Word/Excel).
 - `safety.js` — pure, unit-tested logic for classifying risky actions and filtering phantom transcripts.
@@ -339,7 +339,7 @@ Key settings live in `server/.env`:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `LLM_PROVIDER` | `gemini` | AI provider: gemini, openai, anthropic, groq |
+| `LLM_PROVIDER` | `gemini` | AI provider: gemini, openai, anthropic |
 | `LLM_MODEL` | `gemini-2.0-flash` | Model for the chosen provider |
 | `GEMINI_API_KEY` (etc.) | — | API key for the chosen provider |
 | `GATEWAY_PORT` | `3001` | Server port |

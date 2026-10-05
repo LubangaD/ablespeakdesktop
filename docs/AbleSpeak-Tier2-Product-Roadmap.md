@@ -73,7 +73,7 @@ Verified by reading the code on 3 Sep 2026, not from prior documentation.
 | Chrome bridge extension | **Built** | `chrome-integration-master/` |
 | ASR + hallucination filtering | **Built** | `voice-handler.js:97–192` (SILENCE-marker filter, known-hallucination list) |
 | Fast-command router (~40 patterns, no LLM) | **Built** | `fast-commands.js` — 200–500 ms path |
-| Multi-provider LLM tool-calling | **Built** | `ai-engine.js` (Gemini / OpenAI / Anthropic / Groq) |
+| Multi-provider LLM tool-calling | **Built** | `ai-engine.js` (Gemini / OpenAI / Anthropic) |
 | Safety layer | **Built + tested** | `safety.js`, `safety.test.mjs` |
 | **UI Automation hooks** | **Partial** | `system-tools.js:822–978` — UIA loaded, Invoke tried before mouse |
 | Click-grounding A/B harness | **Built, not yet run on real data** | `server/tools/grounding-eval/` — Gemini vs MolmoWeb, hit rate / distance / latency |

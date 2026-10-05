@@ -42,8 +42,16 @@ which works like a password for that service.
 1. In Chrome, go to **aistudio.google.com/apikey** and sign in with the
    Google account.
 2. Click **Create API key**, then click **Copy**.
-3. In the AbleSpeak dashboard, click **Settings** on the left.
-4. Under **API keys**, find **Google Gemini**. Paste the key into its box
+3. The first time only: right-click the AbleSpeak icon near the clock and
+   choose **Set admin PIN…**. The dashboard opens and asks for a PIN of 4 to
+   8 digits. Choose one only teachers know, type it twice and click **Save
+   PIN and open**. (Setting the first PIN only works from the tray icon, so
+   a student using the dashboard by voice can't set one.)
+4. After that, open these pages with the small **Admin** link at the bottom
+   of the dashboard's menu and the PIN. Settings and Developer Hub always
+   need it, so students can't change the keys, even by voice. After 15
+   minutes they lock again.
+5. Under **API keys**, find **Google Gemini**. Paste the key into its box
    and click **Save key**.
 5. Wait for the green message saying the key works. If it says the key was
    refused, copy it again from Google and paste it again.
@@ -143,7 +151,8 @@ If all five work, setup is finished.
 | Nothing happens when the student speaks | Check the microphone button is pulsing green. If it is grey, click it once. Check step 3. |
 | The overlay says "Ignored" a lot | AbleSpeak is hearing background talk. A headset microphone helps. |
 | "Didn't work" for web pages | Check the AbleSpeak icon in Chrome is green. If not, close and reopen Chrome. |
-| AbleSpeak does not speak or understand at all | Open **Settings** in the dashboard and check the Gemini key (step 2). |
+| AbleSpeak does not speak or understand at all | Click **Admin** in the dashboard, enter the PIN, and check the Gemini key (step 2). |
+| You forgot the admin PIN | Open AbleSpeak's `.env` file in Notepad (usually `%APPDATA%\AbleSpeak\.env`; paste that into the File Explorer address bar), delete the line that starts with `ADMIN_PIN_HASH=`, save, and restart AbleSpeak. Then set a new one with **Set admin PIN…** on the tray icon. |
 | The overlay has disappeared | Say "Come back". Or press Ctrl+Shift+A. Or right-click the AbleSpeak icon near the clock and choose **Voice Overlay**. |
 | The student's work is being recorded under the wrong name | Choose the right student on the Teacher page (step 5). |
 
