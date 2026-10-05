@@ -14,17 +14,55 @@ import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { randomBytes } from 'crypto';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 
-import { initDatabase } from './db.js';
+import { initDatabase, closeDatabase } from './db.js';
+import { startDeviceSession, endDeviceSession, commandAttribution, getActiveStudent } from './student-session.js';
+import { userInfo } from 'os';
+
+/** The Windows account signed in, or null (tests set ABLESPEAK_NO_WINDOWS_USER). */
+function windowsAccount() {
+  if (process.env.ABLESPEAK_NO_WINDOWS_USER === '1') return null;
+  try { return process.env.USERNAME || userInfo().username || null; } catch { return null; }
+}
+import { getProfile, learnAlias, LEARN_AFTER } from './student-profile.js';
+import { recordCorrection } from './db.js';
+import { screenContextForAgent, getScreenModel } from './screen-model.js';
 import { AIEngine } from './ai-engine.js';
 import { ToolRegistry } from './tool-registry.js';
 import { WsProxy } from './ws-proxy.js';
 import { LogTailer } from './log-tailer.js';
 import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
+import { createSettingsRouter } from './routes/settings.js';
+import { createAdminGate } from './admin-pin.js';
+import { adminAccountStatus, setAdminAccount } from './admin-account.js';
+import { createAccount, createAccountRouter, createAuthCallbackRouter, createSecureStore } from './account.js';
+
+/** After Google sign-in in the browser, bring the AbleSpeak window back to the front. */
+async function bringAppForward() {
+  const electron = await import('electron').catch(() => null);
+  const BrowserWindow = electron?.BrowserWindow || electron?.default?.BrowserWindow;
+  const win = BrowserWindow?.getAllWindows().find(w => !w.isDestroyed()
+    && w.webContents.getURL().startsWith(`http://localhost:${PORT}`)); // the dashboard, not the voice bar (a file:// page)
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** Open a web address in the person's default browser (Google sign-in). */
+async function openInBrowser(url) {
+  const electron = await import('electron').catch(() => null);
+  const shell = electron?.shell || electron?.default?.shell;
+  if (shell?.openExternal) return shell.openExternal(url);
+  const { spawn } = await import('child_process');
+  spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore' }).unref();
+}
+import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -52,6 +90,15 @@ console.log('');
 await initDatabase(DB_PATH);
 console.log('[DB] SQLite initialized');
 
+// ── Who is using this computer (AT-50) ──
+// Whoever is signed in to Windows is the user: their own profile opens.
+const { student: activeStudent } = startDeviceSession({ windowsAccount: windowsAccount() });
+console.log(`[User] ${activeStudent ? `Signed in as ${activeStudent.name}` : 'No user signed in'}`);
+process.once('exit', () => {
+  endDeviceSession();
+  closeDatabase(); // writes the file; the 2 s auto-save may not have run yet
+});
+
 // ── Express App ──
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -69,8 +116,54 @@ console.log(`[Tools] ${toolRegistry.listTools().length} tools registered`);
 // AIEngine needs wsHub, but wsHub needs aiEngine — use lazy init
 const aiEngine = new AIEngine({ toolRegistry, wsHub: null });
 
+// ── WS shared-secret token (EXT-2) ──
+// ABLESPEAK_WS_TOKEN used to be unset out of the box, so ANY other local
+// process could open the extension/dashboard WebSocket and drive the browser
+// or system tools with zero authentication — the loopback+origin lock only
+// stops remote/web attackers, not a second process on the same machine.
+// Auto-generate one on first run and persist it next to the database so it
+// survives restarts (the extension caches whatever it's given — a token that
+// changed every launch would break the connection, not secure it).
+const WS_TOKEN_PATH = join(VOQAL_HOME, 'ws-token.txt');
+function resolveWsToken() {
+  if (process.env.ABLESPEAK_WS_TOKEN) return process.env.ABLESPEAK_WS_TOKEN;
+  try {
+    const existing = existsSync(WS_TOKEN_PATH) ? readFileSync(WS_TOKEN_PATH, 'utf8').trim() : '';
+    if (existing) return existing;
+  } catch (err) {
+    console.warn('[WsHub] Could not read persisted WS token:', err.message);
+  }
+  const generated = randomBytes(24).toString('hex');
+  try {
+    mkdirSync(VOQAL_HOME, { recursive: true });
+    writeFileSync(WS_TOKEN_PATH, generated);
+  } catch (err) {
+    console.error('[WsHub] Could not persist WS token — it will change on next restart:', err.message);
+  }
+  return generated;
+}
+const wsToken = resolveWsToken();
+
 // ── WebSocket Hub (standalone — no Voqal) ──
-const wsProxy = new WsProxy({ server, aiEngine });
+const wsProxy = new WsProxy({
+  server, aiEngine, wsToken,
+  attribution: commandAttribution,
+  activeStudent: () => getActiveStudent().student,
+  profile: () => getProfile(commandAttribution().student_id),
+  readScreen: screenContextForAgent,
+  // Stage 4: the same correction twice becomes the student's shortcut.
+  onCorrection: (heard, meant) => {
+    const { student_id } = commandAttribution();
+    if (student_id == null) return null;
+    const normal = text => String(text).toLowerCase().replace(/[.,!?;:]+$/g, '').replace(/\s+/g, ' ').trim();
+    const count = recordCorrection({ student_id, heard: normal(heard), meant: normal(meant) });
+    return { count, learned: count >= LEARN_AFTER && learnAlias(student_id, normal(heard), normal(meant)) };
+  },
+  readScreenModel: async () => {
+    const model = await getScreenModel({ fresh: true, maxElements: 150 });
+    return model.status === 'success' ? model : null;
+  },
+});
 aiEngine.wsHub = wsProxy; // Back-reference
 console.log('[WsHub] Initialized (standalone mode)');
 
@@ -121,8 +214,55 @@ const logTailer = new LogTailer({
 });
 logTailer.start().then(() => console.log('[LogTailer] Started'));
 
+// ── Admin PIN: developer routes are for the teacher/developer, not the student ──
+// Mounted before the routers it guards. /api/logs/health, /api/screen and
+// /api/context stay open because the teacher's Home page uses them.
+// ── AbleSpeak account: email + code or Google sign-in through Supabase (account.js) ──
+// The session is kept encrypted next to the database; the dashboard never sees it.
+const account = createAccount({
+  url: process.env.SUPABASE_URL,
+  key: process.env.SUPABASE_PUBLISHABLE_KEY,
+  store: createSecureStore(join(dirname(DB_PATH), 'account.bin')),
+  // Google: sign in in the person's own browser, which comes back to this address
+  callbackUrl: `http://127.0.0.1:${PORT}/auth/callback`,
+  openUrl: openInBrowser,
+});
+// Renew the saved sign-in now; this also picks up a role set in Supabase
+account.refresh().catch(() => {});
+
+// On the admin's own Windows account, or when an account with the admin role
+// (set in Supabase) is signed in, every page is open without a PIN
+const adminGate = createAdminGate({
+  adminAccount: { status: () => adminAccountStatus(), set: on => setAdminAccount(on) },
+  accountRole: () => account.role(),
+});
+app.use('/api/admin', adminGate.router);
+app.use('/api/account', createAccountRouter(account));
+app.use(createAuthCallbackRouter(account, { onSignedIn: bringAppForward }));
+app.use(['/api/settings', '/api/ai/switch', '/api/ai/providers', '/api/tools', '/api/library', '/api/config'],
+  adminGate.requireAdmin);
+app.get(['/api/logs', '/api/logs/recent'], adminGate.requireAdmin);
+
 // ── API Routes ──
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
+
+// GET /api/ws-token — lets the Chrome extension bootstrap the WS token (EXT-2)
+// with no manual pairing step. This hands out the shared secret that gates the
+// WS control plane, so it must never be reachable over the network — server.listen()
+// below binds all interfaces, unlike the WS upgrade handler's own loopback
+// check, so that same check is enforced here explicitly rather than relying
+// on cors()/helmet() (which don't restrict by IP) or on SEC-2's broader /api
+// auth work landing first.
+app.get('/api/ws-token', (req, res) => {
+  const ra = (req.socket.remoteAddress || '').replace('::ffff:', '');
+  if (ra !== '127.0.0.1' && ra !== '::1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json({ token: wsProxy._wsToken });
+});
+
+// ── Settings: API keys and provider choice, saved to this device's .env ──
+app.use('/api/settings', createSettingsRouter({ aiEngine }));
 
 // ── Additional AI-specific API routes ──
 
@@ -239,6 +379,8 @@ app.post('/api/voice/transcribe', async (req, res) => {
 const overlayHtml = join(__dirname, '..', 'overlay.html');
 if (existsSync(overlayHtml)) {
   app.get('/overlay', (req, res) => res.sendFile(overlayHtml));
+  // Its plain-language messages, loaded by the page as overlay-messages.js
+  app.get('/overlay-messages.js', (req, res) => res.sendFile(join(__dirname, '..', 'overlay-messages.js')));
 }
 
 // POST /api/overlay/reload — Reload the Electron overlay BrowserWindow from disk.
@@ -269,10 +411,28 @@ const dashboardDistDev = join(__dirname, '..', '..', 'dashboard', 'dist');
 const dashboardDistPkg = process.resourcesPath ? join(process.resourcesPath, 'dashboard', 'dist') : null;
 const dashboardDist = (dashboardDistPkg && existsSync(dashboardDistPkg)) ? dashboardDistPkg : dashboardDistDev;
 if (existsSync(dashboardDist)) {
+  // Serve index.html with the WS token injected as a meta tag (EXT-2).
+  // useWebSocket.js already reads <meta name="ablespeak-ws-token"> — that
+  // plumbing pre-dates this change but nothing ever set it, so the dashboard
+  // connected with no token, same gap the overlay and extension had. Must
+  // run BEFORE express.static, which would otherwise serve the raw file for
+  // "/" itself; static still handles the JS/CSS assets that file references.
+  const indexHtmlPath = join(dashboardDist, 'index.html');
+  const serveIndexWithToken = (req, res) => {
+    try {
+      const escapedToken = String(wsProxy._wsToken || '').replace(/"/g, '&quot;');
+      const html = readFileSync(indexHtmlPath, 'utf8')
+        .replace('</head>', `<meta name="ablespeak-ws-token" content="${escapedToken}"></head>`);
+      res.type('html').send(html);
+    } catch (err) {
+      res.status(500).send('Failed to load dashboard: ' + err.message);
+    }
+  };
+  app.get('/', serveIndexWithToken);
   app.use(express.static(dashboardDist));
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
-      res.sendFile(join(dashboardDist, 'index.html'));
+      serveIndexWithToken(req, res);
     }
   });
   console.log('[Static] Serving dashboard from', dashboardDist);
@@ -329,7 +489,13 @@ server.listen(PORT, () => {
     console.log('   OPENAI_API_KEY=sk-...');
     console.log('   GEMINI_API_KEY=...');
     console.log('   ANTHROPIC_API_KEY=...');
-    console.log('   GROQ_API_KEY=...');
     console.log('');
   }
+
+  // Progress probe scheduler: computes daily KPI values for active goals
+  // (boot: yesterday + today, then hourly recompute) — recovered from eric branch.
+  startProbeScheduler();
+  console.log('[ProbeScheduler] Started — daily probes + hourly recompute active');
+  process.once('SIGTERM', () => stopProbeScheduler());
+  process.once('SIGINT', () => stopProbeScheduler());
 });

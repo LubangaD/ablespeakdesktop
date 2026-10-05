@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-[#050D19]">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AbleSpeak Dashboard - Students</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #050D19;
+      color: #EDF0F5;
+      margin: 0;
+      padding: 0;
+    }
+    h1, h2, h3, .font-heading {
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .font-mono-code {
+      font-family: 'JetBrains Mono', monospace;
+      font-feature-settings: "tnum" 1;
+    }
+    .card-base {
+      background-color: #102038;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+    }
+    /* Amber 3px focus ring requirement */
+    input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible {
+      outline: 3px solid #F5A623 !important;
+      outline-offset: 2px;
+    }
+    /* Tabular nums for all stats */
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    /* Custom select styling */
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394A3B8' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      background-size: 1.25rem;
+    }
+  </style>
+</head>
+<body class="h-full flex overflow-hidden text-[#EDF0F5] antialiased select-none">
+
+  <!-- Left Sidebar (exactly matching Home screen) -->
+  <aside class="w-[260px] flex-shrink-0 bg-[#0A1628] border-r border-[rgba(255,255,255,0.12)] flex flex-col justify-between h-full z-20">
+    <!-- Top Branding & Nav -->
+    <div class="flex flex-col">
+      <!-- Logo Header -->
+      <div class="p-6 pb-5 border-b border-[rgba(255,255,255,0.08)]">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-[#0F1F38] border border-[#F5A623] flex items-center justify-center flex-shrink-0">
+            <svg class="w-6 h-6 text-[#F5A623]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" x2="12" y1="19" y2="22"/>
+            </svg>
+          </div>
+          <div>
+            <div class="font-heading text-lg font-bold text-white tracking-tight leading-tight">AbleSpeak</div>
+            <div class="inline-flex items-center gap-1.5 mt-0.5">
+              <span class="w-2 h-2 rounded-full bg-[#1D9E8A]"></span>
+              <span class="text-xs font-medium text-[#94A3B8] tracking-wide">Tier 2 assistive AI</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation Items (Each >= 48px height) -->
+      <nav class="p-4 space-y-2">
+        <!-- Home -->
+        <a href="#home" class="flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm font-medium text-[#94A3B8] hover:text-white hover:bg-[#102038] transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+          <span>Home</span>
+        </a>
+
+        <!-- Students (ACTIVE: amber outline + amber text) -->
+        <a href="#students" class="flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm font-semibold text-[#F5A623] bg-[#0F1F38] border-2 border-[#F5A623] transition-colors shadow-none" aria-current="page">
+          <svg class="w-5 h-5 flex-shrink-0 text-[#F5A623]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+          </svg>
+          <span>Students</span>
+        </a>
+
+        <!-- Speech Profile -->
+        <a href="#speech-profile" class="flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm font-medium text-[#94A3B8] hover:text-white hover:bg-[#102038] transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/>
+          </svg>
+          <span>Speech Profile</span>
+        </a>
+
+        <!-- Test Console -->
+        <a href="#test-console" class="flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm font-medium text-[#94A3B8] hover:text-white hover:bg-[#102038] transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+          <span>Test Console</span>
+        </a>
+
+        <!-- Developer Hub -->
+        <a href="#developer-hub" class="flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm font-medium text-[#94A3B8] hover:text-white hover:bg-[#102038] transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+          </svg>
+          <span>Developer Hub</span>
+        </a>
+
+        <!-- Settings -->
+        <a href="#settings" class="flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm font-medium text-[#94A3B8] hover:text-white hover:bg-[#102038] transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+    </div>
+
+    <!-- Bottom Status Strip -->
+    <div class="p-4 border-t border-[rgba(255,255,255,0.08)] bg-[#07101E]">
+      <div class="flex items-center justify-between text-xs">
+        <div class="flex items-center gap-2">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#34D399] opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#34D399]"></span>
+          </span>
+          <span class="text-[#EDF0F5] font-medium text-sm">Connected</span>
+        </div>
+        <span class="font-mono-code text-xs text-[#94A3B8]">42ms</span>
+      </div>
+      <div class="mt-2 text-xs text-[#94A3B8] truncate">Facilitator Console · Lab 204</div>
+    </div>
+  </aside>
+
+  <!-- Main Workspace Area -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#050D19]">
+    <!-- Slim Top Bar with Active Student Session Chip -->
+    <header class="h-14 bg-[#0A1628] border-b border-[rgba(255,255,255,0.12)] flex items-center justify-between px-8 flex-shrink-0 z-10">
+      <!-- Active Student Chip -->
+      <div class="flex items-center gap-3">
+        <div class="inline-flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-[#102038] border border-[rgba(255,255,255,0.14)] text-xs text-[#EDF0F5]">
+          <span class="w-2 h-2 rounded-full bg-[#34D399]"></span>
+          <span class="font-semibold text-white">Amina K.</span>
+          <span class="text-[#94A3B8]">·</span>
+          <span class="text-[#94A3B8]">Active Session (09:12)</span>
+          <span class="text-[#94A3B8]">·</span>
+          <span class="text-[#1D9E8A] font-medium">Motor & Voice Assist</span>
+        </div>
+      </div>
+
+      <!-- Quick Session Indicator & Time -->
+      <div class="flex items-center gap-4">
+        <div class="text-xs text-[#94A3B8] font-mono-code">Thu 17 Sep 2026 · 10:48</div>
+        <div class="h-4 w-px bg-[rgba(255,255,255,0.12)]"></div>
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-full bg-[#152A4A] border border-[rgba(255,255,255,0.16)] flex items-center justify-center text-xs font-semibold text-[#F5A623]">
+            ER
+          </div>
+          <span class="text-xs text-[#EDF0F5] font-medium">Elena Rostova (AT Facilitator)</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Scrollable Main Content (1280px optimized layout) -->
+    <main class="flex-1 overflow-y-auto px-8 py-8 space-y-8 max-w-[1280px] w-full mx-auto pb-16">
+
+      <!-- 1. Page Header: Title + Subtitle -->
+      <div>
+        <h1 class="text-[32px] font-bold text-white tracking-tight leading-none">Students</h1>
+        <p class="mt-2 text-base text-[#94A3B8]">Who is using this computer, and how each student is progressing.</p>
+      </div>
+
+      <!-- 2. Panel: "Who is using this computer" -->
+      <section class="card-base p-6">
+        <!-- Top status row -->
+        <div class="flex items-center justify-between pb-4 border-b border-[rgba(255,255,255,0.08)]">
+          <div class="flex items-center gap-3">
+            <h2 class="text-xl font-bold text-white tracking-tight">Who is using this computer</h2>
+            <!-- Status Pill: 1-2 words with icon -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#0F3229] border border-[#34D399] text-[#34D399] tracking-wide">
+              <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="8"/>
+              </svg>
+              RECORDING
+            </span>
+          </div>
+          <span class="text-xs text-[#94A3B8]">Assigned to: Station 03 · Dell XPS Lab</span>
+        </div>
+
+        <!-- Sentence Description -->
+        <p class="mt-4 text-base text-[#EDF0F5] font-normal leading-relaxed">
+          Recording for <strong class="text-white font-semibold">Amina</strong> since 09:12. Their voice commands count toward their progress.
+        </p>
+
+        <!-- Controls Row 1: Student at this computer (56px) + Start session + End session -->
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+          <div class="flex-1 min-w-[320px]">
+            <label for="student-select" class="block text-xs font-medium text-[#94A3B8] mb-1.5">Student at this computer</label>
+            <select id="student-select" class="w-full h-14 px-4 rounded-xl bg-[#050D19] border border-[rgba(255,255,255,0.18)] text-white text-base font-medium appearance-none cursor-pointer focus:border-[#F5A623]">
+              <option value="amina" selected>Amina K. (Grade 8 · Tier 2 Speech & Motor)</option>
+              <option value="liam">Liam Morales (Grade 7 · IEP Track 3)</option>
+              <option value="jordan">Jordan Vance (Grade 6 · Dysarthria Support)</option>
+              <option value="chloe">Chloe Bennett (Grade 8 · Fatigue Assist)</option>
+            </select>
+          </div>
+
+          <!-- Amber Primary Button "Start their session" (56px, dark text #050D19 for AA contrast) -->
+          <div class="pt-5 flex items-center gap-3">
+            <button type="button" class="h-14 px-6 rounded-xl bg-[#F5A623] hover:bg-[#E6960E] text-[#050D19] font-bold text-base flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-none">
+              <svg class="w-5 h-5 text-[#050D19]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <span>Start their session</span>
+            </button>
+
+            <!-- Secondary Button "End session" (56px, min 48px, quiet dark style) -->
+            <button type="button" class="h-14 px-6 rounded-xl bg-[#0F1F38] hover:bg-[#152A4A] border border-[rgba(255,255,255,0.16)] text-[#EDF0F5] font-semibold text-base flex items-center justify-center gap-2 cursor-pointer transition-colors">
+              <svg class="w-5 h-5 text-[#94A3B8]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+              </svg>
+              <span>End session</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Controls Row 2: Add a student text field (56px with clear X inside) + Add student button (min 48px) -->
+        <div class="mt-6 pt-6 border-t border-[rgba(255,255,255,0.08)] flex flex-wrap items-center gap-3">
+          <div class="flex-1 min-w-[320px] relative">
+            <label for="add-student-input" class="block text-xs font-medium text-[#94A3B8] mb-1.5">Add a student</label>
+            <div class="relative flex items-center">
+              <input type="text" id="add-student-input" value="Maya Lin" placeholder="First name, or initials" class="w-full h-14 pl-4 pr-12 rounded-xl bg-[#050D19] border border-[rgba(255,255,255,0.18)] text-white text-base font-normal placeholder-[#64748B] focus:border-[#F5A623]">
+              <!-- Clear X Button inside -->
+              <button type="button" aria-label="Clear student name" class="absolute right-3 w-8 h-8 rounded-lg flex items-center justify-center text-[#94A3B8] hover:text-white hover:bg-[#102038] cursor-pointer">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="pt-5">
+            <button type="button" class="h-14 px-6 rounded-xl bg-[#0F1F38] hover:bg-[#152A4A] border border-[rgba(255,255,255,0.16)] text-[#EDF0F5] font-semibold text-base flex items-center justify-center gap-2 cursor-pointer transition-colors">
+              <svg class="w-5 h-5 text-[#F5A623]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              <span>Add student</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Collapsible Row: Remove a student (4) -->
+        <div class="mt-5 pt-4 border-t border-[rgba(255,255,255,0.06)]">
+          <details class="group">
+            <summary class="flex items-center justify-between cursor-pointer py-1.5 text-sm font-medium text-[#94A3B8] hover:text-white transition-colors">
+              <span class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-[#94A3B8] transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+                <span>Remove a student (4)</span>
+              </span>
+              <span class="text-xs text-[#64748B]">Requires facilitator confirmation</span>
+            </summary>
+            <div class="mt-3 pl-6 pr-2 py-3 bg-[#081220] rounded-xl border border-[rgba(255,255,255,0.06)] space-y-2.5">
+              <div class="flex items-center justify-between py-1 border-b border-[rgba(255,255,255,0.04)] text-sm">
+                <div>
+                  <span class="text-white font-medium">Amina K.</span>
+                  <span class="text-xs text-[#94A3B8] ml-2">Active now · Cannot remove during active session</span>
+                </div>
+                <button disabled class="h-9 px-3 rounded-lg bg-[#0F1F38] text-[#64748B] text-xs font-medium cursor-not-allowed">Remove</button>
+              </div>
+              <div class="flex items-center justify-between py-1 border-b border-[rgba(255,255,255,0.04)] text-sm">
+                <div>
+                  <span class="text-white font-medium">Liam Morales</span>
+                  <span class="text-xs text-[#94A3B8] ml-2">Last active yesterday</span>
+                </div>
+                <button class="h-9 px-3 rounded-lg bg-[#0F1F38] hover:bg-[#2A1520] border border-[rgba(255,255,255,0.1)] text-[#FB7185] text-xs font-semibold cursor-pointer">Remove</button>
+              </div>
+              <div class="flex items-center justify-between py-1 border-b border-[rgba(255,255,255,0.04)] text-sm">
+                <div>
+                  <span class="text-white font-medium">Jordan Vance</span>
+                  <span class="text-xs text-[#94A3B8] ml-2">Last active 3 days ago</span>
+                </div>
+                <button class="h-9 px-3 rounded-lg bg-[#0F1F38] hover:bg-[#2A1520] border border-[rgba(255,255,255,0.1)] text-[#FB7185] text-xs font-semibold cursor-pointer">Remove</button>
+              </div>
+              <div class="flex items-center justify-between py-1 text-sm">
+                <div>
+                  <span class="text-white font-medium">Chloe Bennett</span>
+                  <span class="text-xs text-[#94A3B8] ml-2">Last active 5 days ago</span>
+                </div>
+                <button class="h-9 px-3 rounded-lg bg-[#0F1F38] hover:bg-[#2A1520] border border-[rgba(255,255,255,0.1)] text-[#FB7185] text-xs font-semibold cursor-pointer">Remove</button>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- 3. Section: "Success rate, all students" (Five stat tiles) -->
+      <section class="space-y-4">
+        <h2 class="text-xl font-bold text-white tracking-tight">Success rate, all students</h2>
+
+        <div class="grid grid-cols-5 gap-4">
+          <!-- Stat 1: Success rate 84% in amber -->
+          <div class="card-base p-5 flex flex-col justify-between">
+            <span class="text-xs font-medium text-[#94A3B8] uppercase tracking-wider">Success rate</span>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="text-4xl font-bold text-[#F5A623] font-mono-code tabular-nums">84%</span>
+            </div>
+            <span class="mt-2 text-xs text-[#94A3B8]">Overall first attempt</span>
+          </div>
+
+          <!-- Stat 2: Total commands 312 -->
+          <div class="card-base p-5 flex flex-col justify-between">
+            <span class="text-xs font-medium text-[#94A3B8] uppercase tracking-wider">Total commands</span>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="text-4xl font-bold text-white font-mono-code tabular-nums">312</span>
+            </div>
+            <span class="mt-2 text-xs text-[#94A3B8]">Aggregated school term</span>
+          </div>
+
+          <!-- Stat 3: Today 24 -->
+          <div class="card-base p-5 flex flex-col justify-between">
+            <span class="text-xs font-medium text-[#94A3B8] uppercase tracking-wider">Today</span>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="text-4xl font-bold text-white font-mono-code tabular-nums">24</span>
+            </div>
+            <span class="mt-2 text-xs text-[#94A3B8]">Active session commands</span>
+          </div>
+
+          <!-- Stat 4: Average latency 1,240 ms -->
+          <div class="card-base p-5 flex flex-col justify-between">
+            <span class="text-xs font-medium text-[#94A3B8] uppercase tracking-wider">Average latency</span>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="text-4xl font-bold text-white font-mono-code tabular-nums">1,240</span>
+              <span class="text-sm font-medium text-[#94A3B8]">ms</span>
+            </div>
+            <span class="mt-2 text-xs text-[#34D399]">Within target range</span>
+          </div>
+
+          <!-- Stat 5: Students 4 -->
+          <div class="card-base p-5 flex flex-col justify-between">
+            <span class="text-xs font-medium text-[#94A3B8] uppercase tracking-wider">Students</span>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="text-4xl font-bold text-white font-mono-code tabular-nums">4</span>
+            </div>
+            <span class="mt-2 text-xs text-[#94A3B8]">Configured on this unit</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Table: Student Progress Summary -->
+      <section class="card-base overflow-hidden">
+        <div class="px-6 py-4 border-b border-[rgba(255,255,255,0.08)] flex items-center justify-between">
+          <h3 class="text-base font-bold text-white tracking-tight">Roster telemetry overview</h3>
+          <span class="text-xs text-[#94A3B8]">Click a row to inspect individual independence trajectory</span>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-[rgba(255,255,255,0.08)] bg-[#0A1628] text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">
+                <th scope="col" class="py-3.5 px-6">Student</th>
+                <th scope="col" class="py-3.5 px-6">Success rate</th>
+                <th scope="col" class="py-3.5 px-6">Commands</th>
+                <th scope="col" class="py-3.5 px-6">Average latency</th>
+                <th scope="col" class="py-3.5 px-6">Sessions (7 days)</th>
+                <th scope="col" class="py-3.5 px-6">Top command</th>
+                <th scope="col" class="py-3.5 px-6">Last active</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[rgba(255,255,255,0.06)] text-sm">
+              <!-- Row 1: Amina (Selected) -->
+              <tr class="bg-[#152A4A] cursor-pointer transition-colors border-l-4 border-l-[#F5A623]">
+                <th scope="row" class="py-4 px-6 font-semibold text-white whitespace-nowrap">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-2 h-2 rounded-full bg-[#34D399]"></span>
+                    <span>Amina K.</span>
+                    <span class="text-xs font-normal text-[#F5A623] px-2 py-0.5 rounded bg-[#0F1F38] border border-[rgba(245,166,35,0.4)]">Selected</span>
+                  </div>
+                </th>
+                <td class="py-4 px-6 whitespace-nowrap">
+                  <span class="inline-flex items-center gap-1.5 font-mono-code font-bold text-[#FB7185] tabular-nums">
+                    68%
+                    <span class="text-xs font-medium px-2 py-0.5 rounded bg-[#2A1520] border border-[rgba(251,113,133,0.3)] text-[#FB7185]">Low</span>
+                  </span>
+                </td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">98</td>
+                <td class="py-4 px-6 font-mono-code text-[#EDF0F5] tabular-nums">1,380 ms</td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">5</td>
+                <td class="py-4 px-6 text-[#94A3B8] font-mono-code text-xs">"scroll down"</td>
+                <td class="py-4 px-6 text-[#34D399] font-medium text-xs">Active now (09:12)</td>
+              </tr>
+
+              <!-- Row 2: Liam -->
+              <tr class="hover:bg-[#152A4A] cursor-pointer transition-colors border-l-4 border-l-transparent">
+                <th scope="row" class="py-4 px-6 font-semibold text-white whitespace-nowrap">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-2 h-2 rounded-full bg-[#94A3B8]"></span>
+                    <span>Liam Morales</span>
+                  </div>
+                </th>
+                <td class="py-4 px-6 whitespace-nowrap">
+                  <span class="inline-flex items-center gap-1.5 font-mono-code font-bold text-[#34D399] tabular-nums">
+                    94%
+                    <span class="text-xs font-medium px-2 py-0.5 rounded bg-[#0F3229] border border-[rgba(52,211,153,0.3)] text-[#34D399]">Good</span>
+                  </span>
+                </td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">142</td>
+                <td class="py-4 px-6 font-mono-code text-[#EDF0F5] tabular-nums">1,120 ms</td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">7</td>
+                <td class="py-4 px-6 text-[#94A3B8] font-mono-code text-xs">"next tab"</td>
+                <td class="py-4 px-6 text-[#94A3B8] text-xs">Yesterday 14:10</td>
+              </tr>
+
+              <!-- Row 3: Jordan -->
+              <tr class="hover:bg-[#152A4A] cursor-pointer transition-colors border-l-4 border-l-transparent">
+                <th scope="row" class="py-4 px-6 font-semibold text-white whitespace-nowrap">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-2 h-2 rounded-full bg-[#94A3B8]"></span>
+                    <span>Jordan Vance</span>
+                  </div>
+                </th>
+                <td class="py-4 px-6 whitespace-nowrap">
+                  <span class="inline-flex items-center gap-1.5 font-mono-code font-bold text-[#FBBF24] tabular-nums">
+                    81%
+                    <span class="text-xs font-medium px-2 py-0.5 rounded bg-[#2D2410] border border-[rgba(251,191,36,0.3)] text-[#FBBF24]">Fair</span>
+                  </span>
+                </td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">48</td>
+                <td class="py-4 px-6 font-mono-code text-[#EDF0F5] tabular-nums">1,210 ms</td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">3</td>
+                <td class="py-4 px-6 text-[#94A3B8] font-mono-code text-xs">"click submit"</td>
+                <td class="py-4 px-6 text-[#94A3B8] text-xs">14 Sep 2026</td>
+              </tr>
+
+              <!-- Row 4: Chloe -->
+              <tr class="hover:bg-[#152A4A] cursor-pointer transition-colors border-l-4 border-l-transparent">
+                <th scope="row" class="py-4 px-6 font-semibold text-white whitespace-nowrap">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-2 h-2 rounded-full bg-[#94A3B8]"></span>
+                    <span>Chloe Bennett</span>
+                  </div>
+                </th>
+                <td class="py-4 px-6 whitespace-nowrap">
+                  <span class="inline-flex items-center gap-1.5 font-mono-code font-bold text-[#34D399] tabular-nums">
+                    91%
+                    <span class="text-xs font-medium px-2 py-0.5 rounded bg-[#0F3229] border border-[rgba(52,211,153,0.3)] text-[#34D399]">Good</span>
+                  </span>
+                </td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">24</td>
+                <td class="py-4 px-6 font-mono-code text-[#EDF0F5] tabular-nums">1,250 ms</td>
+                <td class="py-4 px-6 font-mono-code text-white tabular-nums">2</td>
+                <td class="py-4 px-6 text-[#94A3B8] font-mono-code text-xs">"read aloud"</td>
+                <td class="py-4 px-6 text-[#94A3B8] text-xs">12 Sep 2026</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 5. Section: "Progress: independence rate" for the selected student -->
+      <section class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold text-white tracking-tight">Progress: independence rate <span class="text-[#94A3B8] font-normal text-base">(for Amina K.)</span></h2>
+          <span class="text-xs text-[#94A3B8]">Goal 1: First-attempt command execution without aide prompt</span>
+        </div>
+
+        <!-- Red-edged decision flag notice -->
+        <div class="rounded-xl bg-[#1C121E] border-2 border-[#FB7185] p-4 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3.5">
+            <div class="w-9 h-9 rounded-lg bg-[#2A1520] border border-[#FB7185] flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-[#FB7185]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white flex items-center gap-2">
+                <span>1 decision flag</span>
+                <span class="text-xs font-normal text-[#FB7185] bg-[#2A1520] px-2 py-0.5 rounded border border-[rgba(251,113,133,0.3)]">Tier 2 Rule R-104</span>
+              </div>
+              <p class="text-sm text-[#EDF0F5] mt-0.5">4 consecutive points below the aim line, consider changing the intervention</p>
+            </div>
+          </div>
+
+          <!-- Secondary "Acknowledge" button (min 48px height) -->
+          <button type="button" class="h-12 px-5 rounded-xl bg-[#0F1F38] hover:bg-[#152A4A] border border-[rgba(255,255,255,0.18)] text-[#EDF0F5] font-semibold text-sm flex-shrink-0 cursor-pointer transition-colors">
+            Acknowledge
+          </button>
+        </div>
+
+        <!-- Large Line Chart Panel -->
+        <div class="card-base p-6">
+          <!-- Legend above the chart -->
+          <div class="flex flex-wrap items-center justify-between pb-5 border-b border-[rgba(255,255,255,0.08)] text-xs text-[#EDF0F5]">
+            <div class="flex flex-wrap items-center gap-5">
+              <!-- Teal circles = auto probe -->
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-[#1D9E8A] border-2 border-white inline-block"></span>
+                <span>Auto probe</span>
+              </div>
+
+              <!-- Violet squares = manual probe -->
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-sm bg-[#A78BFA] border border-white inline-block"></span>
+                <span>Manual probe</span>
+              </div>
+
+              <!-- Amber dashed line = aim line -->
+              <div class="flex items-center gap-2">
+                <span class="w-6 h-0 border-t-2 border-dashed border-[#F5A623] inline-block"></span>
+                <span class="text-[#F5A623] font-medium">Aim line (Target 85%)</span>
+              </div>
+
+              <!-- Light grey solid line = trend -->
+              <div class="flex items-center gap-2">
+                <span class="w-6 h-0.5 bg-[#EDF0F5] inline-block"></span>
+                <span>Trend line</span>
+              </div>
+
+              <!-- Dashed vertical grey lines = phase changes -->
+              <div class="flex items-center gap-2">
+                <span class="h-4 w-0 border-l border-dashed border-[#94A3B8] inline-block"></span>
+                <span class="text-[#94A3B8]">Phase change</span>
+              </div>
+
+              <!-- Dotted today marker -->
+              <div class="flex items-center gap-2">
+                <span class="h-4 w-0 border-l-2 border-dotted border-[#34D399] inline-block"></span>
+                <span class="text-[#34D399] font-medium">Today</span>
+              </div>
+            </div>
+
+            <div class="text-xs text-[#94A3B8]">Scale: Baseline 45% → Aim 85%</div>
+          </div>
+
+          <!-- Responsive SVG Line Chart -->
+          <div class="mt-6 w-full h-[340px]">
+            <svg class="w-full h-full" viewBox="0 0 1000 320" preserveAspectRatio="none">
+              <!-- Horizontal Grid Lines & Y-Axis Labels (14px axis labels) -->
+              <!-- 100% (y = 30) -->
+              <line x1="60" y1="30" x2="960" y2="30" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+              <text x="45" y="35" fill="#94A3B8" font-size="14" text-anchor="end" font-family="Inter">100%</text>
+
+              <!-- 80% (y = 85) -->
+              <line x1="60" y1="85" x2="960" y2="85" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+              <text x="45" y="90" fill="#94A3B8" font-size="14" text-anchor="end" font-family="Inter">80%</text>
+
+              <!-- 60% (y = 140) -->
+              <line x1="60" y1="140" x2="960" y2="140" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+              <text x="45" y="145" fill="#94A3B8" font-size="14" text-anchor="end" font-family="Inter">60%</text>
+
+              <!-- 40% (y = 195) -->
+              <line x1="60" y1="195" x2="960" y2="195" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+              <text x="45" y="200" fill="#94A3B8" font-size="14" text-anchor="end" font-family="Inter">40%</text>
+
+              <!-- 20% (y = 250) -->
+              <line x1="60" y1="250" x2="960" y2="250" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+              <text x="45" y="255" fill="#94A3B8" font-size="14" text-anchor="end" font-family="Inter">20%</text>
+
+              <!-- Baseline X-Axis (y = 280) -->
+              <line x1="60" y1="280" x2="960" y2="280" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" />
+
+              <!-- Phase 1 Boundary (x = 340) -->
+              <line x1="340" y1="20" x2="340" y2="280" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="5 5" />
+              <rect x="250" y="12" width="80" height="20" rx="4" fill="#0A1628" stroke="rgba(255,255,255,0.1)" />
+              <text x="290" y="26" fill="#94A3B8" font-size="11" text-anchor="middle" font-weight="600">Baseline</text>
+
+              <!-- Phase 2 Boundary (x = 650) -->
+              <line x1="650" y1="20" x2="650" y2="280" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="5 5" />
+              <rect x="560" y="12" width="80" height="20" rx="4" fill="#0A1628" stroke="rgba(255,255,255,0.1)" />
+              <text x="600" y="26" fill="#94A3B8" font-size="11" text-anchor="middle" font-weight="600">Dwell 450ms</text>
+
+              <!-- Today vertical dotted marker (x = 880) -->
+              <line x1="880" y1="20" x2="880" y2="280" stroke="#34D399" stroke-width="2" stroke-dasharray="3 3" />
+              <text x="880" y="15" fill="#34D399" font-size="12" text-anchor="middle" font-weight="700">Today</text>
+
+              <!-- AIM LINE (Amber dashed): from Baseline W1 (50% -> y=167) to Target W12 (85% -> y=71) -->
+              <line x1="120" y1="167" x2="920" y2="71" stroke="#F5A623" stroke-width="2.5" stroke-dasharray="6 4" />
+
+              <!-- Trend Line (Light grey solid line, calculated regression) -->
+              <polyline points="120,180 200,175 280,165 370,162 460,158 550,152 640,145 730,148 810,154 880,158"
+                fill="none" stroke="#EDF0F5" stroke-width="2" />
+
+              <!-- Data Connectors (Teal & Violet points) -->
+              <!-- Points Phase 1: W1 (48%), W2 (52%), W3 (50%) -->
+              <circle cx="120" cy="173" r="5" fill="#1D9E8A" stroke="#FFFFFF" stroke-width="1.5" />
+              <circle cx="200" cy="162" r="5" fill="#1D9E8A" stroke="#FFFFFF" stroke-width="1.5" />
+              <rect x="274" y="162" width="10" height="10" rx="2" fill="#A78BFA" stroke="#FFFFFF" stroke-width="1.5" />
+
+              <!-- Points Phase 2: Dwell 450ms (W4: 55%, W5: 58%, W6: 62%, W7: 64%) -->
+              <circle cx="370" cy="154" r="5" fill="#1D9E8A" stroke="#FFFFFF" stroke-width="1.5" />
+              <circle cx="460" cy="146" r="5" fill="#1D9E8A" stroke="#FFFFFF" stroke-width="1.5" />
+              <rect x="544" y="131" width="10" height="10" rx="2" fill="#A78BFA" stroke="#FFFFFF" stroke-width="1.5" />
+              <circle cx="640" cy="131" r="5" fill="#1D9E8A" stroke="#FFFFFF" stroke-width="1.5" />
+
+              <!-- Points Phase 3: The 4 consecutive points below aim line (W8: 60%, W9: 58%, W10: 56%, W11: 58%) -->
+              <!-- Target at these x values is around y=95 to y=80. These points drop to y=140-150 -->
+              <circle cx="710" cy="140" r="5.5" fill="#FB7185" stroke="#FFFFFF" stroke-width="2" />
+              <rect x="764" y="146" width="10" height="10" rx="2" fill="#FB7185" stroke="#FFFFFF" stroke-width="2" />
+              <circle cx="825" cy="152" r="5.5" fill="#FB7185" stroke="#FFFFFF" stroke-width="2" />
+              <circle cx="880" cy="146" r="5.5" fill="#FB7185" stroke="#FFFFFF" stroke-width="2" />
+
+              <!-- Flag highlight bracket on chart for the 4 below points -->
+              <path d="M 700 120 L 700 110 L 890 110 L 890 120" fill="none" stroke="#FB7185" stroke-width="1.5" stroke-dasharray="2 2" />
+              <text x="795" y="104" fill="#FB7185" font-size="11" text-anchor="middle" font-weight="600">4 Points Below Aim</text>
+
+              <!-- X-Axis Labels (14px axis labels) -->
+              <text x="120" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W1</text>
+              <text x="200" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W2</text>
+              <text x="280" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W3</text>
+              <text x="370" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W4</text>
+              <text x="460" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W5</text>
+              <text x="550" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W6</text>
+              <text x="640" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W7</text>
+              <text x="720" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W8</text>
+              <text x="800" y="304" fill="#94A3B8" font-size="14" text-anchor="middle" font-family="Inter">W9</text>
+              <text x="880" y="304" fill="#34D399" font-size="14" text-anchor="middle" font-weight="700" font-family="Inter">W10 (Now)</text>
+              <text x="940" y="304" fill="#64748B" font-size="14" text-anchor="middle" font-family="Inter">W12 (Target)</text>
+            </svg>
+          </div>
+
+          <!-- Under the chart: secondary "Mark met" (check icon) and ghost "Discontinue" buttons (>= 48px) -->
+          <div class="mt-6 pt-5 border-t border-[rgba(255,255,255,0.08)] flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <!-- Secondary "Mark met" (check icon) -->
+              <button type="button" class="h-12 px-5 rounded-xl bg-[#0F1F38] hover:bg-[#152A4A] border border-[rgba(255,255,255,0.18)] text-[#EDF0F5] font-semibold text-sm flex items-center gap-2.5 cursor-pointer transition-colors">
+                <svg class="w-4 h-4 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <span>Mark met</span>
+              </button>
+
+              <!-- Ghost "Discontinue" button -->
+              <button type="button" class="h-12 px-5 rounded-xl hover:bg-[#2A1520] text-[#FB7185] font-semibold text-sm flex items-center gap-2 cursor-pointer transition-colors">
+                <svg class="w-4 h-4 text-[#FB7185]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                <span>Discontinue</span>
+              </button>
+            </div>
+
+            <div class="text-xs text-[#94A3B8]">
+              Intervention recommendation: Decrease dwell latency from 450ms → 380ms or adjust custom phoneme boost.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. Two Columns: Left "Goals" list + Right panel "Mark a phase change" -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Left Column: "Goals" list (48px+ selectable rows with "New goal" button) -->
+        <div class="card-base p-6 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between pb-4 border-b border-[rgba(255,255,255,0.08)]">
+              <div>
+                <h3 class="text-lg font-bold text-white tracking-tight">Goals</h3>
+                <p class="text-xs text-[#94A3B8] mt-0.5">IEP and Tier 2 measurable objectives for Amina</p>
+              </div>
+              <!-- "New goal" button (min 48px height) -->
+              <button type="button" class="h-12 px-4 rounded-xl bg-[#0F1F38] hover:bg-[#152A4A] border border-[rgba(255,255,255,0.16)] text-white text-sm font-semibold flex items-center gap-2 cursor-pointer transition-colors">
+                <svg class="w-4 h-4 text-[#F5A623]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>New goal</span>
+              </button>
+            </div>
+
+            <!-- Selectable Rows (Each >= 48px) -->
+            <div class="mt-4 space-y-3">
+              <!-- Goal 1: ACTIVE (Selected) -->
+              <div class="p-3.5 rounded-xl bg-[#152A4A] border-2 border-[#F5A623] cursor-pointer flex items-center justify-between gap-3 transition-colors min-h-[56px]">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-lg bg-[#0F1F38] flex items-center justify-center flex-shrink-0 text-[#F5A623]">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <circle cx="12" cy="12" r="6"/>
+                      <circle cx="12" cy="12" r="2"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="text-sm font-semibold text-white">First-attempt command independence</div>
+                    <div class="text-xs text-[#94A3B8] mt-0.5">Sep 01, 2026 – Dec 15, 2026 · Target: 85%</div>
+                  </div>
+                </div>
+                <!-- Status pill -->
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#0F3229] border border-[#34D399] text-[#34D399]">
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#34D399]"></span>
+                  ACTIVE
+                </span>
+              </div>
+
+              <!-- Goal 2: ACTIVE -->
+              <div class="p-3.5 rounded-xl bg-[#081220] hover:bg-[#0F1F38] border border-[rgba(255,255,255,0.08)] cursor-pointer flex items-center justify-between gap-3 transition-colors min-h-[56px]">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-lg bg-[#0F1F38] flex items-center justify-center flex-shrink-0 text-[#94A3B8]">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <circle cx="12" cy="12" r="6"/>
+                      <circle cx="12" cy="12" r="2"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="text-sm font-semibold text-white">Browser tab & Canvas LMS navigation</div>
+                    <div class="text-xs text-[#94A3B8] mt-0.5">Sep 15, 2026 – Jan 30, 2027 · Target: 90%</div>
+                  </div>
+                </div>
+                <!-- Status pill -->
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#0F3229] border border-[#34D399] text-[#34D399]">
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#34D399]"></span>
+                  ACTIVE
+                </span>
+              </div>
+
+              <!-- Goal 3: MET -->
+              <div class="p-3.5 rounded-xl bg-[#081220] hover:bg-[#0F1F38] border border-[rgba(255,255,255,0.08)] cursor-pointer flex items-center justify-between gap-3 transition-colors min-h-[56px]">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-lg bg-[#0F1F38] flex items-center justify-center flex-shrink-0 text-[#34D399]">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="text-sm font-semibold text-white">Self-correction vocal token 'Undo' within 4s</div>
+                    <div class="text-xs text-[#94A3B8] mt-0.5">Aug 20, 2026 – Sep 10, 2026 · Target: 80%</div>
+                  </div>
+                </div>
+                <!-- Status pill -->
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#152A4A] border border-[rgba(255,255,255,0.18)] text-[#94A3B8]">
+                  <svg class="w-3 h-3 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  MET
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)] text-xs text-[#94A3B8]">
+            3 total goals logged under Tier 2 IDEA progress monitoring protocol.
+          </div>
+        </div>
+
+        <!-- Right Column: "Mark a phase change" panel -->
+        <div class="card-base p-6">
+          <div class="pb-4 border-b border-[rgba(255,255,255,0.08)]">
+            <h3 class="text-lg font-bold text-white tracking-tight">Mark a phase change</h3>
+            <p class="text-xs text-[#94A3B8] mt-0.5">Logs vertical phase divider on the progress trajectory chart</p>
+          </div>
+
+          <form class="mt-5 space-y-4" onsubmit="event.preventDefault();">
+            <!-- Field 1: What changed? (56px) -->
+            <div>
+              <label for="phase-what" class="block text-xs font-medium text-[#94A3B8] mb-1.5">What changed?</label>
+              <select id="phase-what" class="w-full h-14 px-4 rounded-xl bg-[#050D19] border border-[rgba(255,255,255,0.18)] text-white text-base font-normal appearance-none cursor-pointer focus:border-[#F5A623]">
+                <option value="dwell">Changed dwell latency to 380ms</option>
+                <option value="vocab">Added customized dysarthria vocabulary</option>
+                <option value="mic">Updated microphone gain and directional axis</option>
+                <option value="seating">Physical ergonomics / lap-tray adjustment</option>
+              </select>
+            </div>
+
+            <!-- Field 2: Date of change (56px) -->
+            <div>
+              <label for="phase-date" class="block text-xs font-medium text-[#94A3B8] mb-1.5">Date of change</label>
+              <input type="date" id="phase-date" value="2026-09-17" class="w-full h-14 px-4 rounded-xl bg-[#050D19] border border-[rgba(255,255,255,0.18)] text-white text-base font-normal focus:border-[#F5A623]">
+            </div>
+
+            <!-- Field 3: Note (optional) -->
+            <div>
+              <label for="phase-note" class="block text-xs font-medium text-[#94A3B8] mb-1.5">Note (optional)</label>
+              <textarea id="phase-note" rows="2" placeholder="Explain pedagogical or assistive rationale for Tier 2 IEP records..." class="w-full p-3.5 rounded-xl bg-[#050D19] border border-[rgba(255,255,255,0.18)] text-white text-base font-normal placeholder-[#64748B] focus:border-[#F5A623] resize-none"></textarea>
+            </div>
+
+            <!-- Amber "Mark phase change" button (56px, dark text #050D19 for AA contrast) -->
+            <div class="pt-2">
+              <button type="submit" class="w-full h-14 rounded-xl bg-[#F5A623] hover:bg-[#E6960E] text-[#050D19] font-bold text-base flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-none">
+                <svg class="w-5 h-5 text-[#050D19]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+                <span>Mark phase change</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+</body>
+</html>

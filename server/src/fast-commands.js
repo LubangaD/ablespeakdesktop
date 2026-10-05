@@ -10,6 +10,24 @@
  * All patterns must tolerate this.
  */
 
+import { resolveAppName } from './app-names.js';
+
+// AbleSpeak dashboard pages that can be opened by voice ("go to students")
+const NAV_MAP = {
+  dashboard: 'dashboard', home: 'dashboard',
+  progress: 'progress', 'my progress': 'progress',
+  'speech profile': 'speech', 'speech settings': 'speech', 'voice and words': 'speech', 'my words': 'speech', 'voice settings': 'speech',
+};
+
+// The admin pages (managing users, the test console, Developer Hub, Settings)
+// need the admin PIN (admin-pin.js), so voice never opens them. Their own names get a spoken answer; everyday words
+// that used to open them ("settings", "tools", "logs") go to the AI instead,
+// since a student saying them usually means the app in front of them.
+const ADMIN_PAGE_NAMES = new Set(['developer hub', 'developer', 'admin', 'admin pages', 'prompt editor',
+  'users', 'students', 'teacher', 'teacher page', 'test console', 'chat']);
+const ADMIN_PAGE_WORDS = new Set(['tools', 'context', 'logs', 'settings', 'preferences', 'options', 'prompt']);
+const isDashboardName = name => !!NAV_MAP[name] || ADMIN_PAGE_NAMES.has(name) || ADMIN_PAGE_WORDS.has(name);
+
 // ── Silent commands: these execute without TTS feedback ──
 const SILENT_COMMANDS = new Set([
   'scroll', 'scroll_to_top', 'scroll_to_bottom',
@@ -58,20 +76,45 @@ function cleanTranscription(text) {
  * Pattern-based fast command matching.
  * Returns { tool, args, silent } or null if no match.
  */
-export function matchFastCommand(text) {
+// Pages with their own search bar, where "search for X" searches again in place
+const SEARCH_PAGE = /^https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\/search|duckduckgo\.com\/|(?:m\.)?youtube\.com\/|[a-z-]+\.wikipedia\.org\/)/i;
+
+/**
+ * `activeUrl` is the browser's active tab, when known; it decides whether a
+ * search happens on the current page or as a new Google search.
+ */
+export function matchFastCommand(text, { activeUrl = '' } = {}) {
   const t = cleanTranscription(text);
 
   // ── Dictation Mode Toggle ──
   if (/^(start\s+)?(dictat(e|ed|ing|ion)|typ(e|ing))(\s+mode)?$/i.test(t) || /^(type|write)\s+(for me|mode)$/i.test(t) || /^(start\s+)?(typing|writing)$/i.test(t)) {
     return { tool: 'dictation_mode', args: { enabled: true }, silent: false };
   }
+  // Text to type is taken from what was said, not from `t`, which is
+  // lower-cased and has filler words like "please" removed.
+  const said = String(text || '').trim();
+
   // "dictate My name is Derek..." — activate AND type the trailing text
-  const dictateWithText = t.match(/^(?:start\s+)?dictat(?:e|ed|ing)\s+(.{5,})$/i);
-  if (dictateWithText) {
-    return { tool: 'dictation_mode', args: { enabled: true, initialText: dictateWithText[1] }, silent: false };
+  const dictateFirst = said.match(/^(?:start\s+)?dictat(?:e|ed|ing)[\s,.:;-]+([\s\S]{5,})$/i);
+  if (dictateFirst) {
+    return { tool: 'dictation_mode', args: { enabled: true, initialText: dictateFirst[1].trim() }, silent: false };
   }
   if (/^(stop|end|exit)\s+(dictat(ing|ion)|typ(ing|e))(\s+mode)?$/i.test(t) || /^command\s+mode$/i.test(t)) {
     return { tool: 'dictation_mode', args: { enabled: false }, silent: false };
+  }
+  // "My name is Derek. Dictate." — the sentence first, then the trigger word,
+  // set apart by a pause (punctuation) or said as a plain "dictate". The
+  // sentence keeps its full stop.
+  const dictateLast = said.match(/^([\s\S]{5,}?)([.!?])?([\s,;:-]+)(dictate|dictation)[.!?]*$/i);
+  if (dictateLast) {
+    const [, sentence, stop = '', gap, trigger] = dictateLast;
+    const paused = Boolean(stop) || /[,;:-]/.test(gap);
+    // "I want to dictate", "the end of dictation": the words lead into the
+    // trigger rather than being text to type.
+    const leadsIn = /\b(to|me|us|let's|lets|please|and|then|now|i|we|you|will|can|could|of|the|a|an|my|your|this|that|for|with|about|on|in|from|into|start|begin|stop|end|exit|quit|cancel|not|never|no|don't|dont|won't|can't)$/i.test(sentence.trim());
+    if (!leadsIn && (paused || /^dictate$/i.test(trigger))) {
+      return { tool: 'dictation_mode', args: { enabled: true, initialText: sentence.trim() + stop }, silent: false };
+    }
   }
 
   // ── Scrolling ──
@@ -122,10 +165,19 @@ export function matchFastCommand(text) {
   // ── Search — "search for X", "google X", "look up X" ──
   const searchMatch = t.match(/^(?:search\s+(?:for\s+)?|google\s+|look\s+up\s+)(.+)$/);
   if (searchMatch) {
-    const query = searchMatch[1].trim();
+    // "search youtube for X", "search for X on YouTube"
+    const youtube = searchMatch[1].match(/^youtube\s+for\s+(.+)$/) || searchMatch[1].match(/^(.+?)\s+(?:on|in)\s+youtube$/);
+    if (youtube) return { tool: 'search_youtube', args: { query: youtube[1].trim() }, silent: true };
+    // "…on Chrome", "…online", "search the web for…" say where to search, not what for
+    const query = searchMatch[1]
+      .replace(/^(?:google|chrome|the\s+(?:web|internet)|online)\s+for\s+/, '')
+      .replace(/\s+(?:on|in|using|with)\s+(?:the\s+)?(?:chrome|google|browser|internet|web)$|\s+online$/, '')
+      .trim();
     if (query) {
-      // Use search_in_page (clears search bar and types new query in-place)
-      return { tool: 'search_in_page', args: { query }, silent: true };
+      // Already on a search page: clear its search bar and search again there.
+      // Anywhere else (a new tab, an ordinary page): a new Google search.
+      const tool = SEARCH_PAGE.test(activeUrl) ? 'search_in_page' : 'search_web';
+      return { tool, args: { query }, silent: true };
     }
   }
 
@@ -244,12 +296,14 @@ export function matchFastCommand(text) {
   //  desktop app clicks like "click on the artist profile" in Spotify.)
 
   // ── Select / Choose / Pick — form controls (radio, checkbox, dropdown) ──
-  // "select dark mode", "choose economy", "pick one-way"
-  const selectMatch = t.match(/^(?:select|choose|pick|switch to)\s+(?:the\s+)?(.+?)(?:\s+(?:option|mode|theme|style|radio|button))?$/);
+  // "select dark mode", "choose economy", "pick one-way", "switch to dark mode".
+  // A plain "switch to Word" is an app switch, handled further down.
+  const selectMatch = t.match(/^(?:select|choose|pick)\s+(?:the\s+)?(.+?)(?:\s+(?:option|mode|theme|style|radio|button))?$/)
+    || t.match(/^switch to\s+(?:the\s+)?(.+?)\s+(?:option|mode|theme|style)$/);
   if (selectMatch) {
     const label = selectMatch[1].trim();
     // Don't match if it's "select all" (that's Ctrl+A) or app focus patterns
-    if (label && label !== 'all' && !/^(dashboard|home|chat|voice|tools|context|commands|history|logs|settings|preferences|options|prompt)$/.test(label) && !/\b(tab|window|app|field)\b/i.test(label)) {
+    if (label && label !== 'all' && !/^(dashboard|home|chat|voice|tools|context|logs|settings|preferences|options|prompt)$/.test(label) && !/\b(tab|window|app|field)\b/i.test(label)) {
       return { tool: 'select_option', args: { label }, silent: true };
     }
   }
@@ -270,33 +324,35 @@ export function matchFastCommand(text) {
     return { tool: 'focus_application', args: { app_name: appName }, silent: true };
   }
 
-  // ── App Focus — "bring/show VS Code to front", "open spotify" ──
-  const focusAppMatch = t.match(/^(?:bring|show|switch to|focus)\s+(?:the\s+)?(.+?)(?:\s+to the front|\s+to front|\s+window)?$/);
+  // ── App Focus — "bring/show VS Code to front", "focus on Word" ──
+  // Dashboard pages ("show settings") are left for navigation below.
+  const focusAppMatch = t.match(/^(?:bring up|bring|show|switch to|focus on|focus)\s+(?:the\s+|my\s+)?(.+?)(?:\s+to the front|\s+to front|\s+window)?$/);
   if (focusAppMatch) {
     let appName = focusAppMatch[1].trim()
       .replace(/\b(tab|browser|window|app|application)\b/gi, '').trim();
     // Only match if it looks like an app name (1-3 words, no complex phrases)
-    if (appName && appName.split(/\s+/).length <= 3 && !/\b(and|or|then|after|also|this|that)\b/.test(appName)) {
+    if (appName && !isDashboardName(appName) && appName.split(/\s+/).length <= 3 && !/\b(and|or|then|after|also|this|that)\b/.test(appName)) {
       return { tool: 'focus_application', args: { app_name: appName }, silent: true };
     }
   }
 
+  // "go to Word", "go to my spreadsheet" — only for apps we know by name, so
+  // "go to the top" and "go to settings" keep their own meaning.
+  const goToApp = t.match(/^go to\s+(.+)$/);
+  if (goToApp && resolveAppName(goToApp[1]).app) {
+    return { tool: 'focus_application', args: { app_name: goToApp[1].trim() }, silent: true };
+  }
+
   // ── AbleSpeak Dashboard Navigation — "go to settings", "open chat" ──
-  const NAV_MAP = {
-    dashboard: 'dashboard', home: 'dashboard',
-    chat: 'chat', voice: 'chat',
-    tools: 'tools',
-    context: 'context',
-    commands: 'commands', history: 'commands',
-    logs: 'logs',
-    settings: 'settings', preferences: 'settings', options: 'settings',
-    prompt: 'prompt', 'prompt editor': 'prompt',
-  };
   const navMatch = t.match(/^(?:go to|open|show|navigate to|switch to)\s+(?:the\s+)?(.+?)(?:\s+page)?$/);
   if (navMatch) {
-    const page = NAV_MAP[navMatch[1].trim()];
+    const name = navMatch[1].trim();
+    const page = NAV_MAP[name];
     if (page) {
       return { tool: 'navigate_dashboard', args: { page }, silent: false };
+    }
+    if (ADMIN_PAGE_NAMES.has(name)) {
+      return { tool: 'answer_question', args: { text: 'That page is for your teacher.' }, silent: false };
     }
   }
 

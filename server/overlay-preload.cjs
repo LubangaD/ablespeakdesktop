@@ -8,6 +8,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Fit the overlay window to the voice bar (compact or expanded)
+  resizeOverlay: (width, height) => ipcRenderer.send('overlay-resize', { width, height }),
+
   // Capture the desktop screen as base64 JPEG (for Gemini Vision)
   captureScreen: () => ipcRenderer.invoke('capture-screen'),
 
@@ -76,6 +79,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Hide the overlay window
   hideOverlay: () => {
     ipcRenderer.send('overlay-hide');
+  },
+
+  // Show the overlay window again (voice-only recovery after "dismiss" — HFI-1)
+  showOverlay: () => {
+    ipcRenderer.send('overlay-show');
   },
 
   // Show the main dashboard window

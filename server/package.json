@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "test": "node --test",
     "desktop": "node launch-electron.cjs",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -22,12 +23,16 @@
       "src/**/*",
       "electron-main.cjs",
       "overlay.html",
+      "overlay-messages.js",
       "overlay-preload.cjs",
       "overlay-wake.cjs",
       "wake-preload.cjs",
       "tools/**/*",
-      "data/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!**/*.test.mjs",
+      "!tools/grounding-eval/images/**",
+      "!tools/grounding-eval/out/**",
+      "!tools/grounding-eval/dataset.json"
     ],
     "extraResources": [
       {
@@ -35,8 +40,8 @@
         "to": "dashboard/dist"
       },
       {
-        "from": ".env",
-        "to": ".env"
+        "from": "../chrome-integration-master",
+        "to": "chrome-extension"
       }
     ],
     "asarUnpack": [

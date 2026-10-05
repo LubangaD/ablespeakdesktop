@@ -9,6 +9,7 @@
 // provider's API at runtime (listModels). `prefer` is an ordered list of regex
 // patterns used to auto-pick the best available model (autoSelectModel), so
 // the app keeps working when providers retire old models.
+// AbleSpeak offers these three providers only.
 const PROVIDERS = {
   openai: {
     name: 'OpenAI',
@@ -26,14 +27,6 @@ const PROVIDERS = {
     envKey: 'GEMINI_API_KEY',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
   },
-  azure: {
-    name: 'Azure OpenAI',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4'],
-    defaultModel: 'gpt-4o-mini',
-    prefer: [/mini/, /.*/],
-    envKey: 'AZURE_OPENAI_API_KEY',
-    baseUrl: null, // Set via AZURE_OPENAI_ENDPOINT
-  },
   anthropic: {
     name: 'Anthropic Claude',
     models: ['claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022'],
@@ -42,26 +35,19 @@ const PROVIDERS = {
     envKey: 'ANTHROPIC_API_KEY',
     baseUrl: 'https://api.anthropic.com/v1',
   },
-  ollama: {
-    name: 'Ollama (Local)',
-    models: ['llama3', 'mistral', 'codellama', 'phi3'],
-    defaultModel: 'llama3',
-    prefer: [/llama/, /.*/],
-    envKey: null, // No key needed
-    baseUrl: 'http://localhost:11434/v1',
-  },
-  groq: {
-    name: 'Groq',
-    models: ['llama-3.3-70b-versatile', 'gemma2-9b-it'],
-    defaultModel: 'llama-3.3-70b-versatile',
-    prefer: [/llama-[\d.]+-70b/, /llama.*70b/, /llama/, /.*/],
-    envKey: 'GROQ_API_KEY',
-    baseUrl: 'https://api.groq.com/openai/v1',
-  },
 };
 
 // Models that are not chat/tool-use models — excluded from auto-selection
 const NON_CHAT_RE = /(audio|realtime|tts|whisper|embed|embedding|image|imagen|veo|dall|moderation|transcribe|search|live|robotics|aqa|learnlm|thinking)/i;
+
+// After a finished action the engine records "[executed: tool]" in its own
+// history. Models sometimes copy that into later replies, and the overlay
+// would read it aloud — strip it from anything returned to the student.
+const EXECUTED_MARKER_RE = /\[executed:[^\]]*\]/gi;
+
+export function cleanReply(text) {
+  return typeof text === 'string' ? text.replace(EXECUTED_MARKER_RE, '').trim() : text;
+}
 
 // Extract a numeric version from a model name for "newest first" sorting
 function versionScore(name) {
@@ -87,10 +73,15 @@ export class AIEngine {
     this.toolRegistry = toolRegistry;
     this.wsHub = wsHub;
 
-    // Current provider config
-    this.provider = process.env.LLM_PROVIDER || 'openai';
+    // Current provider config. A saved provider that is no longer offered
+    // (Azure OpenAI, Ollama, Groq) — or none — falls back to the first of the
+    // three that has a key, and that provider's own default model.
+    const saved = (process.env.LLM_PROVIDER || '').trim();
+    const known = !!PROVIDERS[saved];
+    this.provider = known ? saved : (Object.keys(PROVIDERS).find(p => process.env[PROVIDERS[p].envKey]) || 'openai');
+    if (saved && !known) console.warn(`[AIEngine] "${saved}" is no longer offered — using ${PROVIDERS[this.provider].name}`);
     // LLM_MODEL empty or "auto" → resolve dynamically from the provider's live model list
-    const envModel = (process.env.LLM_MODEL || '').trim();
+    const envModel = known ? (process.env.LLM_MODEL || '').trim() : '';
     this.model = (envModel && envModel.toLowerCase() !== 'auto')
       ? envModel
       : PROVIDERS[this.provider]?.defaultModel || 'gpt-4o-mini';
@@ -138,10 +129,8 @@ export class AIEngine {
           const data = await res.json();
           models = (data.data || []).map(m => m.id);
         }
-      } else if (provider === 'azure') {
-        models = [...config.models]; // deployments can't be listed with just an API key
       } else {
-        // OpenAI-compatible: openai, groq, ollama
+        // OpenAI
         const headers = {};
         if (config.envKey && process.env[config.envKey]) {
           headers['Authorization'] = `Bearer ${process.env[config.envKey]}`;
@@ -149,10 +138,7 @@ export class AIEngine {
         const res = await this._fetchWithTimeout(`${config.baseUrl}/models`, { headers }, 10000);
         if (res.ok) {
           const data = await res.json();
-          models = (data.data || []).map(m => m.id);
-          if (provider === 'openai') {
-            models = models.filter(id => /^(gpt-|o\d|chatgpt)/.test(id));
-          }
+          models = (data.data || []).map(m => m.id).filter(id => /^(gpt-|o\d|chatgpt)/.test(id));
         }
       }
     } catch (err) {
@@ -334,7 +320,13 @@ export class AIEngine {
     const mediaCount = context.pageContext?.mediaElements?.length || 0;
     const activeUrl = context.activeTab?.url || 'none';
     const hasScreenshot = !!context.screenshot;
-    console.log(`[AIEngine] Context: ${vpCount} viewport elements, ${mediaCount} media, active: ${activeUrl}${hasScreenshot ? ', +screenshot' : ''}`);
+    // The desktop window the student is in, when it is not the browser: the
+    // browser's tab is always reported, so without this every command looked
+    // as if the AI thought the student was in Chrome.
+    const desk = context.screenModel?.window
+      ? `, desktop: "${String(context.screenModel.window).slice(0, 60)}" (${context.screenModel.summary ? `${context.screenModel.total} controls` : 'controls not read in time'}${context.screenModel.office ? ', +office' : ''})`
+      : '';
+    console.log(`[AIEngine] Context: ${vpCount} viewport elements, ${mediaCount} media, browser tab: ${activeUrl}${desk}${hasScreenshot ? ', +screenshot' : ''}`);
 
     // Add user message to history
     this.conversationHistory.push({ role: 'user', content: userText });
@@ -370,15 +362,25 @@ export class AIEngine {
         'create_tab', 'go_back', 'go_forward', 'reload_tab', 'make_tab_active',
       ]);
 
+      // The same call that already failed in this command fails again: it is
+      // not run twice, and the command ends with that failure instead.
+      const failedCalls = new Set();
+      const callKey = tc => `${tc.name}:${JSON.stringify(tc.arguments || {})}`;
       while (currentResult.toolCalls && currentResult.toolCalls.length > 0 && rounds < MAX_ROUNDS) {
+        if (currentResult.toolCalls.every(tc => failedCalls.has(callKey(tc)))) {
+          console.log('[AIEngine] Not repeating a call that already failed');
+          break;
+        }
         rounds++;
         const roundResults = [];
         const usedNavigation = currentResult.toolCalls.some(tc => NAVIGATION_TOOLS.has(tc.name));
 
         for (const toolCall of currentResult.toolCalls) {
+          if (failedCalls.has(callKey(toolCall))) continue;
           console.log(`[AIEngine] Tool call (round ${rounds}): ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
           const toolResult = await this.toolRegistry.executeTool(toolCall.name, toolCall.arguments, this.wsHub);
           roundResults.push({ tool: toolCall.name, result: toolResult });
+          if (toolResult?.status === 'error' || toolResult?.error) failedCalls.add(callKey(toolCall));
         }
         allToolResults.push(...roundResults);
 
@@ -400,7 +402,7 @@ export class AIEngine {
             content: currentResult.text || `[executed: ${roundResults.map(r => r.tool).join(', ')}]`,
           });
           return {
-            text: currentResult.text || this._summarizeToolResults(allToolResults),
+            text: cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
             toolCalls: allToolResults,
             latency: Date.now() - startTime,
             provider: this.provider,
@@ -448,7 +450,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       if (allToolResults.length > 0) {
         this.conversationHistory.push({ role: 'assistant', content: currentResult.text || '' });
         return {
-          text: currentResult.text || this._summarizeToolResults(allToolResults),
+          text: cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
           toolCalls: allToolResults,
           latency: Date.now() - startTime,
           provider: this.provider,
@@ -457,10 +459,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       }
 
       // Plain text response
-      let finalText = result.text;
+      let finalText = cleanReply(result.text);
       // Never reply with NOTHING when no action was taken — that leaves the
       // user staring at an empty bubble wondering what happened.
-      if (!finalText?.trim()) {
+      const noAction = !finalText?.trim();
+      if (noAction) {
         finalText = context.extensionConnected === false
           ? 'The Chrome extension is not connected, so I could not do that in the browser. Click the AbleSpeak extension icon in Chrome to reconnect it.'
           : 'I did not perform any action for that command. Could you rephrase it?';
@@ -470,6 +473,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       return {
         text: finalText,
         toolCalls: null,
+        noAction, // the command was not carried out (progress engine counts it as failed)
         latency,
         provider: this.provider,
         model: this.model,
@@ -488,6 +492,35 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       // Clean up screenshot so it doesn't persist across requests
       this._currentScreenshot = null;
       this._activeAbortController = null;
+    }
+  }
+
+  /**
+   * One model call with its own messages, for the task agent (Stage 3) to
+   * plan and check steps without touching the conversation history.
+   * Returns { text, toolCalls }.
+   */
+  async complete({ system, messages, tools = [] }) {
+    const send = () => {
+      const history = this.conversationHistory;
+      const screenshot = this._currentScreenshot;
+      this.conversationHistory = messages;
+      this._currentScreenshot = null;
+      try {
+        // Each provider reads the messages before its first await.
+        return this._dispatch(system, tools);
+      } finally {
+        this.conversationHistory = history;
+        this._currentScreenshot = screenshot;
+      }
+    };
+    try {
+      return await send();
+    } catch (err) {
+      if (!this._isModelError(err)) throw err;
+      const replacement = await this.autoSelectModel(true);
+      if (!replacement) throw err;
+      return send();
     }
   }
 
@@ -524,13 +557,14 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **Keyboard shortcuts**: Use `send_system_keys` to send shortcuts like Ctrl+C, Ctrl+V, Alt+F4 to the focused app',
       '- **List running apps**: Use `list_running_apps` to see what applications are currently open',
       '',
-      '### Desktop UI Control — click ANYTHING in ANY app (like having hands)',
-      '- **Click inside desktop apps**: Use `click_desktop_element` with the element\'s visible name — e.g. name:"Play", app_name:"spotify". Works on every Windows application.',
-      '- **See what is clickable**: Use `list_desktop_elements` to scan an app\'s window and get all button/menu/input names with coordinates.',
-      '- **Read a window**: Use `read_desktop_window` to read dialogs, documents, error messages in any app.',
-      '- **Scroll desktop apps**: Use `desktop_scroll` (browser pages use `scroll` instead).',
-      '- **Workflow**: Try `click_desktop_element` directly with the name the user said. If it returns "not found", call `list_desktop_elements`, find the closest matching name, and click that.',
-      '- **Double-click** to open files/icons: pass double_click:true.',
+      '### Desktop UI Control — through each app\'s own controls (like having hands)',
+      '- **Read the window first**: `uia_query` lists the controls in a desktop window through Windows accessibility — ref, type, name, state and the actions each supports. The controls of the window the student is using are often already listed below under "Controls in".',
+      '- **Act through the control**: `uia_act` with a ref presses buttons (invoke), switches checkboxes (toggle), picks tabs and list items (select), opens menus (expand), types into a field (set_value), scrolls a pane, moves a slider to a number (set_range), or reads a document (read_text, with value "selection", "line", "paragraph" etc. for "read what I selected" / "read this paragraph"). This is reliable and does not move the mouse.',
+      '- **By name**: `click_desktop_element` with the visible name also works in every Windows app — it uses the same accessibility actions.',
+      '- **Screen positions are the fallback**: only when a control is not in the uia_query list (some apps draw their own controls), use the SCREENSHOT to find it and call `click_desktop_element` with x and y.',
+      '- **Read a window**: `read_desktop_window`, or `uia_act` with action "read_text" on a Document control.',
+      '- **Scroll desktop apps**: `uia_act` with scroll_down / scroll_up on the pane, or `desktop_scroll` (browser pages use `scroll` instead).',
+      '- **Double-click** to open files/icons: `click_desktop_element` with double_click:true.',
       '',
       '## Rules',
       '- Execute commands immediately when the intent is clear. You do NOT need to ask for confirmation yourself — irreversible actions (closing an app, deleting, sending/submitting) are automatically confirmed with the user by the system before they run.',
@@ -585,8 +619,8 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- User: "read it out" / "read this page" → Use `get_page_content` to read the page, then provide the key content in your response',
       '- User: "what is this page about" → Use `get_page_content` to read the page, then explain what the page is about',
       '',
-      '## CRITICAL: Page Content Commands',
-      '- When the user asks you to "summarize", "read", "tell me about", or "what is on" a page, you MUST:',
+      '## CRITICAL: Page Content Commands (web pages in Chrome — see "Reading the screen" below for other apps)',
+      '- When the user asks you to "summarize", "read", "tell me about", or "what is on" a WEB page in Chrome, you MUST:',
       '  1. Call `get_page_content` to get the page text',
       '  2. Actually provide the summary or content IN YOUR RESPONSE TEXT',
       '  3. NEVER just say "I have summarized/read the content" — the user wants to HEAR the summary',
@@ -615,9 +649,9 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '',
       '## CRITICAL: Interacting with Desktop Apps',
       '- When the user mentions a SPECIFIC desktop app (Spotify, Notepad, Word, Excel, etc.), use DESKTOP tools to interact with it.',
-      '- **Workflow**: `focus_application` → `list_desktop_elements` (if needed) → `click_desktop_element` or `system_type_text`.',
-      '- Use the SCREENSHOT attached to understand what is currently on screen — it shows which app is active and what elements are visible.',
-      '- If the user says "click play" or "click the search bar" while a desktop app is visible in the screenshot, use `click_desktop_element` with the app name.',
+      '- **Workflow**: `focus_application` → `uia_query` (if the controls are not already listed below) → `uia_act` with the right ref. Use `system_type_text` to type at the cursor.',
+      '- Use the SCREENSHOT to understand the screen, but act through the listed controls whenever the control is listed.',
+      '- If the user says "click play" or "click the search bar" in a desktop app, find the control in the list and use `uia_act` with its ref.',
       '',
       '## IMPORTANT',
       '- Do NOT open new tabs unless explicitly asked.',
@@ -639,6 +673,38 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       parts.push('- Answer "what\'s on my screen" / "read this" / "what does it say" questions');
       parts.push('- Find the correct element names for click_desktop_element');
       parts.push('- Describe errors, dialogs, or notifications visible on screen');
+    }
+
+    // ── Screen model (Stage 2): the desktop window's controls, when known ──
+    // (screenContextForAgent sends a summary, not the elements themselves.)
+    if (context.screenModel?.summary) {
+      const model = context.screenModel;
+      parts.push('', `## Controls in "${model.window}" (${model.app}) — the window the student is using`);
+      parts.push('Format: ref Type "name" [actions] (state). Act with `uia_act` using the ref. If what the student wants is not here, use the screenshot and click_desktop_element with x and y.');
+      parts.push(model.summary);
+      if (model.truncated) parts.push(`(${model.total} controls in total; call uia_query with a name to find others.)`);
+      if (model.office) parts.push('', '### Where the student is in the document', model.office);
+    } else if (context.screenModel?.window) {
+      // The controls were too slow to read, but which app is in front is known.
+      const model = context.screenModel;
+      parts.push('', `## The student is using "${model.window}" (${model.app})`);
+      parts.push('Its controls were not read in time: call uia_query to see them, then act with uia_act.');
+    }
+    if (context.screenModel?.window) {
+      const app = context.screenModel.app || context.screenModel.window;
+      const inBrowser = /chrome|edge|firefox|brave|opera|vivaldi/i.test(`${context.screenModel.app} ${context.screenModel.window}`);
+      if (inBrowser) {
+        parts.push('', '## Reading the screen', `The student is looking at a web page in ${app}: for "what's on my screen", "read this" or "read this page", use \`get_page_content\` and say what it holds.`);
+      } else {
+        // The page-content rules above are about Chrome; without this the AI
+        // described a Chrome tab the student was not even looking at.
+        parts.push(`"This", "here" and "the zoom" mean ${app}, not the browser: browser tools (zoom_tab, click_element, scroll_page and the like) only act on a Chrome tab. Use them only if the student names the browser or a website.`);
+        parts.push('', '## Reading the screen',
+          `The student is using ${app}, NOT Chrome. For "what's on my screen", "read this", "read this page" or "what does it say":`,
+          `- a document (Word, a PDF, Notepad, an email): \`uia_act\` with action "read_text" and no ref reads it at their cursor (value "page" or "all" for more);`,
+          `- anything else: describe ${app} from its controls listed above, or the screenshot when attached;`,
+          '- do NOT call `get_page_content` — that reads a Chrome tab the student is not looking at.');
+      }
     }
 
     // ── Extension status — be honest with the user when browser control is unavailable ──
@@ -768,8 +834,12 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       'execute_javascript', 'get_page_state',
     ]);
 
-    const parts = toolResults.map(r => {
+    // Several link-follows in one command: say the first, the link the person asked for
+    const firstLink = toolResults.findIndex(r => r.tool === 'navigate_to_link' && r.result?.status === 'success');
+
+    const parts = toolResults.map((r, i) => {
       const res = r.result;
+      if (r.tool === 'navigate_to_link' && res?.status === 'success' && i !== firstLink) return '';
 
       // Silent action tools: return nothing (no TTS)
       if (SILENT.has(r.tool) && res?.status !== 'error') {
@@ -807,7 +877,8 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       return '';
     }).filter(Boolean);
 
-    return parts.join('\n');
+    // The same message once, however many times it came back
+    return [...new Set(parts)].join('\n');
   }
 
   // ── LLM Dispatch (with retired-model auto-recovery) ──
@@ -820,7 +891,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
   _dispatch(systemPrompt, tools) {
     if (this.provider === 'gemini') return this._callGemini(systemPrompt, tools);
     if (this.provider === 'anthropic') return this._callAnthropic(systemPrompt, tools);
-    // OpenAI-compatible (openai, azure, ollama, groq)
+    // OpenAI
     return this._callOpenAICompatible(systemPrompt, tools);
   }
 
@@ -840,20 +911,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
     }
   }
 
-  // ── OpenAI-Compatible Provider ──
+  // ── OpenAI ──
 
   async _callOpenAICompatible(systemPrompt, tools) {
     const config = PROVIDERS[this.provider];
-    let baseUrl = config.baseUrl;
-    let apiKey = process.env[config.envKey] || '';
-
-    // Azure special handling
-    if (this.provider === 'azure') {
-      const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-      const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || this.model;
-      baseUrl = `${endpoint}/openai/deployments/${deployment}`;
-      apiKey = process.env.AZURE_OPENAI_API_KEY;
-    }
+    const apiKey = process.env[config.envKey] || '';
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -879,19 +941,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       body.tool_choice = 'auto';
     }
 
-    const url = this.provider === 'azure'
-      ? `${baseUrl}/chat/completions?api-version=2024-02-01`
-      : `${baseUrl}/chat/completions`;
-
+    const url = `${config.baseUrl}/chat/completions`;
     const headers = {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
     };
-
-    if (this.provider === 'azure') {
-      headers['api-key'] = apiKey;
-    } else {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
 
     const res = await this._fetchWithRetry(url, {
       method: 'POST',

@@ -1,0 +1,138 @@
+{
+  "date": "2026-09-17",
+  "takenAt": "2026-09-17 00:38:10",
+  "machine": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz, 10 threads, 16 GB RAM, Windows 10.0.26200, Node v24.20.0 (arm64)",
+  "runsPerApp": 7,
+  "thresholdMs": 200,
+  "workerWarmupMs": 882,
+  "windowListMs": 27,
+  "medianOfAppP50": 210,
+  "worstP95": 470,
+  "results": [
+    {
+      "label": "Word",
+      "window": "Document1 - Word",
+      "process": "WINWORD",
+      "runs": 7,
+      "p50": 378,
+      "p95": 470,
+      "min": 319,
+      "max": 470,
+      "uiaReadP50": null,
+      "controls": 177,
+      "actionable": 140,
+      "unnamedActionable": 3,
+      "actions": {
+        "invoke": 61,
+        "set_value": 25,
+        "toggle": 29,
+        "expand_collapse": 43,
+        "select": 17,
+        "scroll": 5,
+        "read_text": 7
+      },
+      "oldScan": {
+        "p50": 427,
+        "elements": 60
+      }
+    },
+    {
+      "label": "Chrome",
+      "window": "lanes with broken white lines meaning those vehicles are driving onto the same direction - Google Search - Google Chrome",
+      "process": "chrome",
+      "runs": 7,
+      "p50": 66,
+      "p95": 76,
+      "min": 49,
+      "max": 76,
+      "uiaReadP50": null,
+      "controls": 81,
+      "actionable": 81,
+      "unnamedActionable": 27,
+      "actions": {
+        "invoke": 13,
+        "set_value": 2,
+        "toggle": 0,
+        "expand_collapse": 14,
+        "select": 20,
+        "scroll": 1,
+        "read_text": 1
+      },
+      "oldScan": {
+        "p50": 109,
+        "elements": 49
+      }
+    },
+    {
+      "label": "Edge",
+      "window": "Constituency Retail PCA and 19 more pages - Personal - Microsoft​ Edge",
+      "process": "msedge",
+      "runs": 7,
+      "p50": 58,
+      "p95": 74,
+      "min": 50,
+      "max": 74,
+      "uiaReadP50": null,
+      "controls": 60,
+      "actionable": 60,
+      "unnamedActionable": 20,
+      "actions": {
+        "invoke": 7,
+        "set_value": 1,
+        "toggle": 0,
+        "expand_collapse": 10,
+        "select": 20,
+        "scroll": 0,
+        "read_text": 1
+      },
+      "oldScan": {
+        "p50": 125,
+        "elements": 37
+      }
+    },
+    {
+      "label": "File Explorer",
+      "window": "Downloads - File Explorer",
+      "error": "minimized — restore it and run again"
+    },
+    {
+      "label": "Zoom",
+      "notOpen": true
+    },
+    {
+      "label": "WhatsApp",
+      "notOpen": true
+    },
+    {
+      "label": "Spotify",
+      "window": "Spotify Premium",
+      "process": "Spotify",
+      "runs": 7,
+      "p50": 210,
+      "p95": 217,
+      "min": 193,
+      "max": 217,
+      "uiaReadP50": null,
+      "controls": 278,
+      "actionable": 278,
+      "unnamedActionable": 98,
+      "actions": {
+        "invoke": 163,
+        "set_value": 34,
+        "toggle": 11,
+        "expand_collapse": 5,
+        "select": 28,
+        "scroll": 5,
+        "read_text": 16
+      },
+      "oldScan": {
+        "p50": 368,
+        "elements": null
+      }
+    },
+    {
+      "label": "Notepad",
+      "notOpen": true
+    }
+  ]
+}

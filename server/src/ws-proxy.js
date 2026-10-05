@@ -1,10 +1,98 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { insertCommand, upsertHealthCheck } from './db.js';
+import { insertCommand, updateCommandOutcome, upsertHealthCheck, logVoiceTurn } from './db.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
-import { isAffirmative } from './safety.js';
+import { isAffirmative, isNegative, isEchoOf } from './safety.js';
+import { normaliseProfile, listeningSettings, expandAlias, findMacro } from './student-profile.js';
+import { toolFailed, aiCommandFailed } from './tool-outcome.js';
+import { TaskAgent, needsPlan } from './agent.js';
+import { spokenWindowName } from './app-names.js';
+
+// Phrases that resume normal operation from sleep OR bring the overlay back
+// from a voice "dismiss" (HFI-1) — shared so the two recovery paths never drift.
+const WAKE_PHRASES_RE = /^(wake up|wake|i'?m back|ablespeak|hey ablespeak|listen|start listening|resume|come back|show yourself)$/;
+
+// About a minute of continuous dictation. Past this, clips are refused rather
+// than typed long after they were spoken.
+const MAX_QUEUED_DICTATION_CLIPS = 8;
+
+// In dictation, "AbleSpeak, open Chrome" is a command rather than text. The
+// word after the name must be a command verb, so "AbleSpeak is great" is typed.
+const DICTATION_COMMAND_RE = /^\s*(?:hey\s+)?able\s*-?\s*speak\b[\s,.:;!-]*((?:open|close|go|switch|click|press|scroll|search|play|pause|show|find|select|save|send|reload|refresh|zoom|mute|unmute|start|stop|take|read|summari[sz]e|tell|set|turn|navigate|focus|minimi[sz]e|maximi[sz]e|copy|paste|print|undo|redo)\b[\s\S]*)$/i;
+
+const STOP_RE = /^(stop|cancel|abort|shut up|be quiet|quiet|nevermind|never mind)[\s.,!]?/i;
+
+// How long a bare "type this" waits for the words.
+const AWAIT_TYPE_TEXT_MS = 2 * 60 * 1000;
+
+const LEAD_IN = String.raw`(?:(?:please|can you|could you|now|and)\s+)*`;
+const TYPE_ASK_RE = new RegExp(String.raw`^${LEAD_IN}(?:type|write)(?:\s+(?:this|that|the following|this out|something|some text))?(?:\s+(?:for me|please))?\s*[:.!?]?$`, 'i');
+const TYPE_TEXT_RE = new RegExp(String.raw`^${LEAD_IN}(?:type|write)(?:\s+(?:this|the following|out))?\s*(?::|\r?\n)\s*([\s\S]*\S)$`, 'i');
+
+/**
+ * "Type this: <words>" → { text }; a bare "type this" → { ask: true };
+ * anything else (including "type hello in Notepad") → null.
+ */
+export function parseTypeRequest(said) {
+  const text = String(said || '').trim();
+  if (TYPE_ASK_RE.test(text)) return { ask: true };
+  const match = text.match(TYPE_TEXT_RE);
+  return match ? { text: match[1] } : null;
+}
+
+/** The command in "AbleSpeak, <command>", or null for ordinary dictated text. */
+export function matchDictationPrefixCommand(text) {
+  const match = String(text || '').match(DICTATION_COMMAND_RE);
+  return match ? match[1].trim() : null;
+}
+
+// ── Command outcomes for the progress engine ──
+
+// A command said this soon after a failed one, and sounding like it, is the
+// student trying the same thing again.
+const RETRY_WINDOW_MS = 60000;
+// "Undo that" / "no, I meant …" only reach back this far, and never into
+// another student's session.
+const CORRECTION_WINDOW_MS = 5 * 60000;
+
+// Tabs Chrome won't screenshot for an extension (a new blank tab, browser and
+// extension pages, the Web Store); asking only waits out the timeout.
+const UNCAPTURABLE_TAB = /^(?:about:|chrome:|chrome-extension:|chrome-search:|chrome-untrusted:|devtools:|edge:|view-source:)|^https:\/\/(?:chromewebstore\.google\.com|chrome\.google\.com\/webstore)/i;
+
+export { toolFailed, aiCommandFailed };
+
+function editSimilarity(a, b) {
+  if (!a.length && !b.length) return 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = row;
+  }
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
+}
+
+/**
+ * Does `text` look like another go at `previousText`? True for a mishearing
+ * fixed ("scroll town" → "scroll down") or a rewording that keeps most words
+ * ("open chrome" → "open google chrome"); false for a new command
+ * ("open chrome" → "open word").
+ */
+export function isLikelyRetry(previousText, text) {
+  const clean = value => String(value || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const a = clean(previousText);
+  const b = clean(text);
+  if (!a || !b) return false;
+  if (editSimilarity(a, b) >= 0.6) return true;
+  const before = new Set(a.split(' '));
+  const after = new Set(b.split(' '));
+  const shared = [...after].filter(word => before.has(word)).length;
+  return shared / Math.min(before.size, after.size) > 0.5;
+}
 
 /**
  * AbleSpeak WebSocket Hub
@@ -16,7 +104,7 @@ import { isAffirmative } from './safety.js';
  */
 
 export class WsProxy {
-  constructor({ server, aiEngine, dashboardPath = '/ws/dashboard', extensionPath = '/ws/extension' }) {
+  constructor({ server, aiEngine, dashboardPath = '/ws/dashboard', extensionPath = '/ws/extension', wsToken, attribution, activeStudent, profile, readScreen, readScreenModel, onCorrection }) {
     this.aiEngine = aiEngine;
     this.voiceHandler = new VoiceHandler();
     this.extensionClients = new Set();
@@ -26,11 +114,33 @@ export class WsProxy {
     this.lastContextUpdate = null;
     this.browserContext = { tabs: [], activeTab: null };
     this.extensionBrowserName = null; // Set by extension's browser_identify message
+    // Who each voice command belongs to (TCH-1, AT-50). index.js passes the
+    // student the teacher picked and that student's current session; without
+    // it (tests), commands carry this run's own session and no student.
+    this._sessionId = `session-${uuidv4()}`;
+    this._attribution = attribution || (() => ({ session_id: this._sessionId, student_id: null }));
+    this._activeStudent = activeStudent || (() => null);
+    // The active student's speech profile: vocabulary, shortcuts, listening
+    // settings (student-profile.js). Defaults when nobody is chosen.
+    this._profile = profile || (() => normaliseProfile({}).profile);
+    // Reads the controls of the window the student is using (screen-model.js).
+    this._readScreen = readScreen || (async () => null);
+    // Full read of the front window, for the task agent's checks.
+    this._readScreenModel = readScreenModel || (async () => null);
+    // "No, I meant X" after "Y": may teach a shortcut (Stage 4). Returns { learned }.
+    this._onCorrection = onCorrection || (() => null);
+    this._agentRunning = false;    // a multi-step task is in progress
+    this._agentCancelled = false;  // the student said "stop" during it
     this._lastTTSText = '';    // Last text spoken by TTS — for echo detection
     this._lastTTSTime = 0;     // When the last TTS was spoken
     this._voiceProcessing = false; // Mutex: prevents concurrent voice command processing
+    this._voiceTurn = null;        // Token for the clip holding the mutex
+    this._voiceTurnWaiters = [];   // Dictation clips waiting for the mutex, oldest first
+    this._voiceHandoff = false;    // the mutex is reserved for a woken waiter
     this._sleeping = false; // Sleep mode: ignore commands until a wake phrase (Gap 5)
+    this._dismissed = false; // Overlay voice-hidden: ignore commands until a wake phrase (HFI-1)
     this._dictationMode = false; // Dictation mode: type speech directly, no AI
+    this._awaitingTypeText = null; // when "type this" asked for the words
     this._pendingConfirmation = null; // { tool, args, prompt } awaiting a spoken yes/no
     this._actionHistory = [];   // recent executed actions, for "undo that" / "no, I meant X"
     this._privacyMode = false;  // when true, no screenshots/vision are captured
@@ -43,11 +153,14 @@ export class WsProxy {
     this.dashboardWss = new WebSocketServer({ noServer: true });
     this.dashboardWss.on('connection', (ws) => this._handleDashboardConnect(ws));
 
-    // Optional shared secret. When set (recommended on shared machines),
-    // clients must connect with ?token=<value>. Origin-lock + loopback apply
-    // regardless, so the control plane is never open to the network or to
-    // arbitrary websites even without a token.
-    this._wsToken = process.env.ABLESPEAK_WS_TOKEN || null;
+    // Shared secret clients must connect with (?token=<value>). Origin-lock +
+    // loopback apply regardless, so the control plane is never open to the
+    // network or to arbitrary websites even without a token — but without one,
+    // ANY other local process could open this WS and drive the extension/system
+    // tools with zero authentication. index.js resolves (or auto-generates and
+    // persists) a token by default now, so this is only ever null if a caller
+    // explicitly opts out (EXT-2).
+    this._wsToken = wsToken !== undefined ? wsToken : (process.env.ABLESPEAK_WS_TOKEN || null);
 
     // Handle HTTP upgrade — AUTHENTICATE before accepting the socket.
     server.on('upgrade', (request, socket, head) => {
@@ -219,6 +332,9 @@ export class WsProxy {
       extensionCount: this.extensionClients.size,
       activePrompt: this.activePrompt,
       aiEngine: this.aiEngine?.getStatus() || {},
+      sessionId: this._attribution().session_id,
+      activeStudent: this._activeStudent(),
+      listening: listeningSettings(this._profile()),
       timestamp: new Date().toISOString()
     }));
 
@@ -226,78 +342,34 @@ export class WsProxy {
       try {
         const msg = JSON.parse(data.toString());
 
-        // ── Chat Command → AI Engine ──
+        // ── Overlay became visible again (wake phrase, shortcut, or tray) ──
+        // Clear the dismissed gate so a stale flag doesn't keep swallowing
+        // commands after the overlay is back on screen by some other path (HFI-1).
+        if (msg.type === 'overlay_shown') {
+          this._dismissed = false;
+          return;
+        }
+
+        // ── Chat Command: handled exactly like speech ──
         if (msg.type === 'chat_command' && msg.text) {
-          const commandId = uuidv4();
-          console.log(`[Chat] Command: "${msg.text}"`);
-
-          // A consequential action may be awaiting a typed yes/no.
-          if (await this._resolvePendingConfirmation(msg.text)) return;
-
-          // Build context for the LLM
-          const systemContext = getFullSystemContext();
-          const context = {
-            tabs: this.browserContext.tabs || [],
-            activeTab: this.browserContext.activeTab || null,
-            pageContext: this.browserContext.pageContext || null,
-            extensionConnected: this.extensionClients.size > 0,
-            currentTime: new Date().toLocaleString(),
-            computerInfo: systemContext.computerInfo,
-            visibleApplications: systemContext.visibleApplications,
-          };
-
-          // Process through AI engine
-          const result = await this.aiEngine.processChat(msg.text, context);
-
-          // The AI tried a consequential action → it was gated. Ask first.
-          if (this._pendingConfirmation) {
-            this._askConfirmation(this._pendingConfirmation.prompt);
-            return;
-          }
-
-          // Persist to DB
-          try {
-            insertCommand({
-              id: commandId,
-              type: 'chat',
-              direction: 'user_to_ai',
-              payload: JSON.stringify({ text: msg.text }),
-              result: JSON.stringify(result),
-              latency_ms: result.latency || 0,
-            });
-          } catch (err) {
-            console.error('[WsHub] DB insert error:', err.message);
-          }
-
-          // Send response to dashboard
-          this._broadcastDashboard({
-            type: 'chat_assistant_message',
-            id: commandId,
-            text: result.text,
-            error: result.error || false,
-            toolCalls: result.toolCalls,
-            provider: result.provider,
-            model: result.model,
-            latency: result.latency,
-            timestamp: new Date().toISOString()
-          });
+          await this._onChatCommand(ws, msg);
         }
 
         // ── Pre-transcribed Voice Text (from Web Speech API — instant, no Gemini roundtrip) ──
         if (msg.type === 'voice_text' && msg.text) {
           if (this._voiceProcessing && Date.now() - (this._voiceProcessingSince || 0) > 60000) {
-            this._voiceProcessing = false;
+            this._endVoiceTurn(this._voiceTurn);
           }
-          if (this._voiceProcessing) {
+          if (this._voiceBusy()) {
             ws.send(JSON.stringify({ type: 'voice_busy', message: 'Still processing previous command', timestamp: new Date().toISOString() }));
             return;
           }
-          this._voiceProcessing = true;
-          this._voiceProcessingSince = Date.now();
+          const turn = this._beginVoiceTurn();
+          this._turnSource = msg.source === 'overlay' ? 'overlay' : 'dashboard';
 
           try {
             const startTime = Date.now();
-            const text = msg.text.trim();
+            let text = msg.text.trim();
             if (!text) { return; }
 
             console.log(`[Voice] Direct text: "${text}"`);
@@ -322,8 +394,11 @@ export class WsProxy {
             // Reactive correction: "undo that" / "no, I meant ..."
             if (await this._handleCorrection(text, startTime)) return;
 
+            text = this._applyAlias(text);
+            if (await this._runRoutine(text, commandId, startTime)) return;
+
             // FAST PATH
-            const fastMatch = matchFastCommand(text);
+            const fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
             if (fastMatch && fastMatch.tool !== 'dictation_mode') {
               console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
               const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
@@ -338,11 +413,9 @@ export class WsProxy {
               if (isBrowserTool(fastMatch.tool)) this._autoFocusBrowser();
               this._recordAction({ tool: fastMatch.tool, args: fastMatch.args, result: toolResult });
 
-              try {
-                insertCommand({ id: commandId, type: 'voice_fast', direction: 'user_to_ai',
-                  payload: JSON.stringify({ text, fastTool: fastMatch.tool }),
-                  result: JSON.stringify(toolResult), latency_ms: latency });
-              } catch (err) { console.error('[WsHub] DB insert error:', err.message); }
+              this._recordVoiceCommand({ id: commandId, type: 'voice_fast', text,
+                payload: { text, fastTool: fastMatch.tool }, result: toolResult,
+                latency_ms: latency, failed: toolFailed(toolResult) });
 
               // A failure must NEVER be silent — the student has to know it failed.
               const failed = toolResult?.status === 'error' || !!toolResult?.error;
@@ -390,8 +463,13 @@ export class WsProxy {
               currentTime: new Date().toLocaleString(),
               computerInfo: systemContext.computerInfo,
               visibleApplications: systemContext.visibleApplications,
+              screenModel: await this._screenForAgent(),
             };
 
+            if (needsPlan(text)) {
+              await this._runTask(text, context, { commandId, startTime });
+              return;
+            }
             const result = await this.aiEngine.processChat(text, context);
 
             // The AI tried a consequential action → it was gated. Ask first.
@@ -413,11 +491,9 @@ export class WsProxy {
               if (allSilent) silent = true;
             }
 
-            try {
-              insertCommand({ id: commandId, type: 'voice', direction: 'user_to_ai',
-                payload: JSON.stringify({ text, source: 'speech_api' }),
-                result: JSON.stringify(result), latency_ms: result.latency || 0 });
-            } catch (err) { console.error('[WsHub] DB insert error:', err.message); }
+            this._recordVoiceCommand({ id: commandId, type: 'voice', text,
+              payload: { text, source: 'speech_api' }, result,
+              latency_ms: result.latency || 0, failed: aiCommandFailed(result) });
 
             this._broadcastDashboard({
               type: 'chat_assistant_message', id: commandId, text: result.text,
@@ -432,415 +508,13 @@ export class WsProxy {
               this._lastTTSTime = Date.now();
             }
           } finally {
-            this._voiceProcessing = false;
+            this._endVoiceTurn(turn);
           }
         }
 
         // ── Voice Audio → Transcribe → Fast Route OR AI Pipeline ──
         if (msg.type === 'voice_audio' && msg.audio) {
-          // Mutex: prevent concurrent voice commands (Fix #5)
-          // Self-heal: if the mutex has been held > 60s something hung — force release
-          if (this._voiceProcessing && Date.now() - (this._voiceProcessingSince || 0) > 60000) {
-            console.warn('[WsHub] Voice mutex stuck >60s — force releasing');
-            this._voiceProcessing = false;
-          }
-          if (this._voiceProcessing) {
-            ws.send(JSON.stringify({
-              type: 'voice_busy',
-              message: 'Still processing previous command',
-              timestamp: new Date().toISOString()
-            }));
-            return;
-          }
-          this._voiceProcessing = true;
-          this._voiceProcessingSince = Date.now();
-
-
-          try {
-          const startTime = Date.now();
-          console.log(`[Voice] Received audio (${Math.round(msg.audio.length / 1024)}KB)`);
-
-          // Transcribe with Gemini
-          const { text, error } = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm');
-
-          if (error === 'no_speech') {
-            ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
-            return;
-          }
-          if (error) {
-            ws.send(JSON.stringify({ type: 'voice_error', error, timestamp: new Date().toISOString() }));
-            return;
-          }
-
-          // Send transcription to dashboard
-          this._broadcastDashboard({
-            type: 'voice_transcription',
-            text,
-            latency: Date.now() - startTime,
-            timestamp: new Date().toISOString()
-          });
-
-          // ────────────────────────────────────────────
-          // ESCAPE HATCH: Critical commands that bypass all filters
-          // When music is playing, the mic picks up noise + the user's voice.
-          // Uses browser media_control FIRST (directly pauses video, no mic interference).
-          // Falls back to system media keys only if extension isn't connected.
-          // ────────────────────────────────────────────
-          if (!this._dictationMode) {
-            const lowerForEscape = text.toLowerCase().trim();
-            const wordCount = lowerForEscape.split(/\s+/).length;
-            const escapeMatch = lowerForEscape.match(/\b(pause|stop|mute|shut up|quiet|silence|hush)\b/);
-
-            if (escapeMatch && wordCount <= 6) {
-              console.log(`[Voice] 🚨 Escape command: "${escapeMatch[1]}" in "${text.slice(0, 60)}"`);
-              try {
-                // Browser media_control — directly pauses the video without affecting the mic
-                await this.aiEngine.toolRegistry.executeTool('media_control', { action: 'pause' }, this);
-              } catch {
-                // Fallback: system media key (may also pause the mic — last resort)
-                try {
-                  await this.aiEngine.toolRegistry.executeTool('system_media_control', { action: 'play_pause' }, this);
-                } catch {}
-              }
-              ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
-              return;
-            }
-          }
-
-          // ────────────────────────────────────────────
-          // NOISE + HALLUCINATION FILTER
-          // Detect song lyrics, speaker bleed, and Gemini phantom transcriptions.
-          // SKIPPED in dictation mode — long text and common phrases are expected.
-          // ────────────────────────────────────────────
-          if (!this._dictationMode) {
-          const HALLUCINATIONS = [
-            'the quick brown fox jumps over the lazy dog',
-            'thank you for watching',
-            'thanks for watching',
-            'please subscribe',
-            'like and subscribe',
-            'subtitles by',
-            'music playing',
-          ];
-          const lowerText = text.toLowerCase().trim();
-
-          const isHallucination = HALLUCINATIONS.some(h => lowerText.includes(h));
-
-          const isLikelyMusic = (() => {
-            if (isHallucination) return true;
-            // Very long transcriptions (>300 chars) are usually music, not commands
-            if (text.length > 300) return true;
-            // Detect repetitive patterns: same phrase repeated 3+ times
-            const words = lowerText.split(/\s+/);
-            if (words.length > 20) {
-              const phrases = new Map();
-              for (let i = 0; i < words.length - 2; i++) {
-                const p = words.slice(i, i + 3).join(' ');
-                phrases.set(p, (phrases.get(p) || 0) + 1);
-              }
-              for (const count of phrases.values()) {
-                if (count >= 3) return true;
-              }
-            }
-            return false;
-          })();
-
-          if (isLikelyMusic) {
-            console.log(`[Voice] Filtered: ${isHallucination ? 'hallucination' : 'music/noise'} — "${text.slice(0, 60)}"`);
-            ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
-            return;
-          }
-          } // end !dictationMode
-
-          // ────────────────────────────────────────────
-          // ECHO DETECTION: Ignore mic picking up TTS speaker output
-          // If the transcription closely matches the last spoken TTS text,
-          // it's the mic hearing our own voice — discard it.
-          // SKIPPED in dictation mode — no TTS is spoken during dictation.
-          // ────────────────────────────────────────────
-          if (!this._dictationMode && this._lastTTSText && (Date.now() - this._lastTTSTime) < 30000) {
-            const lowerText = text.toLowerCase().trim();
-            const ttsWords = this._lastTTSText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-            const heardWords = lowerText.split(/\s+/).filter(w => w.length > 2);
-            if (ttsWords.length > 0 && heardWords.length > 0) {
-              const overlap = heardWords.filter(w => ttsWords.includes(w)).length;
-              const ratio = overlap / Math.min(ttsWords.length, heardWords.length);
-              if (ratio > 0.4) {
-                console.log(`[Voice] 🔇 Echo detected (${Math.round(ratio*100)}% overlap with TTS) — "${text.slice(0, 60)}"`);
-                ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
-                return;
-              }
-            }
-          }
-
-          // VOICE CONTROL: interrupt (stop/cancel) + sleep/wake — never hits the LLM
-          if (this._handleVoiceControl(text)) return;
-
-          // ────────────────────────────────────────────
-          // DICTATION MODE: type speech directly into the active app
-          // No AI processing — just transcribe → type → restart mic
-          // ────────────────────────────────────────────
-          if (this._dictationMode) {
-            const tLower = text.toLowerCase().trim().replace(/[.!?,]+$/, '');
-
-            // Check for exit phrases first
-            if (/^(stop|end|exit)\s+dictat(ing|ion)|^command\s+mode$/.test(tLower)) {
-              this._dictationMode = false;
-              try { const { clearDictationTarget } = await import('./system-tools.js'); clearDictationTarget(); } catch {}
-              console.log('[Voice] ✏️ Dictation mode OFF');
-              this._broadcastDashboard({
-                type: 'dictation_mode', enabled: false,
-                say: 'Dictation mode off. Back to commands.',
-                timestamp: new Date().toISOString(),
-              });
-              return;
-            }
-
-            // Check for in-dictation navigation / formatting commands
-            const navCmd = this._matchDictationCommand(tLower);
-            if (navCmd) {
-              console.log(`[Voice] ✏️ Dictation command: ${navCmd}`);
-              try {
-                const { executeDictationCommand } = await import('./system-tools.js');
-                await executeDictationCommand(navCmd);
-              } catch (err) {
-                console.error('[Voice] Dictation command error:', err.message);
-              }
-              this._broadcastDashboard({
-                type: 'dictation_typed', text: `[${navCmd.replace(/_/g, ' ')}]`,
-                timestamp: new Date().toISOString(),
-              });
-              return;
-            }
-
-            // Convert punctuation words to actual punctuation
-            let typedText = this._processDictationText(text);
-            if (!typedText.trim()) return;
-
-            console.log(`[Voice] ✏️ Dictating: "${typedText}"`);
-            try {
-              const { dictateText } = await import('./system-tools.js');
-              await dictateText(typedText);
-            } catch (err) {
-              console.error('[Voice] Dictation type error:', err.message);
-            }
-
-            // Broadcast to overlay so it shows the typed text
-            this._broadcastDashboard({
-              type: 'dictation_typed', text: typedText,
-              timestamp: new Date().toISOString(),
-            });
-            return;
-          }
-
-          const commandId = uuidv4();
-          console.log(`[Voice] Command: "${text}"`);
-
-          // ────────────────────────────────────────────
-          // CONFIRMATION REPLY: if a consequential action is awaiting a spoken
-          // yes/no, THIS utterance is the answer. Handle it before anything else.
-          // ────────────────────────────────────────────
-          if (await this._resolvePendingConfirmation(text, startTime)) return;
-
-          // Reactive correction: "undo that" / "no, I meant ..." right after a mistake.
-          if (await this._handleCorrection(text, startTime)) return;
-
-          // ────────────────────────────────────────────
-          // FAST PATH: Match common commands instantly
-          // ────────────────────────────────────────────
-          const fastMatch = matchFastCommand(text);
-
-          if (fastMatch) {
-            console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
-
-            // Special handling: dictation mode toggle (not a real tool)
-            if (fastMatch.tool === 'dictation_mode') {
-              this._dictationMode = fastMatch.args.enabled;
-              console.log(`[Voice] ✏️ Dictation mode ${this._dictationMode ? 'ON' : 'OFF'}`);
-
-              // Capture/clear the target window HWND
-              if (this._dictationMode) {
-                try {
-                  const { captureDictationTarget } = await import('./system-tools.js');
-                  await captureDictationTarget();
-                } catch (err) {
-                  console.error('[Voice] Failed to capture dictation target:', err.message);
-                }
-              } else {
-                try {
-                  const { clearDictationTarget } = await import('./system-tools.js');
-                  clearDictationTarget();
-                } catch {}
-              }
-
-              this._broadcastDashboard({
-                type: 'dictation_mode',
-                enabled: this._dictationMode,
-                say: this._dictationMode
-                  ? 'Dictation mode on.'
-                  : 'Dictation mode off. Back to commands.',
-                timestamp: new Date().toISOString(),
-              });
-
-              // If user said "dictate My name is..." — type the initial text immediately
-              if (this._dictationMode && fastMatch.args.initialText) {
-                const typedText = this._processDictationText(fastMatch.args.initialText);
-                if (typedText.trim()) {
-                  console.log(`[Voice] ✏️ Initial dictation: "${typedText}"`);
-                  try {
-                    const { dictateText } = await import('./system-tools.js');
-                    await dictateText(typedText);
-                  } catch (err) {
-                    console.error('[Voice] Dictation type error:', err.message);
-                  }
-                  this._broadcastDashboard({
-                    type: 'dictation_typed', text: typedText,
-                    timestamp: new Date().toISOString(),
-                  });
-                }
-              }
-              return;
-            }
-
-            const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
-            const latency = Date.now() - startTime;
-
-            // Consequential action → pause and ask before doing anything else.
-            if (toolResult?.status === 'needs_confirmation') {
-              this._askConfirmation(toolResult.prompt, startTime);
-              return;
-            }
-
-            // Auto-focus browser for browser commands
-            if (isBrowserTool(fastMatch.tool)) {
-              this._autoFocusBrowser();
-            }
-            this._recordAction({ tool: fastMatch.tool, args: fastMatch.args, result: toolResult });
-
-            // Persist to DB
-            try {
-              insertCommand({
-                id: commandId,
-                type: 'voice_fast',
-                direction: 'user_to_ai',
-                payload: JSON.stringify({ text, fastTool: fastMatch.tool }),
-                result: JSON.stringify(toolResult),
-                latency_ms: latency,
-              });
-            } catch (err) {
-              console.error('[WsHub] DB insert error:', err.message);
-            }
-
-            // A FAILURE IS NEVER SILENT — the student must hear that it failed,
-            // otherwise they wait and retry blind. Only successes honour `silent`.
-            const failed = toolResult?.status === 'error' || !!toolResult?.error;
-            const responseText = failed
-              ? `That didn't work: ${toolResult.error || toolResult.message || 'unknown error'}`
-              : (fastMatch.silent ? '' : (toolResult?.message || `Done: ${fastMatch.tool}`));
-            this._broadcastDashboard({
-              type: 'chat_assistant_message',
-              id: commandId,
-              text: responseText,
-              error: failed,
-              toolCalls: [{ tool: fastMatch.tool, result: toolResult }],
-              provider: 'fast',
-              model: 'pattern-match',
-              latency,
-              source: 'voice',
-              silent: failed ? false : fastMatch.silent,
-              timestamp: new Date().toISOString()
-            });
-
-            console.log(`[Voice] ⚡ Fast executed in ${latency}ms (silent: ${failed ? false : fastMatch.silent}${failed ? ', FAILED' : ''})`);
-            return;
-          }
-
-          // ────────────────────────────────────────────
-          // FULL AI PATH: Complex commands go to LLM
-          // ────────────────────────────────────────────
-          const systemContext = getFullSystemContext();
-
-          // Desktop screenshot from overlay, or fallback to extension tab screenshot.
-          // Privacy mode disables ALL screen capture — voice control still works.
-          let screenshot = this._privacyMode ? null : (msg.screenshot || null);
-          if (!this._privacyMode && !screenshot && this.extensionClients.size > 0) {
-            try {
-              const ssResult = await this.sendToolToExtension('take_screenshot', {});
-              if (ssResult && typeof ssResult === 'string' && ssResult.startsWith('data:')) {
-                screenshot = ssResult.replace(/^data:image\/\w+;base64,/, '');
-              }
-            } catch {}
-          }
-
-          const context = {
-            tabs: this.browserContext.tabs || [],
-            activeTab: this.browserContext.activeTab || null,
-            pageContext: this.browserContext.pageContext || null,
-            extensionConnected: this.extensionClients.size > 0,
-            currentTime: new Date().toLocaleString(),
-            computerInfo: systemContext.computerInfo,
-            visibleApplications: systemContext.visibleApplications,
-            screenshot,
-          };
-
-          const result = await this.aiEngine.processChat(text, context);
-
-          // The AI tried a consequential action → it was gated. Ask first.
-          if (this._pendingConfirmation) {
-            this._askConfirmation(this._pendingConfirmation.prompt, startTime);
-            return;
-          }
-
-          // Auto-focus browser if AI used browser tools
-          if (result.toolCalls && Array.isArray(result.toolCalls)) {
-            const usedBrowserTool = result.toolCalls.some(tc => isBrowserTool(tc.tool || tc.name));
-            if (usedBrowserTool) {
-              this._autoFocusBrowser();
-            }
-          }
-
-          // Determine if the response should be silent
-          let silent = false;
-          if (result.toolCalls && Array.isArray(result.toolCalls)) {
-            const allSilent = result.toolCalls.every(tc => isSilentTool(tc.tool || tc.name));
-            if (allSilent) silent = true;
-          }
-
-          try {
-            insertCommand({
-              id: commandId,
-              type: 'voice',
-              direction: 'user_to_ai',
-              payload: JSON.stringify({ text, source: 'microphone' }),
-              result: JSON.stringify(result),
-              latency_ms: result.latency || 0,
-            });
-          } catch (err) {
-            console.error('[WsHub] DB insert error:', err.message);
-          }
-
-          this._broadcastDashboard({
-            type: 'chat_assistant_message',
-            id: commandId,
-            text: result.text,
-            error: result.error || false,
-            toolCalls: result.toolCalls,
-            provider: result.provider,
-            model: result.model,
-            latency: result.latency,
-            source: 'voice',
-            silent,
-            timestamp: new Date().toISOString()
-          });
-
-          // Store response text so the echo guard can reject the mic picking it up
-          if (result.text && !silent) {
-            this._lastTTSText = result.text;
-            this._lastTTSTime = Date.now();
-          }
-          } finally {
-            this._voiceProcessing = false;
-          }
+          await this._onVoiceAudio(ws, msg);
         }
 
         // ── Switch LLM Provider ──
@@ -881,6 +555,906 @@ export class WsProxy {
     });
   }
 
+  /**
+   * A command typed on the Chat page. It takes the same route as speech, so
+   * everything can be tried without a microphone, and acts on the app that
+   * was in use before the dashboard. An adult is typing, so it never counts
+   * toward the student's progress.
+   */
+  async _onChatCommand(ws, msg) {
+    const text = String(msg.text || '').trim();
+    if (!text) return;
+    console.log(`[Chat] Command: "${text.length > 200 ? `${text.slice(0, 200)}…` : text}"`);
+
+    if (this._voiceProcessing && Date.now() - (this._voiceProcessingSince || 0) > 60000) {
+      this._endVoiceTurn(this._voiceTurn);
+    }
+    if (this._agentRunning) {
+      if (STOP_RE.test(text)) {
+        this._stopTask();
+        return;
+      }
+      this._reply('Still working on the task. Type "stop" to cancel it.', { silent: true });
+      return;
+    }
+    if (this._voiceBusy()) await this._waitForVoiceTurn();
+
+    const turn = this._beginVoiceTurn();
+    this._turnSource = 'dashboard';
+    try {
+      await this._handleUtterance(ws, text, { typed: true });
+    } catch (err) {
+      console.error('[Chat] Command error:', err.message);
+      this._reply(`That didn't work: ${err.message}`, { error: true });
+    } finally {
+      this._endVoiceTurn(turn);
+    }
+  }
+
+  /** Wait to be handed the voice turn. Waiters keep the order they came in. */
+  async _waitForVoiceTurn() {
+    // A waiter that is woken but finds the turn taken goes back to the front.
+    let woken = false;
+    do {
+      await new Promise(resolve => (woken ? this._voiceTurnWaiters.unshift(resolve) : this._voiceTurnWaiters.push(resolve)));
+      woken = true;
+    } while (this._voiceProcessing);
+  }
+
+  /** A message that isn't a command's result: shown, and spoken unless silent. */
+  _reply(text, { error = false, silent = false, model = 'note' } = {}) {
+    this._broadcastDashboard({
+      type: 'chat_assistant_message', id: uuidv4(), text, error, toolCalls: [],
+      provider: 'fast', model, source: 'voice', silent, timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * "Type this: …" types the words exactly as given. A bare "type this" asks
+   * for them, and the next message is typed.
+   */
+  async _handleTypeRequest(text, { commandId, startTime, typed }) {
+    let words = null;
+    if (this._awaitingTypeText && Date.now() - this._awaitingTypeText < AWAIT_TYPE_TEXT_MS) {
+      words = typed ? text : this._processDictationText(text);
+    }
+    this._awaitingTypeText = null;
+
+    if (words === null) {
+      const request = parseTypeRequest(text);
+      if (!request) return false;
+      if (request.ask) {
+        this._awaitingTypeText = Date.now();
+        this._reply(typed ? 'What should I type? Send the words next.' : 'What should I type? Say the words next.', { model: 'type-request' });
+        return true;
+      }
+      words = request.text;
+    }
+    if (!words.trim()) return true;
+
+    const tool = 'system_type_text';
+    const args = { text: words };
+    const toolResult = await this.aiEngine.toolRegistry.executeTool(tool, args, this);
+    if (toolResult?.status === 'needs_confirmation') {
+      this._askConfirmation(toolResult.prompt, startTime);
+      return true;
+    }
+    this._recordAction({ tool, args, result: toolResult });
+    const failed = toolFailed(toolResult);
+    this._recordVoiceCommand({
+      id: commandId, type: 'voice_fast', text,
+      payload: { text, fastTool: tool, source: typed ? 'chat' : 'microphone' },
+      result: toolResult, latency_ms: Date.now() - startTime, failed,
+    });
+    const count = words.trim().split(/\s+/).length;
+    const where = toolResult?.window ? ` into ${toolResult.window}` : '';
+    this._broadcastDashboard({
+      type: 'chat_assistant_message', id: commandId,
+      text: failed
+        ? `That didn't work: ${toolResult?.error || toolResult?.message || 'unknown error'}`
+        : `Typed ${count} word${count === 1 ? '' : 's'}${where}.`,
+      error: failed, toolCalls: [{ tool, result: toolResult }],
+      provider: 'fast', model: 'pattern-match', latency: Date.now() - startTime,
+      source: 'voice', silent: !failed, timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  /** Stop the running task (voice "stop", or "stop" typed on the Chat page). */
+  _stopTask() {
+    console.log('[Voice] ⚡ Stopping the running task');
+    this._agentCancelled = true;
+    try { this.aiEngine?.abortActive?.(); } catch {}
+  }
+
+  /**
+   * Handle one recorded clip from the overlay.
+   *
+   * Outside dictation, a clip that arrives while another is being handled is
+   * turned away with `voice_busy`, since a command said over a running
+   * command is usually a repeat. In dictation the student keeps talking while
+   * earlier speech is typed, so those clips wait their turn and are typed in
+   * the order they were spoken.
+   */
+  async _onVoiceAudio(ws, msg) {
+    // Self-heal: if the mutex has been held > 60s something hung — force release
+    if (this._voiceProcessing && Date.now() - (this._voiceProcessingSince || 0) > 60000) {
+      console.warn('[WsHub] Voice mutex stuck >60s — force releasing');
+      this._endVoiceTurn(this._voiceTurn);
+    }
+    if (this._voiceProcessing && this._agentRunning && !this._dictationMode) {
+      await this._interruptTask(ws, msg);
+      return;
+    }
+    if (this._voiceBusy()) {
+      const canWait = this._dictationMode && this._voiceTurnWaiters.length < MAX_QUEUED_DICTATION_CLIPS;
+      if (!canWait) {
+        ws.send(JSON.stringify({
+          type: 'voice_busy',
+          message: 'Still processing previous command',
+          timestamp: new Date().toISOString()
+        }));
+        return;
+      }
+      console.log(`[Voice] Dictation clip queued (${this._voiceTurnWaiters.length + 1} waiting)`);
+      // Phrases are typed in the order they were spoken.
+      await this._waitForVoiceTurn();
+    }
+
+    const turn = this._beginVoiceTurn();
+    // Only the overlay is the student speaking; the dashboard's Chat page
+    // microphone is an adult trying things, and never counts toward progress.
+    this._turnSource = msg.source === 'overlay' ? 'overlay' : 'dashboard';
+    turn.log = {
+      outcome: 'command', transcript: null, commandId: null,
+      started: Date.now(), audioKb: Math.round((msg.audio.length * 3) / 4 / 1024),
+    };
+    this._turnLog = turn.log;
+    try {
+      await this._processVoiceAudio(ws, msg);
+    } finally {
+      this._logTurn(turn.log);
+      if (this._turnLog === turn.log) this._turnLog = null;
+      this._endVoiceTurn(turn);
+    }
+  }
+
+  /** Who a voice command belongs to: the student only when they spoke. */
+  _voiceAttribution() {
+    const ids = this._attribution();
+    return this._turnSource === 'dashboard' ? { ...ids, student_id: null } : ids;
+  }
+
+  /** How this clip ended, for the recognition readout. */
+  _markTurn(outcome) {
+    if (this._turnLog) this._turnLog.outcome = outcome;
+  }
+
+  _logTurn(turn) {
+    if (!turn) return;
+    try {
+      logVoiceTurn({
+        ...this._voiceAttribution(),
+        outcome: turn.outcome,
+        transcript: turn.transcript,
+        command_id: turn.commandId,
+        audio_kb: turn.audioKb,
+        ms: Date.now() - turn.started,
+      });
+    } catch {
+      // No database (tests); the command itself is unaffected.
+    }
+  }
+
+  // ── Multi-step tasks (Stage 3) ──
+
+  /** While a task runs, a clip can only stop it. */
+  async _interruptTask(ws, msg) {
+    const { text } = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm');
+    if (text && STOP_RE.test(text.trim())) {
+      this._stopTask();
+      this._broadcastDashboard({ type: 'voice_transcription', text, latency: 0, timestamp: new Date().toISOString() });
+      return;
+    }
+    ws.send(JSON.stringify({
+      type: 'voice_busy',
+      task: true,
+      message: 'Still working on the task. Say "stop" to cancel it.',
+      timestamp: new Date().toISOString(),
+    }));
+  }
+
+  _aiContext() {
+    const systemContext = getFullSystemContext();
+    return {
+      tabs: this.browserContext.tabs || [],
+      activeTab: this.browserContext.activeTab || null,
+      pageContext: this.browserContext.pageContext || null,
+      extensionConnected: this.extensionClients.size > 0,
+      currentTime: new Date().toLocaleString(),
+      computerInfo: systemContext.computerInfo,
+      visibleApplications: systemContext.visibleApplications,
+    };
+  }
+
+  /** A tool call made by the agent: through the safety gate, like any other. */
+  async _runAgentTool(name, args, opts = {}) {
+    const result = await this.aiEngine.toolRegistry.executeTool(name, args, this, opts);
+    if (result?.status !== 'needs_confirmation' && !this._evaluating) {
+      this._recordAction({ tool: name, args, result });
+      if (isBrowserTool(name)) this._autoFocusBrowser();
+    }
+    return result;
+  }
+
+  _taskAgent() {
+    const engine = this.aiEngine;
+    return new TaskAgent({
+      llm: request => engine.complete(request),
+      systemPrompt: context => engine._buildSystemPrompt(context),
+      toolsFor: context => engine.toolRegistry.getToolsForContext(context),
+      execute: (name, args) => this._runAgentTool(name, args),
+      readScreen: async () => (this._privacyMode ? null : this._readScreenModel().catch(() => null)),
+      fastMatch: matchFastCommand,
+      report: ({ type, ...event }) => this._broadcastDashboard({ ...event, type: 'agent_progress', phase: type, timestamp: new Date().toISOString() }),
+      isCancelled: () => this._agentCancelled,
+    });
+  }
+
+  // ── Task evaluation (Stage 3 acceptance: tools/agent-eval) ──
+
+  /** The plan the agent would make, without doing anything. */
+  async planTask(text) {
+    const screen = this._privacyMode ? null : await this._readScreenModel().catch(() => null);
+    return this._taskAgent().plan(text, screen, this._aiContext());
+  }
+
+  /**
+   * Run a task for the evaluation: same agent and safety gate, answering
+   * "yes" itself when `autoConfirm`, and never saved as a student's data.
+   */
+  async runTaskForEvaluation(text, { autoConfirm = false } = {}) {
+    if (this._voiceProcessing) return { status: 'busy', text: 'AbleSpeak is busy with a voice command.' };
+    const turn = this._beginVoiceTurn();
+    this._agentRunning = true;
+    this._agentCancelled = false;
+    this._evaluating = true;
+    const started = Date.now();
+    let confirmations = 0;
+    try {
+      const agent = this._taskAgent();
+      const context = this._aiContext();
+      let outcome = await agent.run(text, context);
+      while (outcome.status === 'needs_confirmation') {
+        const pending = this._pendingConfirmation;
+        this._pendingConfirmation = null;
+        if (!autoConfirm || !pending) {
+          outcome = await agent.resume(text, context, outcome.state, null);
+          break;
+        }
+        confirmations++;
+        const confirmed = await this._runAgentTool(pending.tool, pending.args, { confirmed: true });
+        outcome = await agent.resume(text, context, outcome.state, confirmed);
+      }
+      return { ...outcome, state: undefined, confirmations, ms: Date.now() - started };
+    } catch (err) {
+      this._broadcastDashboard({ type: 'agent_progress', phase: 'failed', text: err.message, timestamp: new Date().toISOString() });
+      throw err;
+    } finally {
+      this._pendingConfirmation = null;
+      this._agentRunning = false;
+      this._evaluating = false;
+      this._endVoiceTurn(turn);
+    }
+  }
+
+  /** A routine from the student's profile ("start my homework"). */
+  async _runRoutine(text, commandId, startTime) {
+    const routine = findMacro(this._profile(), text);
+    if (!routine) return false;
+    console.log(`[Voice] Routine "${routine.name}": ${routine.steps.join(' → ')}`);
+    await this._runTask(routine.name, this._aiContext(), {
+      commandId, startTime,
+      plan: routine.steps.map(step => ({ do: step, expect: '' })),
+    });
+    return true;
+  }
+
+  /** Plan, act, check and recover; tell the student how it went. */
+  async _runTask(text, context, { commandId = uuidv4(), startTime = Date.now(), plan = null, resume = null } = {}) {
+    this._agentRunning = true;
+    this._agentCancelled = false;
+    if (this.aiEngine) this.aiEngine._activeAbortController = new AbortController();
+    let outcome;
+    try {
+      const agent = this._taskAgent();
+      outcome = resume
+        ? await agent.resume(text, context, resume.state, resume.confirmed)
+        : await agent.run(text, context, { plan });
+    } catch (err) {
+      const stopped = this._agentCancelled;
+      if (!stopped) console.error('[Agent] Task error:', err.message);
+      outcome = {
+        status: stopped ? 'stopped' : 'failed',
+        text: stopped ? 'Stopped.' : `Sorry, something went wrong: ${err.message}`,
+        steps: [], record: [], replans: 0, toolCalls: [],
+      };
+      this._broadcastDashboard({ type: 'agent_progress', phase: outcome.status, text: outcome.text, timestamp: new Date().toISOString() });
+    } finally {
+      this._agentRunning = false;
+      if (this.aiEngine) this.aiEngine._activeAbortController = null;
+    }
+
+    if (outcome.status === 'needs_confirmation') {
+      // The paused task travels with the question it is waiting on, so an
+      // answer can only ever resume this task.
+      if (this._pendingConfirmation) {
+        this._pendingConfirmation.plan = { text, context, state: outcome.state, commandId, startTime };
+      }
+      this._askConfirmation(outcome.prompt, startTime);
+      return outcome;
+    }
+
+    const failed = outcome.status === 'failed' || outcome.status === 'cannot';
+    console.log(`[Agent] ${outcome.status}: "${text}" — ${outcome.record?.filter(r => r.ok).length || 0}/${outcome.steps?.length || 0} steps, ${outcome.replans} re-plans`);
+    this._recordVoiceCommand({
+      id: commandId,
+      type: 'voice_task',
+      text,
+      payload: { text, source: 'agent', steps: outcome.steps },
+      result: {
+        status: outcome.status,
+        replans: outcome.replans,
+        steps: (outcome.record || []).map(r => ({ do: r.do, tool: r.tool, ok: r.ok, why: r.why })),
+      },
+      latency_ms: Date.now() - startTime,
+      failed: failed || outcome.status === 'stopped',
+    });
+    this._broadcastDashboard({
+      type: 'chat_assistant_message',
+      id: commandId,
+      text: outcome.text,
+      error: failed,
+      toolCalls: (outcome.toolCalls || []).map(call => ({ tool: call.tool, result: call.result })),
+      provider: 'agent',
+      model: this.aiEngine?.model,
+      latency: Date.now() - startTime,
+      source: 'voice',
+      silent: false,
+      task: { status: outcome.status, steps: outcome.steps?.length || 0, replans: outcome.replans },
+      timestamp: new Date().toISOString(),
+    });
+    if (outcome.text) {
+      this._lastTTSText = outcome.text;
+      this._lastTTSTime = Date.now();
+    }
+    return outcome;
+  }
+
+  /** The window's controls for the AI, unless privacy mode is on. */
+  async _screenForAgent() {
+    if (this._privacyMode) return null;
+    try {
+      return await this._readScreen({ extensionConnected: this.extensionClients.size > 0 });
+    } catch {
+      return null;
+    }
+  }
+
+  /** The student's own phrase for a command ("my music" → "open spotify"). */
+  _applyAlias(text) {
+    const means = expandAlias(this._profile(), text);
+    if (!means) return text;
+    console.log(`[Voice] Shortcut "${text}" → "${means}"`);
+    return means;
+  }
+
+  /** Tell the overlay how to listen for the student now using the computer. */
+  broadcastListeningSettings() {
+    this._broadcastDashboard({
+      type: 'listening_settings',
+      ...listeningSettings(this._profile()),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /** Someone holds the voice turn, or it is being handed to a queued clip. */
+  _voiceBusy() {
+    return this._voiceProcessing || this._voiceHandoff;
+  }
+
+  _beginVoiceTurn() {
+    const turn = {};
+    this._voiceHandoff = false;
+    this._voiceTurn = turn;
+    this._voiceProcessing = true;
+    this._voiceProcessingSince = Date.now();
+    return turn;
+  }
+
+  /** Free the voice mutex and wake the next queued clip, if any. */
+  _endVoiceTurn(turn) {
+    // A turn that was force-released must not free the one that replaced it.
+    if (turn !== this._voiceTurn) return;
+    this._voiceTurn = null;
+    this._voiceProcessing = false;
+    const next = this._voiceTurnWaiters.shift();
+    if (next) {
+      // Reserved for the woken clip until it takes the turn.
+      this._voiceHandoff = true;
+      next();
+    }
+  }
+
+  /** Transcribe one clip, then type it (dictation) or run it as a command. */
+  async _processVoiceAudio(ws, msg) {
+    const startTime = Date.now();
+    console.log(`[Voice] Received audio (${Math.round(msg.audio.length / 1024)}KB)`);
+
+    // Transcribe with Gemini, expecting this student's own words
+    const transcript = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm', {
+      vocabulary: this._profile().vocabulary,
+    });
+    const { error } = transcript;
+    let text = transcript.text;
+
+    if (error === 'no_speech') {
+      this._markTurn('no_speech');
+      ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+      return;
+    }
+    if (error) {
+      this._markTurn(error === 'offline' ? 'offline' : 'error');
+      ws.send(JSON.stringify({
+        type: 'voice_error', error,
+        ...(transcript.message ? { message: transcript.message } : {}),
+        timestamp: new Date().toISOString(),
+      }));
+      return;
+    }
+    if (this._turnLog) this._turnLog.transcript = text;
+
+    // Send transcription to dashboard
+    this._broadcastDashboard({
+      type: 'voice_transcription',
+      text,
+      latency: Date.now() - startTime,
+      timestamp: new Date().toISOString()
+    });
+
+    // ────────────────────────────────────────────
+    // ESCAPE HATCH: Critical commands that bypass all filters
+    // When music is playing, the mic picks up noise + the user's voice.
+    // Pauses whatever is playing in ANY app (Spotify, Chrome, VLC…) through
+    // Windows' media controls, which only ever pause, never start. A browser
+    // tab Windows doesn't list falls back to the extension. The person is told
+    // what was paused, and it counts as a command on their progress.
+    // ────────────────────────────────────────────
+    if (!this._dictationMode) {
+      const lowerForEscape = text.toLowerCase().trim();
+      const wordCount = lowerForEscape.split(/\s+/).length;
+      const escapeMatch = lowerForEscape.match(/\b(pause|stop|mute|shut up|quiet|silence|hush)\b/);
+
+      if (escapeMatch && wordCount <= 6) {
+        console.log(`[Voice] 🚨 Escape command: "${escapeMatch[1]}" in "${text.slice(0, 60)}"`);
+        let paused;
+        try {
+          const { pauseAllMedia } = await import('./system-tools.js');
+          paused = await pauseAllMedia();
+        } catch (err) {
+          paused = { status: 'error', message: err.message };
+        }
+        if (paused.status === 'error') console.warn('[Voice] Windows media pause failed:', paused.message);
+
+        let reply;
+        if (paused.status === 'success') {
+          reply = `Paused ${paused.apps.join(' and ')}.`;
+        } else {
+          let tab = null;
+          try { tab = await this.aiEngine.toolRegistry.executeTool('media_control', { action: 'pause' }, this); } catch {}
+          reply = tab?.status === 'success' ? 'Paused.'
+            : paused.status === 'none' ? 'Nothing is playing.'
+            : "I couldn't pause the music.";
+        }
+        console.log(`[Voice] Escape result: ${reply}`);
+        const failed = reply.startsWith("I couldn't");
+        const commandId = uuidv4();
+        this._markTurn('control');
+        this._recordVoiceCommand({
+          id: commandId, type: 'voice_fast', text,
+          payload: { text, fastTool: 'pause_media', source: 'microphone' },
+          result: { status: failed ? 'error' : 'success', message: reply },
+          latency_ms: Date.now() - startTime, failed,
+        });
+        this._broadcastDashboard({
+          type: 'chat_assistant_message', id: commandId, text: reply, error: failed,
+          provider: 'fast', model: 'pattern-match', latency: Date.now() - startTime,
+          source: 'voice', timestamp: new Date().toISOString(),
+        });
+        this._lastTTSText = reply; // the echo guard ignores the mic hearing this
+        this._lastTTSTime = Date.now();
+        return;
+      }
+    }
+
+    // ────────────────────────────────────────────
+    // NOISE + HALLUCINATION FILTER
+    // Detect song lyrics, speaker bleed, and Gemini phantom transcriptions.
+    // SKIPPED in dictation mode — long text and common phrases are expected.
+    // ────────────────────────────────────────────
+    if (!this._dictationMode) {
+      const HALLUCINATIONS = [
+        'the quick brown fox jumps over the lazy dog',
+        'thank you for watching',
+        'thanks for watching',
+        'please subscribe',
+        'like and subscribe',
+        'subtitles by',
+        'music playing',
+      ];
+      const lowerText = text.toLowerCase().trim();
+
+      const isHallucination = HALLUCINATIONS.some(h => lowerText.includes(h));
+
+      const isLikelyMusic = (() => {
+        if (isHallucination) return true;
+        // Very long transcriptions (>300 chars) are usually music, not commands
+        if (text.length > 300) return true;
+        // Detect repetitive patterns: same phrase repeated 3+ times
+        const words = lowerText.split(/\s+/);
+        if (words.length > 20) {
+          const phrases = new Map();
+          for (let i = 0; i < words.length - 2; i++) {
+            const p = words.slice(i, i + 3).join(' ');
+            phrases.set(p, (phrases.get(p) || 0) + 1);
+          }
+          for (const count of phrases.values()) {
+            if (count >= 3) return true;
+          }
+        }
+        return false;
+      })();
+
+      if (isLikelyMusic) {
+        console.log(`[Voice] Filtered: ${isHallucination ? 'hallucination' : 'music/noise'} — "${text.slice(0, 60)}"`);
+        this._markTurn('filtered');
+        ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+        return;
+      }
+    }
+
+    // ────────────────────────────────────────────
+    // ECHO DETECTION: Ignore mic picking up TTS speaker output
+    // If the transcription closely matches the last spoken TTS text,
+    // it's the mic hearing our own voice — discard it.
+    // SKIPPED in dictation mode — no TTS is spoken during dictation.
+    // ────────────────────────────────────────────
+    if (!this._dictationMode && this._lastTTSText && (Date.now() - this._lastTTSTime) < 30000) {
+      const lowerText = text.toLowerCase().trim();
+      const ttsWords = this._lastTTSText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      const heardWords = lowerText.split(/\s+/).filter(w => w.length > 2);
+      if (ttsWords.length > 0 && heardWords.length > 0) {
+        const overlap = heardWords.filter(w => ttsWords.includes(w)).length;
+        const ratio = overlap / Math.min(ttsWords.length, heardWords.length);
+        if (ratio > 0.4) {
+          console.log(`[Voice] 🔇 Echo detected (${Math.round(ratio*100)}% overlap with TTS) — "${text.slice(0, 60)}"`);
+          this._markTurn('filtered');
+          ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+          return;
+        }
+      }
+    }
+
+    await this._handleUtterance(ws, text, { startTime, screenshot: msg.screenshot || null });
+  }
+
+  /**
+   * What to do with something the student said, or an adult typed on the
+   * Chat page (`typed`): stop/sleep, dictation, a pending question, a
+   * correction, "type this", routines, quick commands, tasks, then the AI.
+   */
+  async _handleUtterance(ws, text, { startTime = Date.now(), screenshot = null, typed = false } = {}) {
+    // VOICE CONTROL: interrupt (stop/cancel) + sleep/wake — never hits the LLM
+    if (this._handleVoiceControl(text, { typed })) {
+      this._markTurn('control');
+      return;
+    }
+
+    // ────────────────────────────────────────────
+    // DICTATION MODE: type speech directly into the active app
+    // No AI processing — just transcribe → type → restart mic
+    // ────────────────────────────────────────────
+    if (this._dictationMode) {
+      this._markTurn('dictation');
+      const tLower = text.toLowerCase().trim().replace(/[.!?,]+$/, '');
+
+      // A question is waiting ("AbleSpeak, close Word" → "Close this window?"):
+      // yes or no answers it; anything else cancels it and is typed as usual.
+      if (this._pendingConfirmation) {
+        if (isAffirmative(text) || isNegative(text)) {
+          this._markTurn('command');
+          await this._resolvePendingConfirmation(text, startTime);
+          return;
+        }
+        this._pendingConfirmation = null;
+        this._broadcastDashboard({
+          type: 'chat_assistant_message', id: uuidv4(),
+          text: "Okay, I didn't do that. Carrying on typing.", error: false, toolCalls: [],
+          provider: 'fast', model: 'confirmation', source: 'voice', silent: false,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Check for exit phrases first
+      if (/^(stop|end|exit)\s+dictat(ing|ion)|^command\s+mode$/.test(tLower)) {
+        this._dictationMode = false;
+        try { const { clearDictationTarget } = await import('./system-tools.js'); clearDictationTarget(); } catch {}
+        console.log('[Voice] ✏️ Dictation mode OFF');
+        this._broadcastDashboard({
+          type: 'dictation_mode', enabled: false,
+          say: 'Dictation mode off. Back to commands.',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      // Check for in-dictation navigation / formatting commands
+      const navCmd = this._matchDictationCommand(tLower);
+      if (navCmd) {
+        console.log(`[Voice] ✏️ Dictation command: ${navCmd}`);
+        let cmdError = null;
+        try {
+          const { executeDictationCommand } = await import('./system-tools.js');
+          const cmdResult = await executeDictationCommand(navCmd);
+          if (cmdResult?.status === 'error') cmdError = cmdResult.message || 'Command failed';
+        } catch (err) {
+          console.error('[Voice] Dictation command error:', err.message);
+          cmdError = err.message;
+        }
+        this._broadcastDictationTyped(`[${navCmd.replace(/_/g, ' ')}]`, cmdError);
+        return;
+      }
+
+      // "AbleSpeak, open Chrome" runs below as a command. Dictation stays on
+      // for whatever is said next.
+      const command = matchDictationPrefixCommand(text);
+      if (!command) {
+        // Convert punctuation words to actual punctuation (typed text is kept as it is)
+        const typedText = typed ? text : this._processDictationText(text);
+        if (!typedText.trim()) return;
+
+        console.log(`[Voice] ✏️ Dictating: "${typedText}"`);
+        const dictateError = await this._dictateAndReport(typedText);
+
+        // Broadcast to overlay so it shows the typed text — and speaks it
+        // if it silently failed to type (CVA-3).
+        this._broadcastDictationTyped(typedText, dictateError);
+        return;
+      }
+      console.log(`[Voice] ✏️ Command during dictation: "${command}"`);
+      this._markTurn('command');
+      text = command;
+    }
+
+    const commandId = uuidv4();
+    console.log(`[Voice] Command: "${text.length > 200 ? `${text.slice(0, 200)}…` : text}"`);
+
+    // ────────────────────────────────────────────
+    // CONFIRMATION REPLY: if a consequential action is awaiting a spoken
+    // yes/no, THIS utterance is the answer. Handle it before anything else.
+    // ────────────────────────────────────────────
+    if (await this._resolvePendingConfirmation(text, startTime)) {
+      this._awaitingTypeText = null;
+      return;
+    }
+
+    // "Type this: …", or the words after a bare "type this".
+    if (await this._handleTypeRequest(text, { commandId, startTime, typed })) return;
+
+    // Reactive correction: "undo that" / "no, I meant ..." right after a mistake.
+    if (await this._handleCorrection(text, startTime)) return;
+
+    text = this._applyAlias(text);
+    if (await this._runRoutine(text, commandId, startTime)) return;
+
+    // ────────────────────────────────────────────
+    // FAST PATH: Match common commands instantly
+    // ────────────────────────────────────────────
+    const fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
+
+    if (fastMatch) {
+      console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
+
+      // Special handling: dictation mode toggle (not a real tool)
+      if (fastMatch.tool === 'dictation_mode') {
+        this._dictationMode = fastMatch.args.enabled;
+        console.log(`[Voice] ✏️ Dictation mode ${this._dictationMode ? 'ON' : 'OFF'}`);
+
+        // Capture/clear the target window HWND
+        let target = null;
+        if (this._dictationMode) {
+          try {
+            const { captureDictationTarget } = await import('./system-tools.js');
+            target = await captureDictationTarget();
+          } catch (err) {
+            console.error('[Voice] Failed to capture dictation target:', err.message);
+          }
+        } else {
+          try {
+            const { clearDictationTarget } = await import('./system-tools.js');
+            clearDictationTarget();
+          } catch {}
+        }
+
+        this._broadcastDashboard({
+          type: 'dictation_mode',
+          enabled: this._dictationMode,
+          // Say where the words will go, so a wrong window is caught at once.
+          say: this._dictationMode
+            ? (spokenWindowName(target?.title) ? `Dictation mode on. Typing into ${spokenWindowName(target.title)}.` : 'Dictation mode on.')
+            : 'Dictation mode off. Back to commands.',
+          ...(this._dictationMode && target?.title ? { target: target.title, targetName: spokenWindowName(target.title) || '' } : {}),
+          timestamp: new Date().toISOString(),
+        });
+
+        // If user said "dictate My name is..." — type the initial text immediately
+        if (this._dictationMode && fastMatch.args.initialText) {
+          const typedText = typed ? fastMatch.args.initialText.trim() : this._processDictationText(fastMatch.args.initialText);
+          if (typedText.trim()) {
+            console.log(`[Voice] ✏️ Initial dictation: "${typedText}"`);
+            const dictateError = await this._dictateAndReport(typedText);
+            this._broadcastDictationTyped(typedText, dictateError);
+          }
+        }
+        return;
+      }
+
+      const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
+      const latency = Date.now() - startTime;
+
+      // Consequential action → pause and ask before doing anything else.
+      if (toolResult?.status === 'needs_confirmation') {
+        this._askConfirmation(toolResult.prompt, startTime);
+        return;
+      }
+
+      // Auto-focus browser for browser commands
+      if (isBrowserTool(fastMatch.tool)) {
+        this._autoFocusBrowser();
+      }
+      this._recordAction({ tool: fastMatch.tool, args: fastMatch.args, result: toolResult });
+
+      // Persist to DB
+      this._recordVoiceCommand({
+        id: commandId,
+        type: 'voice_fast',
+        text,
+        payload: { text, fastTool: fastMatch.tool },
+        result: toolResult,
+        latency_ms: latency,
+        failed: toolFailed(toolResult),
+      });
+
+      // A FAILURE IS NEVER SILENT — the student must hear that it failed,
+      // otherwise they wait and retry blind. Only successes honour `silent`.
+      const failed = toolResult?.status === 'error' || !!toolResult?.error;
+      const responseText = failed
+        ? `That didn't work: ${toolResult.error || toolResult.message || 'unknown error'}`
+        : (fastMatch.silent ? '' : (toolResult?.message || `Done: ${fastMatch.tool}`));
+      this._broadcastDashboard({
+        type: 'chat_assistant_message',
+        id: commandId,
+        text: responseText,
+        error: failed,
+        toolCalls: [{ tool: fastMatch.tool, result: toolResult }],
+        provider: 'fast',
+        model: 'pattern-match',
+        latency,
+        source: 'voice',
+        silent: failed ? false : fastMatch.silent,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`[Voice] ⚡ Fast executed in ${latency}ms (silent: ${failed ? false : fastMatch.silent}${failed ? ', FAILED' : ''})`);
+      return;
+    }
+
+    // ────────────────────────────────────────────
+    // FULL AI PATH: Complex commands go to LLM
+    // ────────────────────────────────────────────
+    const systemContext = getFullSystemContext();
+
+    // Desktop screenshot from overlay, or fallback to extension tab screenshot.
+    // Privacy mode disables ALL screen capture — voice control still works.
+    // The tab screenshot is optional: Chrome can't capture a new blank tab or
+    // chrome:// pages, and a slow browser mustn't hold every command for the
+    // extension's full 10-second timeout.
+    if (this._privacyMode) screenshot = null;
+    const tabUrl = this.browserContext.activeTab?.url || '';
+    if (!this._privacyMode && !screenshot && this.extensionClients.size > 0 && !UNCAPTURABLE_TAB.test(tabUrl)) {
+      try {
+        const ssResult = await Promise.race([
+          this.sendToolToExtension('take_screenshot', {}),
+          new Promise(r => setTimeout(() => r(null), 3000)),
+        ]);
+        if (ssResult && typeof ssResult === 'string' && ssResult.startsWith('data:')) {
+          screenshot = ssResult.replace(/^data:image\/\w+;base64,/, '');
+        }
+      } catch {}
+    }
+
+    const context = {
+      tabs: this.browserContext.tabs || [],
+      activeTab: this.browserContext.activeTab || null,
+      pageContext: this.browserContext.pageContext || null,
+      extensionConnected: this.extensionClients.size > 0,
+      currentTime: new Date().toLocaleString(),
+      computerInfo: systemContext.computerInfo,
+      visibleApplications: systemContext.visibleApplications,
+      screenshot,
+      screenModel: await this._screenForAgent(),
+    };
+
+    if (needsPlan(text)) {
+      await this._runTask(text, context, { commandId, startTime });
+      return;
+    }
+    const result = await this.aiEngine.processChat(text, context);
+
+    // The AI tried a consequential action → it was gated. Ask first.
+    if (this._pendingConfirmation) {
+      this._askConfirmation(this._pendingConfirmation.prompt, startTime);
+      return;
+    }
+
+    // Auto-focus browser if AI used browser tools
+    if (result.toolCalls && Array.isArray(result.toolCalls)) {
+      const usedBrowserTool = result.toolCalls.some(tc => isBrowserTool(tc.tool || tc.name));
+      if (usedBrowserTool) {
+        this._autoFocusBrowser();
+      }
+    }
+
+    // Determine if the response should be silent
+    let silent = false;
+    if (result.toolCalls && Array.isArray(result.toolCalls)) {
+      const allSilent = result.toolCalls.every(tc => isSilentTool(tc.tool || tc.name));
+      if (allSilent) silent = true;
+    }
+
+    this._recordVoiceCommand({
+      id: commandId,
+      type: 'voice',
+      text,
+      payload: { text, source: typed ? 'chat' : 'microphone' },
+      result,
+      latency_ms: result.latency || 0,
+      failed: aiCommandFailed(result),
+    });
+
+    this._broadcastDashboard({
+      type: 'chat_assistant_message',
+      id: commandId,
+      text: result.text,
+      // Every action failed: the overlay shows "Didn't work" and says why, not "Done"
+      error: result.error || (Array.isArray(result.toolCalls) && result.toolCalls.length > 0
+        && result.toolCalls.every(call => toolFailed(call.result))) || false,
+      toolCalls: result.toolCalls,
+      provider: result.provider,
+      model: result.model,
+      latency: result.latency,
+      source: 'voice',
+      silent,
+      timestamp: new Date().toISOString()
+    });
+
+    // Store response text so the echo guard can reject the mic picking it up
+    if (result.text && !silent) {
+      this._lastTTSText = result.text;
+      this._lastTTSTime = Date.now();
+    }
+  }
+
   // ── Auto-focus browser window after browser commands ──
   async _autoFocusBrowser() {
     // Only focus the browser that has the extension active.
@@ -901,11 +1475,11 @@ export class WsProxy {
   sendToolToExtension(type, payload) {
     return new Promise((resolve, reject) => {
       if (this.extensionClients.size === 0) {
-        // No extension — execute what we can locally
-        if (type === 'create_tab' || type === 'navigate_to') {
-          resolve({ status: 'success', message: `Would open: ${payload.url}`, simulated: true });
-          return;
-        }
+        // No extension connected — every browser tool must fail loudly here.
+        // create_tab/navigate_to used to resolve as {status:'success', simulated:true}
+        // with nothing having actually happened; simulated was read nowhere else,
+        // and both are in SILENT_COMMANDS, so the student got silence and the
+        // browser never opened (CVA-4).
         reject(new Error('No Chrome extension connected. Please install and enable the AbleSpeak extension.'));
         return;
       }
@@ -971,13 +1545,40 @@ export class WsProxy {
    * Returns true if the utterance was a control phrase (caller should stop and
    * release the voice mutex). Returns false for normal commands.
    */
-  _handleVoiceControl(rawText) {
+  _handleVoiceControl(rawText, { typed = false } = {}) {
     const t = (rawText || '').trim().toLowerCase().replace(/[.!?,]+$/, '');
     if (!t) return false;
+    // Room talk is ignored quietly while asleep; a typed command gets told why.
+    const ignored = (why) => {
+      if (typed) this._reply(why, { silent: true });
+      else this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+    };
+
+    // ── While voice-dismissed: only a wake phrase restores the overlay; everything
+    // else is ignored. This is the ONLY way back for a student who cannot use the
+    // keyboard shortcut, tray icon, or an app relaunch (HFI-1). Checked before sleep
+    // so a dismissed-and-somehow-also-asleep overlay still responds to the same phrase.
+    if (this._dismissed) {
+      if (WAKE_PHRASES_RE.test(t)) {
+        this._dismissed = false;
+        this._sleeping = false;
+        console.log('[Voice] 👋 Restored overlay from dismiss');
+        this._broadcastDashboard({
+          type: 'voice_restored',
+          say: "I'm here.",
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        // Stay hidden, quietly — tell the overlay to keep listening, no error shown.
+        console.log(`[Voice] 🙈 Ignored while dismissed: "${t.slice(0, 40)}"`);
+        ignored('AbleSpeak is hidden. Send "come back" first.');
+      }
+      return true;
+    }
 
     // ── While asleep: only a wake phrase resumes; everything else is ignored. ──
     if (this._sleeping) {
-      if (/^(wake up|wake|i'?m back|ablespeak|hey ablespeak|listen|start listening|resume)$/.test(t)) {
+      if (WAKE_PHRASES_RE.test(t)) {
         this._sleeping = false;
         console.log('[Voice] 👋 Woke up');
         this._broadcastDashboard({
@@ -988,7 +1589,7 @@ export class WsProxy {
       } else {
         // Stay asleep, quietly — tell the overlay to keep listening, no error shown.
         console.log(`[Voice] 💤 Ignored while asleep: "${t.slice(0, 40)}"`);
-        this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+        ignored('AbleSpeak is asleep. Send "wake up" first.');
       }
       return true;
     }
@@ -997,8 +1598,9 @@ export class WsProxy {
     // Skipped while dictating: "stop" there means "stop dictation mode" (the
     // dictation block below owns that), and a bare "stop" must stay typeable
     // as dictated text rather than being swallowed as a global AI interrupt.
-    if (!this._dictationMode && /^(stop|cancel|abort|shut up|be quiet|quiet|nevermind|never mind)[\s.,!]?/i.test(t)) {
+    if (!this._dictationMode && STOP_RE.test(t)) {
       console.log('[Voice] ⚡ INTERRUPT — cancelling current operation');
+      this._awaitingTypeText = null;
       try { if (this.aiEngine && this.aiEngine.abortActive) this.aiEngine.abortActive(); } catch {}
       this._voiceProcessing = false; // release mutex immediately
       this._broadcastDashboard({ type: 'voice_cancelled', timestamp: new Date().toISOString() });
@@ -1012,6 +1614,20 @@ export class WsProxy {
       this._broadcastDashboard({
         type: 'voice_sleeping',
         say: 'Going to sleep. Say wake up when you need me.',
+        timestamp: new Date().toISOString(),
+      });
+      return true;
+    }
+
+    // ── Dismiss: hide the overlay, but the mic stays hot — say "AbleSpeak" or
+    // "come back" to bring it back. A student who cannot type or click must never
+    // lose voice control just because the overlay is out of sight (HFI-1). ──
+    if (/^(close|dismiss|hide|go away)$/.test(t)) {
+      this._dismissed = true;
+      console.log('[Voice] 🙈 Dismissed — say "AbleSpeak" or "come back" to bring it back');
+      this._broadcastDashboard({
+        type: 'voice_dismissed',
+        say: 'Okay. Say AbleSpeak, or come back, any time.',
         timestamp: new Date().toISOString(),
       });
       return true;
@@ -1041,6 +1657,20 @@ export class WsProxy {
       return true;
     }
 
+    // ── "Who am I?" — whose progress this computer is recording (AT-50) ──
+    if (!this._dictationMode && /^(who am i|who's using this( computer)?|who is using this( computer)?|whose session is this)$/.test(t)) {
+      const student = this._activeStudent();
+      this._broadcastDashboard({
+        type: 'chat_assistant_message', id: uuidv4(),
+        text: student
+          ? `This is ${student.name}'s session.`
+          : 'No student is chosen on this computer yet. A teacher can choose one on the Teacher page.',
+        error: false, toolCalls: [], provider: 'fast', model: 'identity', source: 'voice',
+        silent: false, timestamp: new Date().toISOString(),
+      });
+      return true;
+    }
+
     return false;
   }
 
@@ -1050,9 +1680,39 @@ export class WsProxy {
    */
   async _resolvePendingConfirmation(text, startTime = Date.now()) {
     if (!this._pendingConfirmation) return false;
+    // The microphone heard the question itself ("…yes to confirm or anything
+    // else to cancel"): keep waiting for the student's own answer.
+    if (isEchoOf(text, this._pendingConfirmation.prompt)) {
+      console.log(`[Voice] 🔇 Heard our own question back — still waiting for yes or no: "${text.slice(0, 60)}"`);
+      this._markTurn('filtered');
+      this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+      return true;
+    }
     const pending = this._pendingConfirmation;
     this._pendingConfirmation = null;
     const commandId = uuidv4();
+
+    // A multi-step task paused here: carry on (or stop) after the answer.
+    if (pending.plan) {
+      const paused = pending.plan;
+      // Typed on the Chat page, the answer arrives outside a voice turn;
+      // take one so the task never runs alongside a spoken command.
+      const turn = this._voiceProcessing ? null : this._beginVoiceTurn();
+      try {
+        let confirmed = null;
+        if (isAffirmative(text)) {
+          console.log(`[Voice] ✅ Confirmed task step: ${pending.tool}`);
+          confirmed = await this._runAgentTool(pending.tool, pending.args, { confirmed: true });
+        }
+        await this._runTask(paused.text, paused.context, {
+          commandId: paused.commandId, startTime: paused.startTime,
+          resume: { state: paused.state, confirmed },
+        });
+      } finally {
+        if (turn) this._endVoiceTurn(turn);
+      }
+      return true;
+    }
 
     if (isAffirmative(text)) {
       console.log(`[Voice] ✅ Confirmed: ${pending.tool}`);
@@ -1093,6 +1753,69 @@ export class WsProxy {
     });
   }
 
+  /**
+   * Save a voice command with its outcome for the progress engine.
+   *
+   * One task can take several tries. When a command is another go at a
+   * failed one (or a spoken correction, `retryOf`), the earlier row becomes
+   * "superseded" and this row carries the task: one more prompt, and
+   * "repaired" if it worked. So independence_rate counts first-time
+   * successes, and task_completion counts each task once.
+   */
+  _recordVoiceCommand({ id, type, text, payload, result, latency_ms, failed, retryOf = null }) {
+    const ids = this._voiceAttribution();
+    const last = this._lastVoiceCommand;
+    const sameSession = last && last.session_id === ids.session_id;
+    const retrying = retryOf
+      || (sameSession && last.failed && Date.now() - last.at < RETRY_WINDOW_MS && isLikelyRetry(last.text, text) ? last : null);
+    const promptCount = retrying ? retrying.promptCount + 1 : 0;
+    const outcome = failed ? 'error' : (promptCount > 0 ? 'repaired' : 'success');
+    try {
+      if (retrying) updateCommandOutcome(retrying.id, 'superseded');
+      insertCommand({
+        id, type, direction: 'user_to_ai',
+        payload: JSON.stringify(payload),
+        result: JSON.stringify(result ?? {}),
+        latency_ms,
+        ...ids,
+        outcome,
+        prompt_count: promptCount,
+      });
+    } catch (err) {
+      console.error('[WsHub] DB insert error:', err.message);
+    }
+    this._lastVoiceCommand = { id, text, failed, at: Date.now(), promptCount, session_id: ids.session_id };
+    if (this._turnLog) this._turnLog.commandId = id;
+  }
+
+  /** "Undo that": the last command did the wrong thing, so it failed. */
+  _markLastCommandWrong() {
+    const last = this._lastVoiceCommand;
+    if (!last) return null;
+    // Too old, or someone else's session: nothing of this student's to correct.
+    if (last.session_id !== this._voiceAttribution().session_id || Date.now() - last.at > CORRECTION_WINDOW_MS) {
+      return null;
+    }
+    try { updateCommandOutcome(last.id, 'error'); } catch {}
+    this._lastVoiceCommand = { ...last, failed: true, at: Date.now() };
+    return this._lastVoiceCommand;
+  }
+
+  /**
+   * A correction that worked is a labelled example: what AbleSpeak heard,
+   * and what the student meant. Returns a sentence to add when it was
+   * learned as a shortcut, or ''.
+   */
+  _learnCorrection(wrong, meant) {
+    if (!wrong?.text) return '';
+    try {
+      const outcome = this._onCorrection(wrong.text, meant);
+      return outcome?.learned ? ` I'll remember that "${wrong.text}" means "${meant}".` : '';
+    } catch {
+      return '';
+    }
+  }
+
   /** Keep a short rolling history of executed actions for reactive correction. */
   _recordAction(entry) {
     this._actionHistory.push({ ...entry, at: Date.now() });
@@ -1114,8 +1837,9 @@ export class WsProxy {
     if (meant && meant[1].trim().length > 1) {
       const correction = meant[1].trim();
       console.log(`[Voice] ↩️ Correction → "${correction}"`);
+      const wrong = this._markLastCommandWrong();
       await this._undoLast();              // revert the mistaken action
-      await this._executeCorrectedCommand(correction, startTime); // then do the right thing
+      await this._executeCorrectedCommand(correction, startTime, wrong); // then do the right thing
       return true;
     }
 
@@ -1123,6 +1847,7 @@ export class WsProxy {
     const undoRe = /^(undo( that| it| last| the last)?|take that back|revert( that)?|that('?s| is| was)? (wrong|not right|not it)|wrong one|not that one?|nope that('?s| is) wrong)$/;
     if (undoRe.test(t)) {
       console.log('[Voice] ↩️ Undo last action');
+      this._markLastCommandWrong();
       const ok = await this._undoLast();
       this._broadcastDashboard({
         type: 'chat_assistant_message', id: uuidv4(),
@@ -1151,19 +1876,28 @@ export class WsProxy {
     }
   }
 
-  /** Run a corrected command through fast-match then AI, with spoken feedback. */
-  async _executeCorrectedCommand(text, startTime = Date.now()) {
-    const fast = matchFastCommand(text);
+  /**
+   * Run a corrected command through fast-match then AI, with spoken feedback.
+   * `wrong` is the command it replaces, so the task counts one more prompt.
+   */
+  async _executeCorrectedCommand(text, startTime = Date.now(), wrong = null) {
+    const fast = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
     if (fast && fast.tool !== 'dictation_mode') {
       const r = await this.aiEngine.toolRegistry.executeTool(fast.tool, fast.args, this);
       if (r?.status === 'needs_confirmation') { this._askConfirmation(r.prompt, startTime); return; }
       if (isBrowserTool(fast.tool)) this._autoFocusBrowser();
       this._recordAction({ tool: fast.tool, args: fast.args, result: r });
-      const failed = r?.status === 'error' || !!r?.error;
+      const failed = toolFailed(r);
+      this._recordVoiceCommand({
+        id: uuidv4(), type: 'voice_fast', text,
+        payload: { text, fastTool: fast.tool, correction: true }, result: r,
+        latency_ms: Date.now() - startTime, failed, retryOf: wrong,
+      });
+      const learned = failed ? '' : this._learnCorrection(wrong, text);
       this._broadcastDashboard({
         type: 'chat_assistant_message', id: uuidv4(),
         text: failed ? `That didn't work: ${r.error || r.message || 'unknown error'}`
-                     : (fast.silent ? 'Okay, did that instead.' : (r?.message || 'Done.')),
+                     : `${fast.silent ? 'Okay, did that instead.' : (r?.message || 'Done.')}${learned}`,
         error: failed, toolCalls: [{ tool: fast.tool, result: r }], provider: 'fast',
         model: 'correction', source: 'voice', silent: false,
         latency: Date.now() - startTime, timestamp: new Date().toISOString(),
@@ -1175,11 +1909,19 @@ export class WsProxy {
       tabs: this.browserContext.tabs || [], activeTab: this.browserContext.activeTab || null,
       pageContext: this.browserContext.pageContext || null, extensionConnected: this.extensionClients.size > 0,
       currentTime: new Date().toLocaleString(), computerInfo: sys.computerInfo, visibleApplications: sys.visibleApplications,
+      screenModel: await this._screenForAgent(),
     };
     const result = await this.aiEngine.processChat(text, ctx);
     if (this._pendingConfirmation) { this._askConfirmation(this._pendingConfirmation.prompt, startTime); return; }
+    const failed = aiCommandFailed(result);
+    this._recordVoiceCommand({
+      id: uuidv4(), type: 'voice', text,
+      payload: { text, source: 'microphone', correction: true }, result,
+      latency_ms: result.latency || 0, failed, retryOf: wrong,
+    });
+    const learned = failed ? '' : this._learnCorrection(wrong, text);
     this._broadcastDashboard({
-      type: 'chat_assistant_message', id: uuidv4(), text: result.text, error: result.error || false,
+      type: 'chat_assistant_message', id: uuidv4(), text: `${result.text || ''}${learned}`.trim(), error: result.error || false,
       toolCalls: result.toolCalls, provider: result.provider, model: result.model, latency: result.latency,
       source: 'voice', silent: false, timestamp: new Date().toISOString(),
     });
@@ -1265,6 +2007,38 @@ export class WsProxy {
     return text;
   }
 
+  /**
+   * Type dictated text via system-tools and report failure instead of
+   * swallowing it. dictateText()/executeDictationCommand() can either throw
+   * (e.g. a PowerShell/COM error) or resolve with {status:'error', ...} — both
+   * must be treated as failure. Returns an error message string, or null on
+   * success (CVA-3: a dictation failure must never be silent — the student is
+   * mid-sentence and has no way to proofread a word that never got typed).
+   */
+  async _dictateAndReport(typedText) {
+    try {
+      const { dictateText } = await import('./system-tools.js');
+      const result = await dictateText(typedText);
+      if (result?.status === 'error') return result.message || 'Typing failed';
+      return null;
+    } catch (err) {
+      console.error('[Voice] Dictation type error:', err.message);
+      return err.message;
+    }
+  }
+
+  /** Broadcast what got typed — and audibly if it silently failed (CVA-3). */
+  _broadcastDictationTyped(text, error) {
+    this._broadcastDashboard(error ? {
+      type: 'dictation_typed', text,
+      error: true, message: `That didn't type: ${error}`,
+      timestamp: new Date().toISOString(),
+    } : {
+      type: 'dictation_typed', text,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // ── Public API ──
 
   /**
@@ -1283,6 +2057,14 @@ export class WsProxy {
       pendingCommands: this.pendingToolCalls.size,
       lastContextUpdate: this.lastContextUpdate ? new Date().toISOString() : null,
       aiEngine: this.aiEngine?.getStatus() || {},
+      sessionId: this._attribution().session_id,
+      // Voice control state, so the dashboard can show it without waiting for an event
+      voice: {
+        sleeping: !!this._sleeping,
+        dismissed: !!this._dismissed,
+        privacyMode: !!this._privacyMode,
+        dictationMode: !!this._dictationMode,
+      },
     };
   }
 

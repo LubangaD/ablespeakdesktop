@@ -1,0 +1,46 @@
+name: CI
+
+# QA-1: the cheapest possible safety net for every fix from here on — before
+# this, there was zero CI anywhere in the repo, and the one existing test file
+# (safety.test.mjs) wasn't even wired to an npm script, so a developer had to
+# know to run it manually.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server-tests:
+    name: Server tests
+    # The gateway is Windows-only by design (system-tools.js shells out to
+    # PowerShell/UI Automation) — run on the platform the product actually
+    # targets rather than assuming the test suite is platform-agnostic.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No package-lock.json is committed (see .gitignore) — npm ci would fail
+      # here, so this is a plain install rather than a reproducible-lockfile one.
+      - run: npm install
+      - run: npm test
+
+  dashboard-build:
+    name: Dashboard build + typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      # `npm run build` is `tsc && vite build` — typecheck and build in one step.
+      - run: npm run build

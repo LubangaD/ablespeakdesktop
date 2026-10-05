@@ -281,13 +281,35 @@ function connect() {
     const gatewayUrl = 'ws://localhost:3001/ws/extension';
     const directUrl = 'ws://localhost:22171/integration/chrome';
 
-    chrome.storage.local.get(['wsUrl', 'wsToken'], (data) => {
+    chrome.storage.local.get(['wsUrl', 'wsToken'], async (data) => {
         let url = data.wsUrl || gatewayUrl;
-        // Append the pairing token if the user configured one. The server also
-        // origin-locks and loopback-locks, so this is extra defense on shared
-        // machines and a no-op when no token is set.
-        if (data.wsToken) {
-            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(data.wsToken);
+        let token = data.wsToken;
+
+        // EXT-2: the gateway now requires a token by default (auto-generated on
+        // first run — no manual pairing step). Bootstrap it once from the same
+        // host the WS connection is going to, then cache it. This fetch is
+        // itself loopback-only on the server side, matching the trust model the
+        // rest of the local control plane already relies on.
+        if (!token) {
+            try {
+                const tokenUrl = url.replace(/^ws/, 'http').replace(/\/ws\/extension.*$/, '/api/ws-token');
+                const res = await fetch(tokenUrl);
+                if (res.ok) {
+                    const body = await res.json();
+                    if (body.token) {
+                        token = body.token;
+                        chrome.storage.local.set({ wsToken: token });
+                    }
+                }
+            } catch (err) {
+                // Gateway may not be up yet — connect() gets retried by the
+                // reconnect loop below, which will fetch the token again then.
+                console.warn('Could not fetch WS token yet:', err.message);
+            }
+        }
+
+        if (token) {
+            url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
         }
         _doConnect(url, directUrl);
     });
@@ -561,31 +583,38 @@ function _doConnect(primaryUrl, fallbackUrl) {
                 const x = data.payload.x !== undefined ? parseInt(data.payload.x) : (direction === 'right' ? amount : direction === 'left' ? -amount : 0);
                 const y = data.payload.y !== undefined ? parseInt(data.payload.y) : (direction === 'down' ? amount : direction === 'up' ? -amount : 0);
 
-                await chrome.scripting.executeScript({
+                const results = await chrome.scripting.executeScript({
                     target: { tabId: activeTab.id },
-                    func: (scrollX, scrollY) => { window.scrollBy({ left: scrollX, top: scrollY, behavior: 'smooth' }); },
-                    args: [x, y]
+                    func: pageScroll,
+                    args: ['by', x, y]
                 });
-                webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
+                const why = y > 0 ? 'The page is already at the bottom.' : y < 0 ? 'The page is already at the top.' : 'This page can’t scroll that way.';
+                webSocket.send(JSON.stringify({ result: scrollAnswer(results, why), replyTo: data.replyTo }));
             }
         } else if (data.type === 'scroll_to_top') {
             const activeTab = await getActiveTab();
             if (activeTab) {
-                await chrome.scripting.executeScript({
+                const results = await chrome.scripting.executeScript({
                     target: { tabId: activeTab.id },
-                    func: () => { window.scrollTo({ top: 0, behavior: 'smooth' }); }
+                    func: pageScroll,
+                    args: ['top', 0, 0]
                 });
+                webSocket.send(JSON.stringify({ result: scrollAnswer(results, 'The page is already at the top.'), replyTo: data.replyTo }));
+            } else {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No active tab' }, replyTo: data.replyTo }));
             }
-            webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
         } else if (data.type === 'scroll_to_bottom') {
             const activeTab = await getActiveTab();
             if (activeTab) {
-                await chrome.scripting.executeScript({
+                const results = await chrome.scripting.executeScript({
                     target: { tabId: activeTab.id },
-                    func: () => { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }
+                    func: pageScroll,
+                    args: ['bottom', 0, 0]
                 });
+                webSocket.send(JSON.stringify({ result: scrollAnswer(results, 'The page is already at the bottom.'), replyTo: data.replyTo }));
+            } else {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No active tab' }, replyTo: data.replyTo }));
             }
-            webSocket.send(JSON.stringify({ result: { status: 'success' }, replyTo: data.replyTo }));
         } else if (data.type === 'close_tab') {
             try {
                 const tabId = data.payload?.tab_id ? parseInt(data.payload.tab_id) : (await getActiveTab())?.id;
@@ -753,36 +782,28 @@ function _doConnect(primaryUrl, fallbackUrl) {
             // Direct voice control of video/audio: play, pause, seek, volume, mute, speed
             // IMPORTANT: Find the tab that actually has media playing, not just the active tab.
             // The user may be on the AbleSpeak dashboard while music plays on YouTube.
-            let targetTab = null;
-
-            // 1. Try to find a tab that's currently producing audio
+            // Candidates, best first: the tab the person is looking at, tabs
+            // making sound, then other media sites. Only ordinary web pages
+            // (Chrome's own pages and suspended tabs can't be scripted), and
+            // if one can't be controlled, the next is tried.
+            const MEDIA_URL = /youtube\.com\/(watch|shorts|embed)|youtu\.be|music\.youtube\.com|spotify\.com|soundcloud\.com|twitch\.tv|vimeo\.com|music\.apple\.com/i;
+            const usable = t => t && /^https?:/i.test(t.url || '') && !t.discarded && !isAbleSpeakTab(t);
+            const front = await getActiveTab();
             const audibleTabs = await chrome.tabs.query({ audible: true });
-            if (audibleTabs.length > 0) {
-                targetTab = audibleTabs[0];
+            const mediaTabs = (await chrome.tabs.query({})).filter(t => MEDIA_URL.test(t.url || ''));
+            const candidates = [];
+            for (const t of [front, ...audibleTabs, ...mediaTabs]) {
+                if (usable(t) && !candidates.some(c => c.id === t.id)) candidates.push(t);
             }
 
-            // 2. Fall back to a tab with a known media URL (YouTube, Spotify, SoundCloud, etc.)
-            if (!targetTab) {
-                const allTabs = await chrome.tabs.query({});
-                targetTab = allTabs.find(t =>
-                    /youtube\.com\/watch|youtu\.be|spotify\.com|soundcloud\.com|twitch\.tv|vimeo\.com|music\.apple\.com/i.test(t.url || '')
-                );
-            }
-
-            // 3. Last resort: active tab
-            if (!targetTab) {
-                targetTab = await getActiveTab();
-            }
-
-            if (!targetTab) {
-                webSocket.send(JSON.stringify({ result: { status: 'error', message: 'No tab with media found' }, replyTo: data.replyTo }));
-            } else {
+            let answer = { status: 'error', message: 'No video or music is open in Chrome.' };
+            for (const targetTab of candidates) {
                 try {
-                    console.log(`[Media] Targeting tab ${targetTab.id}: ${(targetTab.url || '').slice(0, 60)} (audible: ${targetTab.audible})`);
+                    console.log(`[Media] Trying tab ${targetTab.id}: ${(targetTab.url || '').slice(0, 60)} (audible: ${targetTab.audible})`);
                     const [result] = await chrome.scripting.executeScript({
                         target: { tabId: targetTab.id },
                         world: 'MAIN',
-                        func: (action, value, xpath) => {
+                        func: async (action, value, xpath) => {
                             function getByXPath(xp) {
                                 return document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                             }
@@ -791,8 +812,13 @@ function _doConnect(primaryUrl, fallbackUrl) {
                                 || document.querySelector('.html5-video-player video')
                                 || document.querySelector('video')
                                 || document.querySelector('audio');
-                            if (!media) return { status: 'error', message: 'No media element found on page' };
-                            if (action === 'play')        media.play();
+                            if (!media) return { status: 'error', message: 'No video or music on this page.' };
+                            if (action === 'play') {
+                                // play() can be refused (autoplay rules); say so instead of "done"
+                                try { await media.play(); } catch (e) {
+                                    return { status: 'error', message: 'The video wouldn’t start. Try “click play”.' };
+                                }
+                            }
                             else if (action === 'pause')  media.pause();
                             else if (action === 'toggle') { media.paused ? media.play() : media.pause(); }
                             else if (action === 'seek')   { media.currentTime = parseFloat(value); }
@@ -811,11 +837,14 @@ function _doConnect(primaryUrl, fallbackUrl) {
                         },
                         args: [data.payload.action, data.payload.value ?? null, data.payload.xpath ?? null]
                     });
-                    webSocket.send(JSON.stringify({ result: result?.result ?? result, replyTo: data.replyTo }));
+                    answer = result?.result ?? result;
+                    if (answer?.status === 'success') break; // done; otherwise try the next tab
                 } catch (err) {
-                    webSocket.send(JSON.stringify({ result: { status: 'error', message: err.message }, replyTo: data.replyTo }));
+                    console.warn(`[Media] Tab ${targetTab.id} can't be controlled: ${err.message}`);
+                    answer = { status: 'error', message: 'AbleSpeak couldn’t control the video in Chrome.' };
                 }
             }
+            webSocket.send(JSON.stringify({ result: answer, replyTo: data.replyTo }));
         } else if (data.type === 'focus_next') {
             // Tab-forward through focusable elements — navigating a page without a mouse
             const activeTab = await getActiveTab();
@@ -926,9 +955,79 @@ function _doConnect(primaryUrl, fallbackUrl) {
     };
 }
 
+// AbleSpeak's own dashboard, when it is open in the browser
+const isAbleSpeakTab = tab => /^https?:\/\/(localhost|127\.0\.0\.1):3001(\/|$)/.test(tab?.url || '');
+
+/**
+ * The tab the person is looking at: the active tab of the last browser
+ * window they used, never AbleSpeak's own dashboard. ("currentWindow" in a
+ * service worker means whatever window was focused last, which can be the
+ * dashboard, so voice commands used to land there.)
+ */
 async function getActiveTab() {
-    const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-    return tabs[0];
+    try {
+        const win = await chrome.windows.getLastFocused({ populate: true, windowTypes: ['normal'] });
+        const tab = win?.tabs?.find(t => t.active && !isAbleSpeakTab(t));
+        if (tab) return tab;
+    } catch { /* no normal window focused yet */ }
+    const active = await chrome.tabs.query({ active: true, windowType: 'normal' });
+    return active.find(t => !isAbleSpeakTab(t)) || active[0];
+}
+
+/**
+ * Runs in the page: scroll whatever actually scrolls there. Many sites
+ * (LinkedIn, Gmail, chat apps) scroll an inner panel, not the window, so a
+ * plain window.scrollBy did nothing while reporting success. Tries the page,
+ * then the panel under the middle of the screen, then the biggest panel that
+ * can move that way. Returns { moved, where } or { moved: false }.
+ */
+function pageScroll(mode, dx, dy) {
+    const root = document.scrollingElement || document.documentElement;
+    const scrolls = (el) => {
+        if (!el || el === document.body || el === document.documentElement) return false;
+        const st = getComputedStyle(el);
+        return (/(auto|scroll|overlay)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 1)
+            || (/(auto|scroll|overlay)/.test(st.overflowX) && el.scrollWidth > el.clientWidth + 1);
+    };
+    const canMove = (el, x, y) =>
+        (y > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) || (y < 0 && el.scrollTop > 0)
+        || (x > 0 && el.scrollLeft + el.clientWidth < el.scrollWidth - 1) || (x < 0 && el.scrollLeft > 0);
+    // "top" and "bottom" are moves up or down as far as it goes
+    const wantX = mode === 'by' ? dx : 0;
+    const wantY = mode === 'by' ? dy : mode === 'top' ? -1 : 1;
+
+    let target = null;
+    if (canMove(root, wantX, wantY)) target = root;
+    if (!target) {
+        let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+        while (el && !(scrolls(el) && canMove(el, wantX, wantY))) el = el.parentElement;
+        target = el;
+    }
+    if (!target) {
+        let best = null, bestArea = 0;
+        const all = document.querySelectorAll('body *');
+        for (let i = 0; i < all.length && i < 5000; i++) {
+            const el = all[i];
+            if (!scrolls(el) || !canMove(el, wantX, wantY)) continue;
+            const r = el.getBoundingClientRect();
+            const area = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+            if (area > bestArea) { best = el; bestArea = area; }
+        }
+        target = best;
+    }
+    if (!target) return { moved: false };
+
+    const scroller = target === root ? window : target;
+    if (mode === 'by') scroller.scrollBy({ left: dx, top: dy, behavior: 'smooth' });
+    else scroller.scrollTo({ top: mode === 'top' ? 0 : target.scrollHeight, behavior: 'smooth' });
+    return { moved: true, where: target === root ? 'page' : (target.getAttribute('aria-label') || target.tagName.toLowerCase()) };
+}
+
+/** Tell AbleSpeak whether the page really moved. */
+function scrollAnswer(results, why) {
+    const r = results?.[0]?.result;
+    if (r?.moved) return { status: 'success', scrolled: r.where };
+    return { status: 'error', message: why };
 }
 
 async function getTabsByHost(host) {

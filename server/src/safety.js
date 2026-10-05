@@ -20,6 +20,48 @@ function toolTokens(tool) {
   return new Set(String(tool || '').toLowerCase().split(/[_\s-]+/).filter(Boolean));
 }
 
+const DELETE_WORDS = ['delete', 'remove', 'trash', 'destroy'];
+const SEND_WORDS = ['send', 'submit', 'post', 'publish', 'email', 'share', 'purchase', 'buy', 'pay', 'order'];
+
+// Tools whose real target is a labeled element, not the tool name itself — a
+// misheard "click delete" must be gated the same way close_application already
+// is (CVA-1). click_element may be called with only an xpath; tool-registry.js
+// resolves that to args.resolvedLabel before the gate sees it.
+const ELEMENT_TARGET_TOOLS = new Set(['click_element', 'click_desktop_element', 'select_option', 'uia_act']);
+
+// uia_act only presses a control with these actions (none given means
+// "press it"); typing into a field labelled "Email" is not sending one.
+const PRESS_ACTIONS = new Set(['invoke', 'toggle', 'select']);
+
+/** Best available human-readable text for what an element-targeting tool is about to act on. */
+function targetLabel(args) {
+  return String(args?.resolvedLabel || args?.label || args?.name || args?.text || '').toLowerCase();
+}
+
+/** True if the tool's target label is entirely made of / contains one of `words` as a whole word. */
+function labelMatches(tool, args, words) {
+  if (!ELEMENT_TARGET_TOOLS.has(tool)) return false;
+  if (tool === 'uia_act' && args?.action && !PRESS_ACTIONS.has(args.action)) return false;
+  const label = targetLabel(args);
+  if (!label) return false;
+  const tokens = label.split(/[^a-z0-9]+/).filter(Boolean);
+  return words.some(w => tokens.includes(w));
+}
+
+/** True if execute_javascript's code calls .submit() — form submission IS the "send" action. */
+function jsSubmitCall(tool, args) {
+  if (tool !== 'execute_javascript') return false;
+  return /\.submit\s*\(/.test(String(args?.code || '').toLowerCase());
+}
+
+/** True if execute_javascript's code clicks something AND mentions one of `words` (CVA-1). */
+function jsClickMatches(tool, args, words) {
+  if (tool !== 'execute_javascript') return false;
+  const code = String(args?.code || '').toLowerCase();
+  if (!code || !/\.click\s*\(/.test(code)) return false;
+  return words.some(w => code.includes(w));
+}
+
 const CONSEQUENTIAL_RULES = [
   {
     id: 'close-app',
@@ -34,18 +76,25 @@ const CONSEQUENTIAL_RULES = [
     id: 'delete',
     test: (tool, args) => {
       const tk = toolTokens(tool);
-      if (['delete', 'remove', 'trash', 'destroy'].some(w => tk.has(w))) return true;
+      if (DELETE_WORDS.some(w => tk.has(w))) return true;
       const keys = String(args?.keys || args?.key || '').toLowerCase().replace(/\s+/g, '');
-      return tool === 'send_system_keys' && keys.includes('shift+del');
+      if (tool === 'send_system_keys' && keys.includes('shift+del')) return true;
+      if (labelMatches(tool, args, DELETE_WORDS)) return true;
+      if (jsClickMatches(tool, args, DELETE_WORDS)) return true;
+      return false;
     },
     prompt: 'Delete this? This may not be reversible. Say "yes" to confirm, or anything else to cancel.',
   },
   {
     id: 'send',
-    test: (tool) => {
+    test: (tool, args) => {
       if (tool === 'send_system_keys' || tool === 'send_keys' || tool === 'press_key_combination') return false;
       const tk = toolTokens(tool);
-      return ['send', 'submit', 'post', 'publish', 'email', 'share', 'purchase', 'buy', 'pay', 'order'].some(w => tk.has(w));
+      if (SEND_WORDS.some(w => tk.has(w))) return true;
+      if (labelMatches(tool, args, SEND_WORDS)) return true;
+      if (jsSubmitCall(tool, args)) return true;
+      if (jsClickMatches(tool, args, SEND_WORDS)) return true;
+      return false;
     },
     prompt: 'Send this? It will go out and cannot be unsent. Say "yes" to confirm, or anything else to cancel.',
   },
@@ -66,11 +115,59 @@ export function classifyConsequential(tool, args = {}) {
   return null;
 }
 
+const CLOSE_WORDS = ['close', 'quit', 'exit', 'shut'];
+
+/**
+ * Steps of a multi-step plan that will stop for a spoken yes/no (Stage 3).
+ * Each tool call is still gated on its own; this only lets the plan say so
+ * up front. Returns [{ index, id }].
+ */
+export function classifyPlan(steps = []) {
+  const flagged = [];
+  steps.forEach((step, index) => {
+    const words = String(step?.do || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    if (words.some(w => DELETE_WORDS.includes(w))) flagged.push({ index, id: 'delete' });
+    else if (words.some(w => SEND_WORDS.includes(w))) flagged.push({ index, id: 'send' });
+    else if (words.some(w => CLOSE_WORDS.includes(w)) && !words.includes('tab')) flagged.push({ index, id: 'close-app' });
+  });
+  return flagged;
+}
+
 const AFFIRMATIVES = /^(yes|yeah|yep|yup|confirm|confirmed|do it|go ahead|proceed|okay|ok|sure|affirmative)\b/i;
+
+const NEGATIVES = /^(no|nope|nah|cancel|don'?t|do not|never ?mind|stop)\b/i;
+
+/** A clear "no" — used where other words should not count as an answer. */
+export function isNegative(text) {
+  return NEGATIVES.test(String(text || '').trim());
+}
 
 /** Anything that is not a clear affirmative is treated as a cancel (safe default). */
 export function isAffirmative(text) {
   return AFFIRMATIVES.test(String(text || '').trim());
+}
+
+/**
+ * Whether what was heard is AbleSpeak's own question coming back through the
+ * microphone ("…yes to confirm or anything else to cancel"), not the
+ * student's answer. Needs four of the question's words in their order, and
+ * mostly its words: "yes", "yes close it" and "yes, close this window" are
+ * answers, because the question never says them in that order. An echo of
+ * a question about deleting must never count as a yes, nor as a no.
+ */
+export function isEchoOf(heard, spoken) {
+  const words = text => String(text || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
+  const said = words(spoken);
+  const got = words(heard);
+  if (got.length < 4 || said.length < 4) return false;
+  const saidText = ` ${said.join(' ')} `;
+  let inOrder = false;
+  for (let i = 0; i + 4 <= got.length && !inOrder; i++) {
+    inOrder = saidText.includes(` ${got.slice(i, i + 4).join(' ')} `);
+  }
+  if (!inOrder) return false;
+  const vocabulary = new Set(said);
+  return got.filter(w => vocabulary.has(w)).length / got.length >= 0.7;
 }
 
 // ── 2. Hallucination / noise / echo detection ─────────────────────────────

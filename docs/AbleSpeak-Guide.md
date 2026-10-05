@@ -2,7 +2,7 @@
 
 **Hands-free computer control for students who cannot use a keyboard or mouse.**
 
-*Version: June 2026 · Combined overview, technical architecture, and user guide.*
+*Version: September 2026 · Combined overview, technical architecture, and user guide.*
 
 ---
 
@@ -27,9 +27,13 @@
 - [Setup in brief](#setup-in-brief)
 - [Getting started](#getting-started)
 - [Command reference](#command-reference)
+- [What the overlay shows](#what-the-overlay-shows)
 - [Dictation: typing by voice](#dictation-typing-by-voice)
+- [Switching apps and documents](#switching-apps-and-documents)
+- [Tasks with several steps](#tasks-with-several-steps)
 - [Confirmations, undo, and corrections](#confirmations-undo-and-corrections)
 - [Privacy mode](#privacy-mode)
+- [For teachers: students, speech settings and progress](#for-teachers-students-speech-settings-and-progress)
 - [Troubleshooting](#troubleshooting)
 
 **Appendix**
@@ -69,9 +73,13 @@ AbleSpeak closes those gaps by treating voice as the *only* input and engineerin
 |------|----------|
 | **Browser control** | Open tabs, go to sites, click links and buttons, scroll, switch tabs, go back/forward, search, read the page aloud |
 | **Desktop control** | Launch and switch between applications, minimize/maximize/snap windows, press keyboard shortcuts, control media and volume |
-| **Typing by voice** | Dictation mode types speech directly into Word, Excel, or any text field, with spoken punctuation and editing commands |
+| **Typing by voice** | Dictation mode types speech directly into Word, Excel, or any text field, with spoken punctuation and editing commands. The student can keep talking while earlier phrases are typed |
+| **Reading the screen** | Reads the controls of any Windows app through its accessibility information, and presses, types into, opens or scrolls them directly |
+| **Tasks with several steps** | "Open my email and find the message from John" — AbleSpeak plans the steps, checks each one worked, and tries another way or stops and explains |
 | **Safety & recovery** | Spoken confirmation before irreversible actions, audible failure feedback, "undo that" and "no, I meant…" correction |
-| **Privacy** | A one-word privacy mode that stops screen capture while keeping voice control |
+| **Fits each student** | Microphone sensitivity, pause length, the student's own words, shortcuts and routines — and shortcuts learned from their corrections |
+| **Progress evidence** | Every command is saved against the student using the computer, feeding goals, aim lines and trends on the Teacher page |
+| **Privacy** | A one-word privacy mode that stops screen capture while keeping voice control; students' data stays on the computer |
 
 ## Design principles
 
@@ -118,11 +126,14 @@ AbleSpeak closes those gaps by treating voice as the *only* input and engineerin
 **2. The gateway server (Node, port 3001).** The brain. It receives speech, decides what to do, executes actions, and talks to the browser. Key modules:
 
 - `ws-proxy.js` — the WebSocket hub and the heart of the voice pipeline. Routes every utterance, applies safety checks, and broadcasts results to the overlay/dashboard.
-- `ai-engine.js` — multi-provider LLM integration (Gemini, OpenAI, Anthropic, Groq) with a tool-calling loop for commands that need reasoning.
+- `ai-engine.js` — multi-provider LLM integration (Gemini, OpenAI, Anthropic) with a tool-calling loop for commands that need reasoning.
 - `tool-registry.js` — the catalog of every action AbleSpeak can take, and the single chokepoint where the safety gate runs.
 - `system-tools.js` — OS-level actions on Windows via PowerShell and UI Automation (launch apps, type, manage windows, dictate into Word/Excel).
 - `safety.js` — pure, unit-tested logic for classifying risky actions and filtering phantom transcripts.
-- `voice-handler.js` — speech-to-text via Gemini, with hallucination filtering.
+- `voice-handler.js` — speech-to-text via Gemini, with hallucination filtering and the student's own vocabulary.
+- `screen-model.js` — reads a window's controls through Windows UI Automation (compiled C# in `uia/`), and acts on them.
+- `agent.js` — plans, acts, checks and recovers for instructions with several steps.
+- `student-session.js`, `student-profile.js` — who is using the computer, and that student's speech settings, shortcuts and routines.
 
 **3. The Chrome extension.** A content script and service worker that let AbleSpeak see and act on web pages: navigate, click elements, scroll the right container, read content, and report page context back to the server.
 
@@ -177,7 +188,11 @@ The control plane is **loopback-only** (never reachable over the network) and **
 
 ## Setup in brief
 
-Full installation steps are in the project `README.md`. In short:
+Setting up a student's computer from the installer: follow
+[INSTALL-FOR-TEACHERS.md](INSTALL-FOR-TEACHERS.md). It is written for a
+teacher, not a developer.
+
+Running from source: full steps are in the project `README.md`. In short:
 
 1. Install Node.js 18+ and Google Chrome.
 2. In `server/`, run `npm install`, copy `.env.example` to `.env`, and add at least one AI API key (Gemini recommended).
@@ -238,16 +253,46 @@ These phrases match the instant fast path. Natural variations generally work too
 | "Stop" / "Cancel" | Interrupt the current action |
 | "Go to sleep" → "Wake up" | Pause and resume listening |
 
+## What the overlay shows
+
+Above the microphone, the overlay always shows the last command:
+
+- **Heard: "…"** — what AbleSpeak took the student to say.
+- The result underneath: **Working…**, then **✓ Done**, **✗ Didn't work** (also said aloud, with the reason), or **Ignored** when the sound was treated as background talk.
+- During a task with several steps: **Step 2 of 4: …**, and **Waiting — say yes or no** when it needs a confirmation.
+- The top line shows whose session it is, for example "Amina's session". Say **"Who am I?"** to hear it.
+
 ## Dictation: typing by voice
 
 To type into a document or text field:
 
-- Say **"Dictate"** (or "start typing") to turn on dictation mode. You can also say **"Dictate <your text>"** to switch on and type at once.
-- Speak normally. Say punctuation by name — "period," "comma," "question mark," "new line," "new paragraph."
+- Say **"Dictate"** (or "start typing") to turn on dictation mode. You can also say **"Dictate, my name is Amina"** or **"My name is Amina. Dictate."** to switch on and type at once — capital letters and full stops are kept.
+- Speak normally. Each pause (about two seconds, or longer if set for the student) ends a phrase, and the phrase is typed. The student can keep talking while it types; nothing said in the meantime is lost, and phrases are typed in order.
+- Say punctuation by name — "period," "comma," "question mark," "new line," "new paragraph."
 - Editing by voice while dictating: "delete word," "new line," "bold," "italic," "select all," "undo that," "next line," "end of document," and similar.
+- To give a command without leaving dictation, start with the name: **"AbleSpeak, open Chrome."** A sentence like "AbleSpeak is great" is still typed.
+- If AbleSpeak asks a question during dictation, "yes" or "no" answers it; anything else is typed and the question is dropped.
 - Say **"Stop dictation"** (or "command mode") to return to normal commands.
 
-Dictation types directly at the cursor — into Microsoft Word and Excel through their automation interfaces, and into any other field as a fallback — without disturbing the cursor or your clipboard.
+To type one piece of text without dictation mode, say **"Type this"**. AbleSpeak asks for the words, and the next thing said is typed. On the Chat page, **"Type this: <text>"** types the text straight away, exactly as written.
+
+## Switching apps and documents
+
+- **"Switch to Word"**, **"Go to Word"**, **"Bring my Word document to the front"** — everyday names work: "Word document", "my spreadsheet", "the presentation", "file explorer".
+- **"Bring my essay to the front"** — an open document can be found by its title.
+- If the app is not open, AbleSpeak says so and suggests "open Word".
+
+## Tasks with several steps
+
+Say the whole thing at once: **"Open my email and find the message from John"**, **"Open Notepad, type my name, then save it"**.
+
+- AbleSpeak makes a short plan and shows each step on the overlay.
+- After every step it reads the screen again to check the step worked. If it did not, it tries a different way (at most twice). If it still cannot finish, it takes back any typing it did, stops, and says how far it got and why.
+- Before anything that cannot be undone — deleting, sending, closing a window — it stops and asks. "Yes" carries on; anything else stops the task.
+- Say **"Stop"** at any time to end the task. Typing already done is kept.
+- A **routine** is a task with a name, set up by a teacher (see below): **"Start my homework"** runs its steps in order.
+
+Dictation types into the app that was in use when it started. In Microsoft Word and Excel it types at the cursor through their automation interfaces. In any other app it pastes, then puts back what was on the clipboard.
 
 ## Confirmations, undo, and corrections
 
@@ -256,6 +301,19 @@ Dictation types directly at the cursor — into Microsoft Word and Excel through
 **Undo.** Say **"Undo that"** (also "take that back," "that's wrong," "wrong one") right after an action to reverse it.
 
 **Corrections.** Say **"No, I meant <X>"** (also "actually <X>," "I wanted <X>") and AbleSpeak undoes the previous action and then does what you actually meant.
+
+## For teachers: students, speech settings and progress
+
+Everything here is on the dashboard's **Teacher** page, and only opens on the computer itself.
+
+- **Trying things without a microphone.** Type on the **Chat** page. A typed command does exactly what the same words said aloud would do: quick commands, dictation, routines, tasks and questions. It acts on the app you used before the dashboard, not on the dashboard. The reply is spoken by the overlay, in the same voice as always.
+- **Who is using this computer.** Add students by first name or initials and choose who is at the computer. AbleSpeak remembers the choice after a restart; choose again only when a different student sits down. Commands from the dashboard's Chat page never count toward a student's progress.
+- **How well AbleSpeak hears them.** For the last 7 days: how often they were understood, how often a command worked first time, how many retries, and the words set aside as background talk (if those were the student, try "Quiet voice"). It also compares retries per command before and after the last change to their speech settings.
+- **Speech settings.** Microphone sensitivity (standard, quiet voice, noisy room), the pause that ends a command, the student's own words (names, subjects, places), their shortcuts ("my music" → "open spotify") and routines. Shortcuts marked **learned** were added by AbleSpeak after the student corrected the same thing twice with "no, I meant …".
+- **Another computer.** "Save to a file" and "Load from a file" carry a student's settings to a different computer.
+- **Goals and progress.** Goals, aim lines, trends and decision flags come from the student's own saved commands.
+
+Setting up a new computer: see [INSTALL-FOR-TEACHERS.md](INSTALL-FOR-TEACHERS.md).
 
 ## Privacy mode
 
@@ -281,7 +339,7 @@ Key settings live in `server/.env`:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `LLM_PROVIDER` | `gemini` | AI provider: gemini, openai, anthropic, groq |
+| `LLM_PROVIDER` | `gemini` | AI provider: gemini, openai, anthropic |
 | `LLM_MODEL` | `gemini-2.0-flash` | Model for the chosen provider |
 | `GEMINI_API_KEY` (etc.) | — | API key for the chosen provider |
 | `GATEWAY_PORT` | `3001` | Server port |

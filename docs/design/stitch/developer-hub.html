@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>AbleSpeak Dashboard - Developer Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "background": "#050D19",
+            "surface": "#0A1628",
+            "card-surface": "#102038",
+            "primary": "#F5A623",
+            "primary-hover": "#E6960E",
+            "primary-text": "#050D19",
+            "teal-accent": "#1D9E8A",
+            "teal-light": "#34D399",
+            "status-green": "#34D399",
+            "status-amber": "#F5A623",
+            "status-coral": "#FB7185",
+            "border-subtle": "rgba(255, 255, 255, 0.1)"
+          },
+          fontFamily: {
+            sans: ["Inter", "sans-serif"],
+            grotesk: ["Space Grotesk", "sans-serif"],
+            mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"]
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    *:focus-visible {
+      outline: 3px solid #F5A623 !important;
+      outline-offset: 2px !important;
+    }
+    /* Custom scrollbar matching dark theme */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0A1628;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1B2B44;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #253956;
+    }
+  </style>
+</head>
+<body class="bg-[#050D19] text-slate-100 font-sans antialiased min-h-screen selection:bg-[#F5A623] selection:text-[#050D19]">
+
+  <!-- APP LAYOUT WRAPPER (1280px friendly desktop grid) -->
+  <div class="flex min-h-screen">
+
+    <!-- 1. LEFT SIDEBAR -->
+    <aside class="w-64 bg-[#0A1628] border-r border-white/10 flex flex-col justify-between p-4 h-screen fixed left-0 top-0 z-30 flex-shrink-0 select-none">
+      <div class="flex flex-col gap-6">
+        <!-- Logo Header -->
+        <div class="flex items-center gap-3">
+          <div class="size-10 rounded-full bg-[#102038] border border-white/20 flex items-center justify-center flex-shrink-0">
+            <span class="material-symbols-outlined text-[#F5A623] text-[22px]">mic</span>
+          </div>
+          <div class="flex flex-col">
+            <div class="flex items-center gap-2">
+              <span class="font-grotesk text-[18px] font-bold text-white tracking-tight leading-tight">AbleSpeak</span>
+            </div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="size-2 rounded-full bg-emerald-400"></span>
+              <span class="text-[12px] font-medium text-emerald-300">Tier 2 assistive AI</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Navigation items (each >=48px touch target with 12px gap) -->
+        <nav class="flex flex-col gap-3">
+          <a class="h-12 px-4 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-3 transition-colors text-[15px] font-medium" href="#">
+            <span class="material-symbols-outlined text-[22px]">home</span>
+            <span>Home</span>
+          </a>
+          <a class="h-12 px-4 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-3 transition-colors text-[15px] font-medium" href="#">
+            <span class="material-symbols-outlined text-[22px]">group</span>
+            <span>Students</span>
+          </a>
+          <a class="h-12 px-4 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-3 transition-colors text-[15px] font-medium" href="#">
+            <span class="material-symbols-outlined text-[22px]">record_voice_over</span>
+            <span>Speech Profile</span>
+          </a>
+          <a class="h-12 px-4 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-3 transition-colors text-[15px] font-medium" href="#">
+            <span class="material-symbols-outlined text-[22px]">terminal</span>
+            <span>Test Console</span>
+          </a>
+          <!-- Active Nav Item: Developer Hub (Amber outline + Amber text) -->
+          <a class="h-12 px-4 rounded-xl border border-[#F5A623] text-[#F5A623] bg-[#F5A623]/10 font-semibold flex items-center gap-3 transition-colors text-[15px]" href="#">
+            <span class="material-symbols-outlined text-[22px]" style="font-variation-settings: 'FILL' 1;">code</span>
+            <span>Developer Hub</span>
+          </a>
+          <a class="h-12 px-4 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-3 transition-colors text-[15px] font-medium" href="#">
+            <span class="material-symbols-outlined text-[22px]">settings</span>
+            <span>Settings</span>
+          </a>
+        </nav>
+      </div>
+
+      <!-- Bottom Status Strip & Staff Profile -->
+      <div class="flex flex-col gap-3 pt-4 border-t border-white/10">
+        <div class="flex items-center justify-between px-2">
+          <div class="flex items-center gap-2">
+            <span class="relative flex h-2.5 w-2.5">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span class="text-[13px] font-semibold text-slate-200">Connected</span>
+          </div>
+          <span class="text-[12px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">42ms</span>
+        </div>
+        <div class="text-[11px] text-slate-400 px-2 font-mono leading-tight">
+          Gateway daemon v2.0.0 · Port 8443
+        </div>
+        <div class="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/5 border border-white/10 mt-1">
+          <div class="size-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white border border-white/20">
+            ER
+          </div>
+          <div class="flex flex-col overflow-hidden">
+            <span class="text-xs font-semibold text-white truncate">Elena Rostova</span>
+            <span class="text-[11px] text-slate-400 truncate leading-none">AT Facilitator</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 2. MAIN CONTENT AREA (Offset by sidebar width) -->
+    <div class="flex-1 ml-64 flex flex-col min-w-0 bg-[#050D19]">
+
+      <!-- SLIM TOP BAR -->
+      <header class="h-14 border-b border-white/10 bg-[#0A1628]/90 backdrop-blur px-8 flex items-center justify-between sticky top-0 z-20">
+        <!-- Active Student Session Chip -->
+        <div class="flex items-center gap-3">
+          <div class="h-8 px-3 rounded-full bg-[#102038] border border-white/15 flex items-center gap-2.5 text-[13px]">
+            <span class="size-2 rounded-full bg-emerald-400"></span>
+            <span class="text-white font-medium">Liam Morales</span>
+            <span class="text-slate-400">·</span>
+            <span class="text-slate-300">Active session (42m)</span>
+            <span class="text-xs font-mono text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded ml-1 border border-emerald-500/30">Quiet voice profile</span>
+          </div>
+          <span class="text-xs text-slate-400 font-mono hidden md:inline">Station 03 · Dell XPS Lab</span>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="h-8 px-3 rounded-md bg-[#F5A623]/10 border border-[#F5A623]/30 text-[#F5A623] text-xs font-mono font-medium flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-[16px]">terminal</span>
+            <span>DEVELOPER MODE</span>
+          </div>
+          <button type="button" class="h-9 px-3.5 rounded-lg border border-white/15 hover:bg-white/10 text-slate-300 text-[13px] font-medium transition-colors">
+            Switch student
+          </button>
+        </div>
+      </header>
+
+      <!-- VIEWPORT MAIN BODY -->
+      <main class="p-8 space-y-6 max-w-[1240px] w-full mx-auto">
+
+        <!-- TITLE & SUBTITLE -->
+        <div class="flex items-start justify-between flex-wrap gap-4">
+          <div>
+            <h1 class="font-grotesk text-[32px] font-bold text-white tracking-tight leading-tight">
+              Developer hub
+            </h1>
+            <p class="text-slate-400 text-[15px] mt-1">
+              What the AI sees and can do. For technical staff.
+            </p>
+          </div>
+
+          <!-- Quick Daemon status badge -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0A1628] border border-white/10 text-xs font-mono text-slate-300">
+            <span class="size-2 rounded-full bg-emerald-400"></span>
+            <span>RPC Engine: Active</span>
+            <span class="text-slate-500">|</span>
+            <span>Gemini 2.5 Flash</span>
+          </div>
+        </div>
+
+        <!-- 56px TAB BAR & "55 available" COUNTER -->
+        <div class="flex items-center justify-between border-b border-white/10 pb-0 pt-1">
+          <div class="flex items-center gap-2 h-14" role="tablist">
+            <!-- Prompt Tab -->
+            <button type="button" role="tab" aria-selected="false" class="h-14 px-6 text-slate-400 hover:text-white font-medium text-[15px] transition-colors flex items-center gap-2">
+              <span class="material-symbols-outlined text-[20px]">description</span>
+              <span>Prompt</span>
+            </button>
+            <!-- Tools Tab (Selected: Amber text, Bold, 3px Amber underline) -->
+            <button type="button" role="tab" aria-selected="true" class="h-14 px-6 text-[#F5A623] font-bold text-[15px] flex items-center gap-2 border-b-[3px] border-[#F5A623] -mb-[1px]">
+              <span class="material-symbols-outlined text-[20px]">build</span>
+              <span>Tools</span>
+            </button>
+            <!-- Context Tab -->
+            <button type="button" role="tab" aria-selected="false" class="h-14 px-6 text-slate-400 hover:text-white font-medium text-[15px] transition-colors flex items-center gap-2">
+              <span class="material-symbols-outlined text-[20px]">account_tree</span>
+              <span>Context</span>
+            </button>
+            <!-- Logs Tab -->
+            <button type="button" role="tab" aria-selected="false" class="h-14 px-6 text-slate-400 hover:text-white font-medium text-[15px] transition-colors flex items-center gap-2">
+              <span class="material-symbols-outlined text-[20px]">receipt_long</span>
+              <span>Logs</span>
+              <span class="size-2 rounded-full bg-emerald-400"></span>
+            </button>
+          </div>
+
+          <!-- Total Tools Available Indicator -->
+          <div class="flex items-center gap-2 text-[14px] text-slate-300 font-mono pr-2">
+            <span class="size-2.5 rounded-full bg-[#1D9E8A]"></span>
+            <span class="font-bold text-white">55</span> available
+          </div>
+        </div>
+
+        <!-- SECTION: TOOLS TAB CONTENT -->
+        <div class="space-y-4">
+          <!-- 48px FILTER CHIPS WITH COUNTS (12px gap, horizontal scroll on overflow) -->
+          <div class="flex items-center gap-3 overflow-x-auto pb-2 pt-1 no-scrollbar select-none">
+            <!-- All Filter Chip (Selected: Teal fill, Navy text, check icon) -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#1D9E8A] text-[#050D19] font-bold text-[14px] flex items-center gap-2 flex-shrink-0 transition-all border border-[#1D9E8A]">
+              <span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'wght' 700;">check</span>
+              <span>All</span>
+              <span class="bg-[#050D19]/20 text-[#050D19] px-2 py-0.5 rounded-full text-xs font-mono font-bold">55</span>
+            </button>
+
+            <!-- Browser tabs 11 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Browser tabs</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">11</span>
+            </button>
+
+            <!-- Browser navigation 3 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Browser navigation</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">3</span>
+            </button>
+
+            <!-- Scrolling 4 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Scrolling</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">4</span>
+            </button>
+
+            <!-- Keyboard & focus 3 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Keyboard &amp; focus</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">3</span>
+            </button>
+
+            <!-- Page interaction 9 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Page interaction</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">9</span>
+            </button>
+
+            <!-- Search 3 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Search</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">3</span>
+            </button>
+
+            <!-- Media & volume 3 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Media &amp; volume</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">3</span>
+            </button>
+
+            <!-- Desktop apps 6 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Desktop apps</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">6</span>
+            </button>
+
+            <!-- Desktop screen reading 7 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Desktop screen reading</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">7</span>
+            </button>
+
+            <!-- Conversation 1 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Conversation</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">1</span>
+            </button>
+
+            <!-- Dashboard control 5 -->
+            <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-[#102038] border border-white/10 text-slate-200 font-medium text-[14px] flex items-center gap-2 flex-shrink-0 transition-colors">
+              <span>Dashboard control</span>
+              <span class="bg-white/10 text-slate-300 px-2 py-0.5 rounded-full text-xs font-mono">5</span>
+            </button>
+          </div>
+
+          <!-- SPLIT PANE: LEFT (300px, #0A1628) & RIGHT (#102038) (rounded 16px, 1px border) -->
+          <div class="rounded-2xl border border-white/15 overflow-hidden flex flex-col lg:flex-row min-h-[580px]">
+
+            <!-- LEFT COLUMN (300px, #0A1628) -->
+            <div class="w-full lg:w-[320px] bg-[#0A1628] border-b lg:border-b-0 lg:border-r border-white/10 flex flex-col flex-shrink-0">
+              <!-- 56px Search field "Search tools" with clear X button -->
+              <div class="p-3 border-b border-white/10">
+                <div class="relative flex items-center">
+                  <span class="material-symbols-outlined text-slate-400 absolute left-3.5 text-[20px]">search</span>
+                  <input type="text" value="tab" placeholder="Search tools" class="w-full h-14 pl-11 pr-11 bg-[#050D19] border border-white/15 rounded-xl text-white text-[14px] placeholder-slate-400 focus:border-[#F5A623] focus:ring-0 transition-colors"/>
+                  <button type="button" aria-label="Clear search" class="size-10 absolute right-1.5 flex items-center justify-center text-slate-400 hover:text-white rounded-lg transition-colors">
+                    <span class="material-symbols-outlined text-[18px]">close</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Tool List with Group Labels in sentence case and 48px monospace rows -->
+              <div class="flex-1 overflow-y-auto p-3 space-y-4 max-h-[520px]">
+
+                <!-- Group: Browser tabs -->
+                <div>
+                  <div class="px-3 py-1.5 text-xs font-semibold text-[#1D9E8A] uppercase tracking-wider">
+                    Browser tabs (6)
+                  </div>
+                  <div class="flex flex-col gap-1 mt-1">
+                    <!-- create_tab -->
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">create_tab</span>
+                      <span class="text-xs text-slate-500 font-sans">POST</span>
+                    </button>
+
+                    <!-- open_url -->
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">open_url</span>
+                      <span class="text-xs text-slate-500 font-sans">POST</span>
+                    </button>
+
+                    <!-- make_tab_active -->
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">make_tab_active</span>
+                      <span class="text-xs text-slate-500 font-sans">PUT</span>
+                    </button>
+
+                    <!-- close_tab (SELECTED: Amber left edge + Amber bold text) -->
+                    <button type="button" class="h-12 px-3 rounded-xl bg-[#102038] border-l-4 border-[#F5A623] text-[#F5A623] font-bold text-[14px] font-mono flex items-center justify-between text-left shadow-sm">
+                      <span class="truncate flex items-center gap-2">
+                        <span>close_tab</span>
+                      </span>
+                      <span class="text-xs text-[#F5A623] font-mono px-1.5 py-0.5 rounded bg-[#F5A623]/15">ACTIVE</span>
+                    </button>
+
+                    <!-- reload_tab -->
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">reload_tab</span>
+                      <span class="text-xs text-slate-500 font-sans">PUT</span>
+                    </button>
+
+                    <!-- duplicate_tab -->
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">duplicate_tab</span>
+                      <span class="text-xs text-slate-500 font-sans">POST</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Group: Browser navigation -->
+                <div>
+                  <div class="px-3 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Browser navigation (3)
+                  </div>
+                  <div class="flex flex-col gap-1 mt-1">
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">navigate_back</span>
+                      <span class="text-xs text-slate-500 font-sans">POST</span>
+                    </button>
+                    <button type="button" class="h-12 px-3 rounded-xl hover:bg-white/5 text-slate-300 text-[14px] font-mono flex items-center justify-between text-left transition-colors">
+                      <span class="truncate">navigate_forward</span>
+                      <span class="text-xs text-slate-500 font-sans">POST</span>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- RIGHT PANE (#102038) TOOL DETAIL VIEW -->
+            <div class="flex-1 bg-[#102038] p-6 lg:p-8 flex flex-col justify-between space-y-6">
+              <div class="space-y-6">
+                <!-- Tool Header Area -->
+                <div class="flex items-start justify-between flex-wrap gap-4 pb-4 border-b border-white/10">
+                  <div class="flex items-center gap-4">
+                    <!-- 48px Amber-tinted wrench icon tile -->
+                    <div class="size-12 rounded-xl bg-[#F5A623]/15 border border-[#F5A623]/30 flex items-center justify-center flex-shrink-0">
+                      <span class="material-symbols-outlined text-[#F5A623] text-[26px]">build</span>
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-3">
+                        <h2 class="font-mono text-[22px] font-bold text-white tracking-tight">close_tab</h2>
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#1D9E8A]/15 text-[#1D9E8A] border border-[#1D9E8A]/30">
+                          Browser tabs
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2 mt-1">
+                        <span class="material-symbols-outlined text-amber-400 text-[16px]">info</span>
+                        <span class="text-[14px] text-amber-300 font-medium">Needs the Chrome extension</span>
+                        <span class="text-slate-500">·</span>
+                        <span class="text-[14px] text-slate-400 font-mono">v3.8.4 Direct</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Quick Action Buttons -->
+                  <div class="flex items-center gap-2">
+                    <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-white/5 border border-white/20 text-white font-medium text-[14px] flex items-center gap-2 transition-colors">
+                      <span class="material-symbols-outlined text-[18px]">play_arrow</span>
+                      <span>Test execute</span>
+                    </button>
+                    <button type="button" class="h-12 px-4 rounded-xl bg-[#0A1628] hover:bg-white/5 border border-white/20 text-slate-300 hover:text-white font-medium text-[14px] flex items-center gap-2 transition-colors">
+                      <span class="material-symbols-outlined text-[18px]">content_copy</span>
+                      <span>Copy schema</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Section: Description -->
+                <div class="space-y-2">
+                  <h3 class="font-grotesk text-[17px] font-bold text-white">Description</h3>
+                  <p class="text-[15px] text-slate-200 leading-relaxed bg-[#0A1628] p-4 rounded-xl border border-white/10">
+                    Closes the active tab or a targeted background tab in the student’s Chrome browser. If no <code class="font-mono text-[#F5A623] bg-white/5 px-1 py-0.5 rounded text-[13px]">tab_id</code> is passed, the engine dispatches to the foreground tab currently inspected by the screen accessibility layer.
+                  </p>
+                </div>
+
+                <!-- Section: Parameters -->
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <h3 class="font-grotesk text-[17px] font-bold text-white">Parameters</h3>
+                    <span class="text-xs text-slate-400 font-mono">1 argument definition</span>
+                  </div>
+                  <!-- Row Card: tab_id · string · optional with description -->
+                  <div class="bg-[#0A1628] border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="space-y-1">
+                      <div class="flex items-center gap-2.5">
+                        <span class="font-mono text-[15px] font-bold text-white">tab_id</span>
+                        <span class="text-slate-500">·</span>
+                        <span class="font-mono text-xs text-[#1D9E8A] bg-[#1D9E8A]/10 border border-[#1D9E8A]/30 px-2 py-0.5 rounded">string</span>
+                        <span class="text-slate-500">·</span>
+                        <span class="text-xs text-slate-300 font-mono bg-white/5 px-2 py-0.5 rounded">optional</span>
+                      </div>
+                      <p class="text-[14px] text-slate-300">
+                        Numeric string identifier of the tab to close. Defaults to current active foreground tab if omitted.
+                      </p>
+                    </div>
+                    <div class="text-xs font-mono text-slate-400 bg-[#050D19] px-3 py-2 rounded-lg border border-white/5 self-start sm:self-auto">
+                      default: null
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Section: Function schema (JSON code block, 14px monospace) -->
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <h3 class="font-grotesk text-[17px] font-bold text-white">Function schema</h3>
+                    <span class="text-xs font-mono text-emerald-400 flex items-center gap-1">
+                      <span class="size-1.5 rounded-full bg-emerald-400"></span>
+                      OpenAI / Gemini compatible
+                    </span>
+                  </div>
+                  <div class="bg-[#050D19] border border-white/15 rounded-xl p-4 overflow-x-auto">
+                    <pre class="font-mono text-[14px] text-slate-200 leading-relaxed"><code class="block">{
+  <span class="text-[#1D9E8A]">"name"</span>: <span class="text-[#F5A623]">"close_tab"</span>,
+  <span class="text-[#1D9E8A]">"description"</span>: <span class="text-slate-300">"Closes the currently active browser tab or specified tab_id."</span>,
+  <span class="text-[#1D9E8A]">"parameters"</span>: {
+    <span class="text-[#1D9E8A]">"type"</span>: <span class="text-amber-300">"object"</span>,
+    <span class="text-[#1D9E8A]">"properties"</span>: {
+      <span class="text-[#1D9E8A]">"tab_id"</span>: {
+        <span class="text-[#1D9E8A]">"type"</span>: <span class="text-amber-300">"string"</span>,
+        <span class="text-[#1D9E8A]">"description"</span>: <span class="text-slate-300">"The ID of the tab to close. When omitted, active tab is closed."</span>
+      }
+    },
+    <span class="text-[#1D9E8A]">"required"</span>: []
+  }
+}</code></pre>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- Subtle footer status inside detail pane -->
+              <div class="pt-4 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+                <span class="font-mono">Registered in: <code class="text-slate-300">desktop_gateway_manifest.json</code></span>
+                <span class="font-mono">Safety tier: <strong>Tier 2 (Confirm before exit)</strong></span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- SECTION: SECONDARY STATE / INSET PREVIEW FOR THE "LOGS" TAB -->
+        <section aria-labelledby="logs-preview-heading" class="pt-2">
+          <div class="bg-[#0A1628] border border-white/15 rounded-2xl p-6 space-y-4">
+
+            <!-- Inset Header -->
+            <div class="flex items-center justify-between flex-wrap gap-3">
+              <div class="flex items-center gap-3">
+                <div class="size-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+                  <span class="material-symbols-outlined text-emerald-400 text-[20px]">receipt_long</span>
+                </div>
+                <div>
+                  <h3 id="logs-preview-heading" class="font-grotesk text-[18px] font-bold text-white flex items-center gap-2">
+                    <span>Logs tab preview</span>
+                    <span class="text-xs font-mono font-medium px-2 py-0.5 rounded bg-white/10 text-slate-300">Live stream</span>
+                  </h3>
+                  <p class="text-xs text-slate-400">Secondary state preview demonstrating real-time gateway event monitoring.</p>
+                </div>
+              </div>
+
+              <!-- Controls: 48px Pause scrolling button -->
+              <button type="button" class="h-12 px-4 rounded-xl bg-[#102038] hover:bg-white/10 border border-white/20 text-white font-medium text-[14px] flex items-center gap-2 transition-colors">
+                <span class="material-symbols-outlined text-[20px]">pause</span>
+                <span>Pause scrolling</span>
+              </button>
+            </div>
+
+            <!-- Level Chips Row (All / INFO / WARN / ERROR) -->
+            <div class="flex items-center justify-between flex-wrap gap-3 pt-1">
+              <div class="flex items-center gap-3">
+                <!-- All Level Chip -->
+                <button type="button" class="h-12 px-4 rounded-xl bg-[#1D9E8A] text-[#050D19] font-bold text-[14px] flex items-center gap-2">
+                  <span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'wght' 700;">filter_alt</span>
+                  <span>All (200)</span>
+                </button>
+                <!-- INFO Level Chip -->
+                <button type="button" class="h-12 px-4 rounded-xl bg-[#102038] hover:bg-white/5 border border-white/15 text-slate-200 font-medium text-[14px] flex items-center gap-2">
+                  <span class="size-2 rounded-full bg-emerald-400"></span>
+                  <span>INFO</span>
+                  <span class="text-xs font-mono text-slate-400">182</span>
+                </button>
+                <!-- WARN Level Chip -->
+                <button type="button" class="h-12 px-4 rounded-xl bg-[#102038] hover:bg-white/5 border border-white/15 text-slate-200 font-medium text-[14px] flex items-center gap-2">
+                  <span class="size-2 rounded-full bg-amber-400"></span>
+                  <span>WARN</span>
+                  <span class="text-xs font-mono text-amber-300">14</span>
+                </button>
+                <!-- ERROR Level Chip -->
+                <button type="button" class="h-12 px-4 rounded-xl bg-[#102038] hover:bg-white/5 border border-white/15 text-slate-200 font-medium text-[14px] flex items-center gap-2">
+                  <span class="size-2 rounded-full bg-rose-400"></span>
+                  <span>ERROR</span>
+                  <span class="text-xs font-mono text-rose-300">4</span>
+                </button>
+              </div>
+
+              <!-- Stream speed info -->
+              <span class="text-xs font-mono text-slate-400">Auto-refresh 250ms · Buffer 200 items</span>
+            </div>
+
+            <!-- Monospace Log Stream with Timestamp, Coloured Level Word, and Message -->
+            <div class="bg-[#050D19] border border-white/10 rounded-xl p-4 font-mono text-[14px] leading-relaxed space-y-2.5 overflow-x-auto">
+              <!-- Log Row 1 (INFO) -->
+              <div class="flex items-start gap-3 py-1 hover:bg-white/5 px-2 rounded transition-colors">
+                <span class="text-slate-500 select-none">10:48:11.204</span>
+                <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-16 text-center">INFO</span>
+                <span class="text-slate-200">Audio buffer frame committed: 48000Hz PCM · SNR 28dB · ASR intent parsed with 98.4% confidence</span>
+              </div>
+
+              <!-- Log Row 2 (INFO) -->
+              <div class="flex items-start gap-3 py-1 hover:bg-white/5 px-2 rounded transition-colors">
+                <span class="text-slate-500 select-none">10:48:12.482</span>
+                <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-16 text-center">INFO</span>
+                <span class="text-slate-200">Executing tool <code class="text-[#F5A623] font-bold">browser.scroll</code> via Chrome Extension helper (delta: 450px)</span>
+              </div>
+
+              <!-- Log Row 3 (WARN) -->
+              <div class="flex items-start gap-3 py-1 hover:bg-white/5 px-2 rounded transition-colors bg-amber-500/5">
+                <span class="text-slate-500 select-none">10:48:15.910</span>
+                <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 w-16 text-center">WARN</span>
+                <span class="text-amber-200">Dwell boundary approaching: target button has high proximity to neighboring anchor. Dwell confirmation prolonged to 450ms.</span>
+              </div>
+
+              <!-- Log Row 4 (ERROR) -->
+              <div class="flex items-start gap-3 py-1 hover:bg-white/5 px-2 rounded transition-colors bg-rose-500/5">
+                <span class="text-slate-500 select-none">10:48:21.034</span>
+                <span class="px-2 py-0.5 rounded text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 w-16 text-center">ERROR</span>
+                <span class="text-rose-200">Tool execution timeout: <code class="text-white font-bold">click_element</code> failed on query <code class="text-slate-300">[data-test-id="submit-quiz"]</code> after 400ms retry window. Dispatched friendly audio prompt.</span>
+              </div>
+
+              <!-- Log Row 5 (INFO) -->
+              <div class="flex items-start gap-3 py-1 hover:bg-white/5 px-2 rounded transition-colors">
+                <span class="text-slate-500 select-none">10:48:26.115</span>
+                <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-16 text-center">INFO</span>
+                <span class="text-slate-200">Spoken recovery phrase received: "undo that". Dispatched <code class="text-[#F5A623] font-bold">browser.history_back</code>. Session restored safely.</span>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+  </div>
+
+</body>
+</html>

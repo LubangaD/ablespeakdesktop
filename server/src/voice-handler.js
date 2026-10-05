@@ -6,9 +6,53 @@
  * (15 RPM for gemini-2.0-flash).
  */
 
+// Whole sentences Gemini has been seen to invent for audio with no clear
+// speech (seen 16 Sep 2026 on long background-noise recordings). Matched as a
+// full pattern so a student can still dictate "I can't make it to the meeting".
+const INVENTED_SENTENCES = [
+  /going to go ahead and say that .{0,20}not going to be able to make it/i,
+];
+
+// Codes Node's fetch reports when the computer can't reach Google at all
+// (no network, no DNS, Wi-Fi dropped), as opposed to Google answering badly.
+const NETWORK_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH',
+  'ENETDOWN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT',
+]);
+const REQUEST_TIMEOUT_MS = 12000;
+export const OFFLINE_MESSAGE = 'AbleSpeak needs the internet right now. I’ll reconnect automatically.';
+
+/** Whether a fetch failure means the internet (or Google) can't be reached. */
+export function isNetworkError(err) {
+  if (!err) return false;
+  if (err.name === 'TimeoutError' || err.name === 'AbortError') return true;
+  const code = err.cause?.code || err.code;
+  if (code && NETWORK_CODES.has(code)) return true;
+  return /fetch failed/i.test(err.message || '');
+}
+
+export function isInventedTranscript(text) {
+  return INVENTED_SENTENCES.some(pattern => pattern.test(String(text || '')));
+}
+
+const BASE_PROMPT = 'Transcribe this audio clip. Rules:\n1. Return ONLY the exact words spoken by a human voice. No quotes, no explanations.\n2. If you hear SILENCE, background noise, music, humming, or any non-speech audio, return exactly: SILENCE\n3. Do NOT invent or hallucinate text. If you are unsure whether speech was spoken, return SILENCE.\n4. Common hallucinations to avoid: "The quick brown fox", "I\'m not sure if", "Thank you for watching", generic sentences about meetings or weather.\n5. Only transcribe clear, intentional human speech directed at a microphone.';
+
+/**
+ * The transcription instructions, with the speaker's own words when known.
+ * The words only guide spelling; they must never be returned unless spoken.
+ */
+export function transcriptionPrompt(vocabulary = []) {
+  const words = (Array.isArray(vocabulary) ? vocabulary : [])
+    .map(word => String(word).replace(/[\r\n"]+/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 100);
+  if (!words.length) return BASE_PROMPT;
+  return `${BASE_PROMPT}\n6. This speaker often says these names and words. When you hear one, spell it exactly like this: ${words.join(', ')}. Do not include them unless they were said.`;
+}
+
 export class VoiceHandler {
   constructor(apiKey) {
-    this.apiKey = apiKey || process.env.GEMINI_API_KEY;
+    this.apiKey = apiKey;
     this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
     // Voice transcription ALWAYS uses Gemini (audio understanding), so only
     // honor LLM_MODEL if the main provider is Gemini too. Empty/"auto" → default.
@@ -24,6 +68,16 @@ export class VoiceHandler {
     this._maxRequestsPerMinute = 12; // Stay under Gemini's 15 RPM limit
     this._minIntervalMs = 3000;      // Minimum 3s between requests
     this._lastRequestTime = 0;
+  }
+
+  // A key passed to the constructor wins. Otherwise read the environment on
+  // every call, so a Gemini key saved from the Settings page works at once.
+  get apiKey() {
+    return this._apiKey || process.env.GEMINI_API_KEY;
+  }
+
+  set apiKey(value) {
+    this._apiKey = value || null;
   }
 
   /**
@@ -84,9 +138,11 @@ export class VoiceHandler {
   }
 
   /**
-   * Transcribe base64-encoded audio using Gemini
+   * Transcribe base64-encoded audio using Gemini.
+   * `vocabulary`: names and words this speaker uses, spelled as they should
+   * appear (Stage 1 per-student vocabulary).
    */
-  async transcribe(audioBase64, mimeType = 'audio/webm') {
+  async transcribe(audioBase64, mimeType = 'audio/webm', { vocabulary = [] } = {}) {
     if (!this.apiKey) {
       return { text: '', error: 'GEMINI_API_KEY not configured' };
     }
@@ -119,6 +175,7 @@ export class VoiceHandler {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), // a half-dead connection must not hang the turn
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -129,7 +186,7 @@ export class VoiceHandler {
                   }
                 },
                 {
-                  text: 'Transcribe this audio clip. Rules:\n1. Return ONLY the exact words spoken by a human voice. No quotes, no explanations.\n2. If you hear SILENCE, background noise, music, humming, or any non-speech audio, return exactly: SILENCE\n3. Do NOT invent or hallucinate text. If you are unsure whether speech was spoken, return SILENCE.\n4. Common hallucinations to avoid: "The quick brown fox", "I\'m not sure if", "Thank you for watching", generic sentences about meetings or weather.\n5. Only transcribe clear, intentional human speech directed at a microphone.'
+                  text: transcriptionPrompt(vocabulary),
                 }
               ]
             }],
@@ -160,6 +217,8 @@ export class VoiceHandler {
           const text = rawText
             .replace(/^\s*silence\b[.,!]?\s*/i, '')
             .replace(/\s*\bsilence\b[.,!]?\s*$/i, '')
+            // Gemini sometimes repeats its own instructions after the words
+            .replace(/\s*\b(transcribe this audio clip|return only the exact words)\b[^\n]*/gi, '')
             .trim();
 
           if (!text) {
@@ -187,7 +246,7 @@ export class VoiceHandler {
             'is anybody there',
             'hello is anyone there',
           ];
-          if (KNOWN_HALLUCINATIONS.some(h => lower.includes(h))) {
+          if (KNOWN_HALLUCINATIONS.some(h => lower.includes(h)) || isInventedTranscript(text)) {
             console.log(`[VoiceHandler] Filtered hallucination: "${text}"`);
             return { text: '', error: 'no_speech' };
           }
@@ -226,11 +285,14 @@ export class VoiceHandler {
         return { text: '', error: `Transcription failed: ${status}` };
 
       } catch (err) {
-        console.error('[VoiceHandler] Transcription error:', err.message);
+        const offline = isNetworkError(err);
+        console.error(`[VoiceHandler] Transcription error${offline ? ' (no connection)' : ''}:`, err.message);
         if (attempt === 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 2000)); // ride out a short blip
           continue;
         }
+        // Say plainly that the connection is down, so nobody repeats themselves for nothing.
+        if (offline) return { text: '', error: 'offline', message: OFFLINE_MESSAGE };
         return { text: '', error: err.message };
       }
     }

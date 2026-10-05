@@ -10,6 +10,9 @@ import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { classifyConsequential } from './safety.js';
 
+/** The student whose session a tool runs in, for the resolution log. */
+const studentOf = wsHub => (wsHub?._evaluating ? null : wsHub?._attribution?.().student_id ?? null);
+
 // ── Tool Definitions ──
 
 const TOOLS = [
@@ -471,26 +474,46 @@ const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        label: { type: 'string', description: 'Text to match against link labels on the page (partial, case-insensitive).' },
+        label: { type: 'string', description: 'What the person called the link, e.g. "Michael Jackson Wikipedia" or "the Wikipedia link". Matched word by word against each link\'s text and its web address, so a site name works too.' },
         index: { type: 'number', description: '0-based index when multiple links match (default: 0 = first match).' },
       },
       required: ['label'],
     },
     selector: { requiresExtension: true },
     execute: async (args, wsHub) => {
-      const escaped = JSON.stringify((args.label || '').toLowerCase());
+      const escaped = JSON.stringify(linkWords(args.label));
+      const phrase = JSON.stringify(String(args.label || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
       const idx = typeof args.index === 'number' ? Math.max(0, args.index) : 0;
 
-      // Step 1: Find the matching link's raw href via content script
+      // Step 1: Find the best matching link's raw href via content script.
+      // Every word said must appear in the link's text or its address
+      // ("Michael Jackson Wikipedia" → en.wikipedia.org/wiki/Michael_Jackson,
+      // whose text runs "Michael JacksonWikipedia…" on Google). The exact
+      // phrase, words in the visible text, and links on screen rank higher.
       const findCode = `(function(){
-        var links = Array.from(document.querySelectorAll('a[href]'));
-        var matches = links.filter(function(a){
-          var t = (a.textContent || a.getAttribute('aria-label') || a.title || '').trim().toLowerCase();
-          return t.includes(${escaped});
+        var words = ${escaped};
+        var phrase = ${phrase};
+        var norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };
+        var scored = [];
+        Array.from(document.querySelectorAll('a[href]')).forEach(function (a) {
+          var href = a.getAttribute('href') || '';
+          if (!href || href.charAt(0) === '#' || /^javascript:/i.test(href)) return;
+          var text = norm((a.textContent || '') + ' ' + (a.getAttribute('aria-label') || '') + ' ' + (a.title || ''));
+          var where = '';
+          try { var u = new URL(a.href); where = norm(u.hostname + ' ' + decodeURIComponent(u.pathname)); } catch (e) {}
+          var hay = text + ' ' + where;
+          if (!words.length || !words.every(function (w) { return hay.indexOf(w) !== -1; })) return;
+          var r = a.getBoundingClientRect();
+          var shown = r.width > 0 && r.height > 0;
+          var score = (phrase && text.indexOf(phrase) !== -1 ? 50 : 0)
+            + words.filter(function (w) { return text.indexOf(w) !== -1; }).length * 10
+            + (shown ? 20 : 0) + (shown && r.top >= 0 && r.top < innerHeight ? 10 : 0)
+            - Math.min(text.length, 200) / 50;
+          scored.push({ href: href, score: score });
         });
-        var el = matches[${idx}];
-        if (el && el.getAttribute('href')) return el.getAttribute('href');
-        return 'NOT_FOUND';
+        scored.sort(function (x, y) { return y.score - x.score; });
+        var best = scored[${idx}];
+        return best ? best.href : 'NOT_FOUND';
       })()`;
 
       const result = await wsHub.sendToolToExtension('javascript', findCode);
@@ -513,7 +536,8 @@ const TOOLS = [
 
       // Step 3: Navigate via open_url (background service worker — no timeout)
       await wsHub.sendToolToExtension('open_url', { url: fullUrl });
-      return { status: 'success', message: `Navigated to: ${fullUrl.substring(0, 80)}` };
+      // Said and shown to the person: what is opening, never the raw address
+      return { status: 'success', message: `Opening ${spokenPageName(fullUrl, args.label)}.`, url: fullUrl };
     },
   },
 
@@ -544,9 +568,12 @@ const TOOLS = [
     },
     selector: { requiresExtension: true },
     execute: async (args, wsHub) => {
+      // The page's own words, not its menus: big sites (Microsoft Learn, news,
+      // docs) start with thousands of characters of navigation, so the first
+      // 5,000 characters of <body> held no article at all.
       const code = args.selector
-        ? `document.querySelector('${args.selector}')?.innerText || 'Element not found'`
-        : `document.body.innerText.substring(0, 5000)`;
+        ? `document.querySelector(${JSON.stringify(String(args.selector))})?.innerText || 'Element not found'`
+        : PAGE_TEXT_SCRIPT;
       return wsHub.sendToolToExtension('javascript', code);
     },
   },
@@ -711,7 +738,7 @@ const TOOLS = [
   },
   {
     name: 'focus_application',
-    description: 'Bring a desktop application window to the foreground. Use this when the user wants to switch to an app like Spotify, Notepad, Chrome, VS Code, etc.',
+    description: 'Bring a desktop application window to the foreground. Use this when the user wants to switch to an app like Spotify, Notepad, Chrome, VS Code, etc. Everyday names work ("Word document", "my spreadsheet"), and so does the title of an open document ("bring my essay to the front").',
     parameters: {
       type: 'object',
       properties: {
@@ -780,6 +807,80 @@ const TOOLS = [
   },
   // ── Desktop UI Automation — see and click anything in ANY desktop app ──
   {
+    name: 'uia_query',
+    description: "Read the controls in a desktop app window through Windows accessibility — fast, no screenshot needed. Returns each control's ref, type, name, position, state (focused, toggled, expanded, selected, current value, slider position) and the actions it supports: invoke, set_value, toggle, expand_collapse, select, scroll, scroll_into_view, read_text, set_range. Use this first to understand any desktop app, then act with uia_act using a ref. Omit app_name for the window the student is using.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_name: { type: 'string', description: 'The app or document to read (e.g. "word", "spotify", "my essay"). Omit for the window the student is using.' },
+        name: { type: 'string', description: 'Only list controls whose name contains this text.' },
+        limit: { type: 'number', description: 'Most controls to return (default 80, up to 200).' },
+      },
+    },
+    selector: {},
+    execute: async (args) => {
+      const { getScreenModel, describeElements } = await import('./screen-model.js');
+      const model = await getScreenModel({ app: args.app_name, fresh: true, maxElements: 400, restore: true });
+      if (model.status !== 'success') return model;
+      const filter = String(args.name || '').toLowerCase().trim();
+      const matching = filter ? model.elements.filter(e => e.name.toLowerCase().includes(filter)) : model.elements;
+      const limit = Math.max(1, Math.min(200, Number(args.limit) || 80));
+      const shown = matching.slice(0, limit);
+      return {
+        status: 'success',
+        window: model.window,
+        app: model.app,
+        count: matching.length,
+        total: model.total,
+        ms: model.ms,
+        elements: shown,
+        message: `${model.window} — ${matching.length} control${matching.length === 1 ? '' : 's'}${matching.length > shown.length ? ` (first ${shown.length})` : ''}:\n${describeElements({ elements: shown }, limit)}`,
+      };
+    },
+  },
+  {
+    name: 'uia_act',
+    description: "Act on a control in a desktop app through its own accessibility action — press a button (invoke), switch a checkbox (toggle), pick a list or tab item (select), open or close a menu or tree item (expand / collapse), replace a field's text (set_value, with value), scroll a pane (scroll_up / scroll_down / scroll_left / scroll_right), bring a control into view (scroll_into_view), move a slider or spinner (set_range, with value a position on the min–max scale uia_query shows; that scale is the app's own and may not be the number on screen, so check what the result says it now shows and move again if needed), read a document's text (read_text; value picks how much: selection, word, line, paragraph, page, or all by default; with no ref or name it reads the document the student is in, at their cursor) or move focus (focus). Give the ref from uia_query, or the control's name. Leave action out to press it. Prefer this to clicking screen coordinates.",
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: "The control's ref from uia_query." },
+        name: { type: 'string', description: "The control's visible name, if you have no ref." },
+        app_name: { type: 'string', description: 'The app containing it. Omit for the window the student is using.' },
+        action: {
+          type: 'string',
+          enum: ['invoke', 'toggle', 'select', 'expand', 'collapse', 'set_value', 'focus', 'scroll_into_view', 'scroll_up', 'scroll_down', 'scroll_left', 'scroll_right', 'read_text', 'set_range'],
+          description: 'What to do. Omit to press the control.',
+        },
+        value: { type: 'string', description: 'Text for set_value; a number for set_range; for read_text, how much: selection, word, line, paragraph, page or all.' },
+        type: { type: 'string', description: 'Only match controls of this type (e.g. "Button", "Edit") when using name.' },
+      },
+    },
+    selector: {},
+    execute: async (args, wsHub) => {
+      // read_text alone reads the document in front ("read this paragraph").
+      if (!args.ref && !args.name && args.action !== 'read_text') return { status: 'error', message: "Give a ref from uia_query or the control's name." };
+      const { actOnElement } = await import('./screen-model.js');
+      return actOnElement({ ...args, app: args.app_name, studentId: studentOf(wsHub) });
+    },
+  },
+  {
+    name: 'fix_spelling',
+    description: 'Fix a spelling mistake in Microsoft Word using Word’s own suggestions: the mistake at or nearest the cursor, or the misspelled word the person names. "fix that spelling" or "use the first suggestion" → choice 1; "use the second one" → choice 2; "what are the suggestions?" → choice 0 (lists them, changes nothing). Works without the Editor pane open.',
+    parameters: {
+      type: 'object',
+      properties: {
+        choice: { type: 'number', description: 'Which of Word’s suggestions to use, 1 = first (default). 0 only lists them.' },
+        word: { type: 'string', description: 'The misspelled word, if the person named one. Leave out for the mistake at the cursor.' },
+      },
+    },
+    selector: {},
+    execute: async (args) => {
+      const { fixSpelling } = await import('./office-uia.js');
+      return fixSpelling({ choice: args.choice ?? 1, word: args.word || '' });
+    },
+  },
+  {
     name: 'list_desktop_elements',
     description: 'Scan a desktop application window and list ALL its clickable elements (buttons, menus, inputs, list items) with their names. This is your EYES on desktop apps — use it when you need to know what can be clicked, or when click_desktop_element could not find an element. Omit app_name to scan the window the user is currently using.',
     parameters: {
@@ -790,8 +891,28 @@ const TOOLS = [
     },
     selector: {},
     execute: async (args) => {
-      const { listDesktopElements } = await import('./system-tools.js');
-      return listDesktopElements(args.app_name);
+      // Same answer as before, read through the faster screen model.
+      const { getScreenModel } = await import('./screen-model.js');
+      const model = await getScreenModel({ app: args.app_name, fresh: true, maxElements: 200, restore: true });
+      if (model.status !== 'success') {
+        const { listDesktopElements } = await import('./system-tools.js');
+        return model.code === 'MINIMIZED' ? model : listDesktopElements(args.app_name);
+      }
+      const elements = model.elements
+        .filter(e => e.actions.length && e.name)
+        .slice(0, 60)
+        .map(e => ({
+          name: e.name, type: e.type, enabled: e.enabled !== false, ref: e.ref,
+          x: Math.round(e.rect[0] + e.rect[2] / 2), y: Math.round(e.rect[1] + e.rect[3] / 2),
+        }));
+      return {
+        status: 'success',
+        window: model.window,
+        count: elements.length,
+        elements,
+        message: `Found ${elements.length} interactive elements in "${model.window}": ` +
+          elements.slice(0, 25).map(e => `"${e.name}" (${e.type})`).join(', '),
+      };
     },
   },
   {
@@ -809,8 +930,31 @@ const TOOLS = [
       },
     },
     selector: {},
-    execute: async (args) => {
-      const { clickDesktopElement } = await import('./system-tools.js');
+    execute: async (args, wsHub) => {
+      const { clickDesktopElement, mouseClick } = await import('./system-tools.js');
+      const { actOnElement, recordResolution, resolveTargetWindow } = await import('./screen-model.js');
+      const studentId = studentOf(wsHub);
+      const plainClick = !args.double_click && (args.button || 'left') === 'left';
+
+      // By name: act through the control's accessibility action first.
+      if (args.name && plainClick) {
+        const result = await actOnElement({ app: args.app_name, name: args.name, studentId });
+        if (result.status === 'success' || result.notFound || result.code === 'MINIMIZED') return result;
+        // Found, but it would not take the action: click where it is.
+        if (result.element?.rect && ['NOT_SUPPORTED', 'FAILED'].includes(result.code)) {
+          const [x, y, w, h] = result.element.rect;
+          const clicked = await mouseClick(x + w / 2, y + h / 2);
+          return { ...clicked, message: `Clicked "${result.element.name}"` };
+        }
+        // The screen model could not read the window: use the older scan.
+      }
+
+      // A bare screen position (usually read off the screenshot) is a pixel,
+      // not a control — counted separately for the UIA resolution rate.
+      if (typeof args.x === 'number' && typeof args.y === 'number' && !args.name) {
+        const win = await resolveTargetWindow(args.app_name).catch(() => null);
+        recordResolution({ app: win?.process || args.app_name, method: 'coordinates', action: 'click', started: Date.now(), studentId });
+      }
       return clickDesktopElement(args);
     },
   },
@@ -864,13 +1008,13 @@ const TOOLS = [
   // ── AbleSpeak Dashboard Control (Accessibility — voice-navigable UI) ──
   {
     name: 'navigate_dashboard',
-    description: 'Navigate the AbleSpeak dashboard to a specific page. Use when the user says "go to settings", "open chat", "show tools", "show logs", "show commands", "go to context", "show dashboard", or "open prompt editor".',
+    description: 'Open one of the user\'s own AbleSpeak pages: home ("show dashboard"), their progress ("show my progress") or their voice and words ("open my words"). The admin pages (users, test console, Developer Hub, Settings) need the admin PIN and cannot be opened by voice: if asked for them, answer "That page is for your teacher." A plain "open settings" usually means the Windows or app settings, not this dashboard.',
     parameters: {
       type: 'object',
       properties: {
         page: {
           type: 'string',
-          enum: ['dashboard', 'chat', 'tools', 'context', 'commands', 'logs', 'settings', 'prompt'],
+          enum: ['dashboard', 'progress', 'speech'],
           description: 'The dashboard page to navigate to.',
         },
       },
@@ -878,17 +1022,16 @@ const TOOLS = [
     },
     selector: {},
     execute: async (args, wsHub) => {
+      // The user's own pages; admin pages (users, test console, Developer Hub, Settings) are PIN-only.
       const pageMap = {
         dashboard: '/',
-        chat: '/chat',
-        tools: '/tools',
-        context: '/context',
-        commands: '/commands',
-        logs: '/logs',
-        settings: '/settings',
-        prompt: '/prompt',
+        progress: '/progress',
+        speech: '/speech',
       };
-      const path = pageMap[args.page] || '/';
+      if (!pageMap[args.page]) {
+        return { status: 'error', message: 'That page is for your teacher.' };
+      }
+      const path = pageMap[args.page];
       wsHub.broadcastToDashboard({
         type: 'dashboard_navigate',
         path,
@@ -905,7 +1048,7 @@ const TOOLS = [
       properties: {
         provider: {
           type: 'string',
-          enum: ['gemini', 'openai', 'anthropic', 'groq'],
+          enum: ['gemini', 'openai', 'anthropic'],
           description: 'The AI provider to switch to.',
         },
         model: {
@@ -993,12 +1136,72 @@ const TOOLS = [
   },
 ];
 
+/**
+ * The words that identify a link: what was said, without filler such as
+ * "the", "link", "open" or "click on". "the Wikipedia link" → ["wikipedia"].
+ */
+/**
+ * Runs in the page (get_page_content): the title and the main content —
+ * <main>, <article> or role="main" when it holds real text — with tidy spacing.
+ */
+export const PAGE_TEXT_SCRIPT = `(() => {
+  const picks = ['main article', 'article', 'main', '[role="main"]', '#main-content', '#main', '#content'];
+  let el = null;
+  for (const s of picks) {
+    const found = document.querySelector(s);
+    if (found && (found.innerText || '').trim().length > 200) { el = found; break; }
+  }
+  const text = ((el || document.body).innerText || '')
+    .replace(/[ \\t\\u00a0]+/g, ' ')
+    .replace(/\\s*\\n\\s*(\\n\\s*)+/g, '\\n\\n')
+    .trim();
+  return (document.title ? 'Title: ' + document.title + '\\n\\n' : '') + text.substring(0, 8000);
+})()`;
+
+/**
+ * A web page as a person would say it: "Michael Jackson on Wikipedia", the
+ * link's own words, or the site's name — never "https://en.wikipedia.org/…".
+ */
+export function spokenPageName(url, label = '') {
+  let parsed;
+  try { parsed = new URL(url); } catch { return 'the link'; }
+  const host = parsed.hostname.replace(/^www\./, '');
+  if (/(^|\.)wikipedia\.org$/.test(host)) {
+    const article = parsed.pathname.match(/^\/wiki\/([^/?#]+)/);
+    if (article) {
+      let title = article[1];
+      try { title = decodeURIComponent(title); } catch {}
+      title = title.replace(/_/g, ' ').trim();
+      if (title && !title.includes(':')) return `${title} on Wikipedia`;
+    }
+    return 'Wikipedia';
+  }
+  const words = String(label || '').replace(/\s+/g, ' ').trim();
+  if (words && words.length <= 60 && !/^https?:|^www\./i.test(words)) return `“${words}”`;
+  return host;
+}
+
+export function linkWords(label) {
+  const FILLER = new Set(['the', 'a', 'an', 'link', 'links', 'open', 'click', 'on', 'go', 'to', 'page', 'website', 'site', 'result', 'please', 'one']);
+  return String(label || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w && !FILLER.has(w));
+}
+
 // ── Tool Registry Class ──
 
 export class ToolRegistry {
   constructor() {
     this.tools = [...TOOLS];
     this.pendingToolCalls = new Map();
+  }
+
+  /** The desktop control a uia_act / click_desktop_element call will press, or null. */
+  async findDesktopControl(args) {
+    const { getScreenModel, findElement } = await import('./screen-model.js');
+    const model = await getScreenModel({ app: args.app_name, maxElements: 400 });
+    if (model.status !== 'success') return null;
+    return args.ref
+      ? model.elements.find(e => e.ref === args.ref) || null
+      : findElement(model, args.name, { type: args.type });
   }
 
   /**
@@ -1037,7 +1240,7 @@ export class ToolRegistry {
     // "yes") bypasses the gate. This is the single chokepoint for BOTH the
     // fast path and the AI tool-calling loop.
     if (!opts.confirmed) {
-      const consequence = classifyConsequential(name, args);
+      const consequence = classifyConsequential(name, await this._resolveGateArgs(name, args, wsHub));
       if (consequence) {
         if (wsHub) {
           wsHub._pendingConfirmation = { tool: name, args, prompt: consequence.prompt, id: consequence.id };
@@ -1059,6 +1262,32 @@ export class ToolRegistry {
       console.error(`[ToolRegistry] Error executing ${name}:`, err.message);
       return { status: 'error', error: err.message };
     }
+  }
+
+  /**
+   * click_element is often called with only an xpath (no label) — the AI reads
+   * it straight off the viewport-elements list. Resolve the element's visible
+   * text the same way click_element's own execute() resolves label → xpath, but
+   * in reverse, so the safety gate can see what's actually about to be clicked
+   * instead of gating on the tool name alone (CVA-1).
+   */
+  async _resolveGateArgs(name, args, wsHub) {
+    // Desktop controls: gate on the control that will actually be pressed —
+    // a ref carries no name, and a spoken name may match a longer one
+    // ("receive" → "Send/Receive").
+    if ((name === 'uia_act' || name === 'click_desktop_element') && (args?.ref || args?.name)) {
+      try {
+        const element = await this.findDesktopControl(args);
+        if (element?.name) return { ...args, resolvedLabel: element.name };
+      } catch {
+        // The screen could not be read; gate on the words given.
+      }
+      return args;
+    }
+    if (name !== 'click_element' || args?.label || !args?.xpath || !wsHub) return args;
+    const elements = wsHub.browserContext?.pageContext?.viewportElements || [];
+    const match = elements.find(el => el.xpath === args.xpath);
+    return match?.label ? { ...args, resolvedLabel: match.label } : args;
   }
 
   /**

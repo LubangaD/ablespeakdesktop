@@ -55,6 +55,13 @@ function scheduleSave() {
   saveTimer = setInterval(saveToFile, 2000); // auto-save every 2s (reduced from 5s)
 }
 
+/** Stop the auto-save timer and release the handle (test/dev-reload cleanup). */
+export function closeDatabase() {
+  if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
+  saveToFile();
+  db = null;
+}
+
 function migrate() {
   db.run(`
     CREATE TABLE IF NOT EXISTS commands (
@@ -85,6 +92,93 @@ function migrate() {
   )`);
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_commands_session ON commands(session_id)`); } catch {}
 
+  // ── Progress monitoring (Tier 2 KPI engine) ──
+  // Recovered from the `eric` branch (df5ea9d/920bc23/681a72e), which never got
+  // merged into main. Adapted to reference THIS file's existing INTEGER
+  // students.id / session_prefix attribution model instead of eric's separate
+  // TEXT-id student system — see insertCommand() below for how student_id gets
+  // resolved from session_id automatically, with no ws-proxy.js changes needed.
+  try { db.run(`ALTER TABLE commands ADD COLUMN student_id INTEGER`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN outcome TEXT`); } catch {}
+  try { db.run(`ALTER TABLE commands ADD COLUMN prompt_count INTEGER`); } catch {}
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_commands_student ON commands(student_id)`); } catch {}
+  db.run(`CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, student_id INTEGER NOT NULL, measure TEXT NOT NULL, baseline_value REAL NOT NULL, baseline_date TEXT NOT NULL, target_value REAL NOT NULL, target_date TEXT NOT NULL, decision_rule TEXT NOT NULL DEFAULT '4_below_aim', status TEXT DEFAULT 'active', created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS progress_points (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, student_id INTEGER NOT NULL, measured_at TEXT NOT NULL, value REAL NOT NULL, source TEXT NOT NULL DEFAULT 'auto', sample_size INTEGER, UNIQUE(goal_id, measured_at))`);
+  db.run(`CREATE TABLE IF NOT EXISTS phase_changes (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, changed_at TEXT NOT NULL, label TEXT NOT NULL, note TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS decision_flags (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, rule TEXT NOT NULL, fired_at TEXT NOT NULL, detail TEXT, acknowledged_at TEXT)`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_goals_student ON goals(student_id)`); } catch {}
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_progress_points_goal ON progress_points(goal_id)`); } catch {}
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_decision_flags_goal ON decision_flags(goal_id)`); } catch {}
+
+  // ── Student identity (AT-50) ──
+  // Which student is using this computer is saved here, so it survives a
+  // restart, and every session and voice command records that student
+  // directly instead of being matched later by a text prefix.
+  db.run(`CREATE TABLE IF NOT EXISTS device_state (key TEXT PRIMARY KEY, value TEXT)`);
+  try { db.run(`ALTER TABLE sessions ADD COLUMN student_id INTEGER`); } catch {}
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_student ON sessions(student_id)`); } catch {}
+  // ── Student speech profiles (Stage 1 / Stage 4) — JSON, see student-profile.js ──
+  db.run(`CREATE TABLE IF NOT EXISTS student_profiles (
+    student_id INTEGER PRIMARY KEY,
+    profile TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
+  // ── Every voice turn, for the recognition readout (Stage 1) ──
+  // outcome: 'no_speech' (nothing usable heard), 'filtered' (heard, but
+  // treated as noise, music or echo), 'command', 'dictation', 'control'
+  // (sleep, stop, …), 'error' (the recogniser failed) or 'offline' (no
+  // internet; not counted against the person's recognition).
+  db.run(`CREATE TABLE IF NOT EXISTS voice_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    student_id INTEGER,
+    session_id TEXT,
+    outcome TEXT NOT NULL,
+    transcript TEXT,
+    command_id TEXT,
+    audio_kb INTEGER,
+    ms INTEGER
+  )`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_voice_turns_student ON voice_turns(student_id, created_at)`); } catch {}
+
+  // ── "No, I meant …" pairs, from which shortcuts are learned (Stage 4) ──
+  db.run(`CREATE TABLE IF NOT EXISTS correction_pairs (
+    student_id INTEGER NOT NULL,
+    heard TEXT NOT NULL,
+    meant TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    last_at TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (student_id, heard, meant)
+  )`);
+
+  // ── How desktop targets were found (Stage 2 UIA resolution rate) ──
+  // method: 'uia' (found in the accessibility tree), 'coordinates' (a screen
+  // position, e.g. from the screenshot), 'not_found'.
+  db.run(`CREATE TABLE IF NOT EXISTS resolution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    app TEXT NOT NULL,
+    method TEXT NOT NULL,
+    action TEXT,
+    found INTEGER NOT NULL,
+    ok INTEGER,
+    ms INTEGER,
+    student_id INTEGER
+  )`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_resolution_app ON resolution_log(app)`); } catch {}
+
+  if (!getDeviceState('prefix_attribution_migrated')) {
+    // Once: commands saved under the old prefix scheme get their student.
+    db.run(`UPDATE commands SET student_id = (
+        SELECT s.id FROM students s
+        WHERE s.session_prefix IS NOT NULL AND s.session_prefix != ''
+          AND commands.session_id LIKE (s.session_prefix || '%')
+        ORDER BY s.id LIMIT 1)
+      WHERE student_id IS NULL AND session_id IS NOT NULL AND type LIKE 'voice%'`);
+    setDeviceState('prefix_attribution_migrated', '1');
+  }
+
   saveToFile();
 }
 
@@ -107,14 +201,77 @@ function run(sql, params = []) {
   db.run(sql, params);
 }
 
+// ── Device state ──
+
+export function getDeviceState(key) {
+  return queryOne('SELECT value FROM device_state WHERE key = ?', [key])?.value ?? null;
+}
+
+/** Save a value for this device; null removes it. */
+export function setDeviceState(key, value) {
+  if (value == null) run('DELETE FROM device_state WHERE key = ?', [key]);
+  else run('INSERT INTO device_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, String(value)]);
+}
+
 // ── Commands ──
 
-export function insertCommand({ id, type, direction, payload, result, latency_ms, session_id }) {
-  run(`INSERT OR IGNORE INTO commands (id,type,direction,payload,result,latency_ms,session_id) VALUES (?,?,?,?,?,?,?)`,
+/**
+ * Resolve which student (if any) a session_id belongs to, via the same
+ * session_prefix LIKE match getTeacherAnalytics() already uses — i.e. does
+ * session_id start with that student's session_prefix.
+ */
+function resolveStudentIdForSession(sessionId) {
+  if (!sessionId) return null;
+  const row = queryOne(
+    `SELECT id FROM students WHERE session_prefix IS NOT NULL AND session_prefix != '' AND ? LIKE (session_prefix || '%') LIMIT 1`,
+    [sessionId]
+  );
+  return row?.id ?? null;
+}
+
+/**
+ * Very small outcome heuristic derived from the same signal
+ * getTeacherAnalytics() already uses (`result NOT LIKE '%error%'`).
+ *
+ * KNOWN LIMITATION: this cannot yet distinguish "succeeded first try" from
+ * "succeeded after a retry/correction" — that needs real retry/repair
+ * tracking in the voice pipeline (the `outcome stamping` work on the eric
+ * branch, c8b4753, which is NOT included here). Until that lands,
+ * independence_rate and task_completion will read identically, and
+ * prompt_count is always 0. Both measures are still real and meaningful —
+ * they're computed from actual command outcomes, not placeholder data —
+ * they just don't yet differentiate "no prompts needed" from "needed one".
+ */
+function deriveOutcome(resultStr) {
+  if (!resultStr) return null;
+  return /error/i.test(resultStr) ? 'error' : 'success';
+}
+
+export function insertCommand({ id, type, direction, payload, result, latency_ms, session_id, student_id, outcome, prompt_count }) {
+  const resultStr = typeof result === 'string' ? result : JSON.stringify(result || {});
+
+  // Only voice-originated commands feed the KPI engine — dev/chat test
+  // traffic from the dashboard's Chat page must not pollute a student's data.
+  const isVoice = typeof type === 'string' && type.startsWith('voice');
+  const resolvedStudentId = isVoice ? (student_id ?? resolveStudentIdForSession(session_id)) : null;
+  const resolvedOutcome = outcome ?? (isVoice ? deriveOutcome(resultStr) : null);
+  const resolvedPromptCount = prompt_count ?? (isVoice ? 0 : null);
+
+  run(`INSERT OR IGNORE INTO commands (id,type,direction,payload,result,latency_ms,session_id,student_id,outcome,prompt_count) VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [id, type, direction || 'voqal_to_ext',
      typeof payload === 'string' ? payload : JSON.stringify(payload || {}),
-     typeof result === 'string' ? result : JSON.stringify(result || {}),
-     latency_ms || null, session_id || null]);
+     resultStr,
+     latency_ms || null, session_id || null,
+     resolvedStudentId, resolvedOutcome, resolvedPromptCount]);
+  if (session_id) run('UPDATE sessions SET command_count = command_count + 1 WHERE id = ?', [session_id]);
+}
+
+/**
+ * Change a saved command's outcome: 'error' when the student undid it,
+ * 'superseded' when a later try at the same task replaced it.
+ */
+export function updateCommandOutcome(id, outcome) {
+  run('UPDATE commands SET outcome = ? WHERE id = ?', [outcome, id]);
 }
 
 export function getCommands({ limit = 50, offset = 0, type = null, direction = null } = {}) {
@@ -138,8 +295,25 @@ export function getCommandStats() {
 
 // ── Sessions ──
 
-export function insertSession({ id, started_at }) { run('INSERT INTO sessions (id,started_at) VALUES (?,?)', [id, started_at]); }
-export function getSessions({ limit = 20 } = {}) { return query('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?', [limit]); }
+export function insertSession({ id, started_at, student_id = null }) {
+  run('INSERT INTO sessions (id,started_at,student_id) VALUES (?,?,?)', [id, started_at, student_id]);
+}
+export function endSession(id, ended_at) {
+  run('UPDATE sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL', [ended_at, id]);
+}
+
+/** Sessions left open by a crash or forced quit end at their last command. */
+export function closeAbandonedSessions() {
+  run(`UPDATE sessions SET ended_at = COALESCE(
+      (SELECT MAX(created_at) FROM commands WHERE commands.session_id = sessions.id), started_at)
+    WHERE ended_at IS NULL`);
+}
+export function getSessions({ limit = 20, studentId = null } = {}) {
+  if (studentId != null) {
+    return query('SELECT * FROM sessions WHERE student_id = ? ORDER BY started_at DESC LIMIT ?', [studentId, limit]);
+  }
+  return query('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?', [limit]);
+}
 
 // ── Log Events ──
 
@@ -171,10 +345,14 @@ export function getHealthAlerts() {
   return query(`SELECT h.* FROM health_checks h INNER JOIN (SELECT component, MAX(id) as max_id FROM health_checks GROUP BY component) latest ON h.id=latest.max_id WHERE h.status IN ('warn','error') ORDER BY h.checked_at DESC`);
 }
 
-// ── Teacher Dashboard ──
+// ── Teacher Dashboard: Students ──
 
 export function getStudents() {
   return query('SELECT * FROM students ORDER BY name ASC');
+}
+
+export function getStudent(id) {
+  return queryOne('SELECT * FROM students WHERE id = ?', [id]);
 }
 
 export function addStudent({ name, session_prefix }) {
@@ -182,39 +360,110 @@ export function addStudent({ name, session_prefix }) {
   return queryOne('SELECT * FROM students WHERE id = last_insert_rowid()');
 }
 
+/**
+ * One user's own progress since `since` (a local "YYYY-MM-DD HH:MM:SS"):
+ * commands and successes per day, the totals, and what they say most. The
+ * same counting rule as the analytics: tries a retry replaced don't count,
+ * and a command worked if it did first time or after a retry.
+ */
+export function getStudentProgress(studentId, { since }) {
+  const counted = `student_id = ? AND (outcome IS NULL OR outcome != 'superseded')`;
+  const worked = `SUM(CASE WHEN outcome IN ('success','repaired') THEN 1 ELSE 0 END)`;
+  const days = query(
+    `SELECT date(created_at) AS day, COUNT(*) AS total, ${worked} AS succeeded
+     FROM commands WHERE ${counted} AND created_at >= ? GROUP BY date(created_at) ORDER BY day ASC`,
+    [studentId, since],
+  ).map(d => ({ day: d.day, total: d.total || 0, succeeded: d.succeeded || 0 }));
+  const period = queryOne(
+    `SELECT COUNT(*) AS total, ${worked} AS succeeded, ROUND(AVG(latency_ms), 0) AS avg_ms
+     FROM commands WHERE ${counted} AND created_at >= ?`,
+    [studentId, since],
+  ) || {};
+  const allTime = queryOne(
+    `SELECT COUNT(*) AS total, ${worked} AS succeeded, MIN(created_at) AS first_at
+     FROM commands WHERE ${counted}`,
+    [studentId],
+  ) || {};
+
+  // What they say most, from their recent commands' words
+  const counts = new Map();
+  for (const row of query(`SELECT payload FROM commands WHERE ${counted} AND created_at >= ? ORDER BY id DESC LIMIT 1000`, [studentId, since])) {
+    let text = '';
+    try { text = String(JSON.parse(row.payload || '{}').text || ''); } catch { /* not JSON */ }
+    const key = text.toLowerCase().replace(/[.!?,]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (key) counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const topCommands = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([text, count]) => ({ text, count }));
+
+  return {
+    days,
+    period: { total: period.total || 0, succeeded: period.succeeded || 0, avgLatency: period.avg_ms || null },
+    allTime: { total: allTime.total || 0, succeeded: allTime.succeeded || 0, since: allTime.first_at || null },
+    topCommands,
+  };
+}
+
+export function renameStudent(id, name) {
+  run('UPDATE students SET name = ? WHERE id = ?', [name, id]);
+  return getStudent(id);
+}
+
+/**
+ * Remove a person and every row of theirs, everywhere (Phase 2 Step 1,
+ * section 4 of the accounts plan). Deleting used to leave their commands,
+ * voice turns, sessions, goals and progress behind — a real privacy bug, and
+ * a problem for "delete my account" once accounts exist. Goals have their own
+ * child rows (phase_changes, decision_flags) keyed by goal_id, not student_id,
+ * so those are deleted by first finding this student's goal ids.
+ */
 export function deleteStudent(id) {
+  const goalIds = query('SELECT id FROM goals WHERE student_id = ?', [id]).map(g => g.id);
+  for (const goalId of goalIds) {
+    run('DELETE FROM phase_changes WHERE goal_id = ?', [goalId]);
+    run('DELETE FROM decision_flags WHERE goal_id = ?', [goalId]);
+  }
+  run('DELETE FROM goals WHERE student_id = ?', [id]);
+  run('DELETE FROM progress_points WHERE student_id = ?', [id]);
+  run('DELETE FROM commands WHERE student_id = ?', [id]);
+  run('DELETE FROM voice_turns WHERE student_id = ?', [id]);
+  run('DELETE FROM sessions WHERE student_id = ?', [id]);
+  run('DELETE FROM correction_pairs WHERE student_id = ?', [id]);
+  run('DELETE FROM resolution_log WHERE student_id = ?', [id]);
+  run('DELETE FROM student_profiles WHERE student_id = ?', [id]);
   run('DELETE FROM students WHERE id = ?', [id]);
+
+  // device_state entries that point at this student: the active-user choice,
+  // and any Windows account still linked to them (student-session.js).
+  if (Number(getDeviceState('active_student_id')) === id) setDeviceState('active_student_id', null);
+  for (const row of query(`SELECT key FROM device_state WHERE key LIKE 'windows_user:%' AND value = ?`, [String(id)])) {
+    setDeviceState(row.key, null);
+  }
 }
 
 export function getTeacherAnalytics() {
   const students = getStudents();
 
-  // Per-student stats: join students to commands via session_prefix
+  // Per-student stats, from the student recorded on each command
   const perStudent = students.map(s => {
-    const prefix = s.session_prefix || s.name;
-    const total = queryOne(
-      `SELECT COUNT(*) as count FROM commands WHERE session_id LIKE ?`,
-      [`${prefix}%`]
-    );
-    const successCount = queryOne(
-      `SELECT COUNT(*) as count FROM commands WHERE session_id LIKE ? AND (result NOT LIKE '%error%' AND result NOT LIKE '%Error%')`,
-      [`${prefix}%`]
-    );
-    const avgLat = queryOne(
-      `SELECT ROUND(AVG(latency_ms), 0) as avg_ms FROM commands WHERE session_id LIKE ? AND latency_ms IS NOT NULL`,
-      [`${prefix}%`]
+    const stats = queryOne(
+      `SELECT SUM(CASE WHEN outcome IS NULL OR outcome != 'superseded' THEN 1 ELSE 0 END) AS total,
+              SUM(CASE WHEN outcome IN ('success','repaired') THEN 1 ELSE 0 END) AS succeeded,
+              ROUND(AVG(latency_ms), 0) AS avg_ms,
+              MAX(created_at) AS last_active
+       FROM commands WHERE student_id = ?`,
+      [s.id]
     );
     const topCmd = queryOne(
-      `SELECT type, COUNT(*) as count FROM commands WHERE session_id LIKE ? GROUP BY type ORDER BY count DESC LIMIT 1`,
-      [`${prefix}%`]
+      `SELECT type, COUNT(*) as count FROM commands WHERE student_id = ? GROUP BY type ORDER BY count DESC LIMIT 1`,
+      [s.id]
     );
-    const lastActive = queryOne(
-      `SELECT created_at FROM commands WHERE session_id LIKE ? ORDER BY created_at DESC LIMIT 1`,
-      [`${prefix}%`]
+    const sessionsThisWeek = queryOne(
+      `SELECT COUNT(*) AS count FROM sessions WHERE student_id = ? AND started_at >= datetime('now', '-7 days', 'localtime')`,
+      [s.id]
     );
 
-    const totalCount = total?.count || 0;
-    const succCount = successCount?.count || 0;
+    const totalCount = stats?.total || 0;
+    const succCount = stats?.succeeded || 0;
 
     return {
       id: s.id,
@@ -222,9 +471,10 @@ export function getTeacherAnalytics() {
       session_prefix: s.session_prefix,
       commands: totalCount,
       successRate: totalCount > 0 ? Math.round((succCount / totalCount) * 100) : 0,
-      avgLatency: avgLat?.avg_ms || 0,
+      avgLatency: stats?.avg_ms || 0,
       topCommand: topCmd?.type || '—',
-      lastActive: lastActive?.created_at || '—',
+      lastActive: stats?.last_active || '—',
+      sessionsThisWeek: sessionsThisWeek?.count || 0,
     };
   });
 
@@ -232,8 +482,14 @@ export function getTeacherAnalytics() {
   const totalCommands = queryOne('SELECT COUNT(*) as count FROM commands');
   const todayCommands = queryOne(`SELECT COUNT(*) as count FROM commands WHERE date(created_at)=date('now','localtime')`);
   const classAvgLatency = queryOne(`SELECT ROUND(AVG(latency_ms), 0) as avg_ms FROM commands WHERE latency_ms IS NOT NULL`);
-  const classSuccessTotal = queryOne(`SELECT COUNT(*) as count FROM commands`);
-  const classSuccessOk = queryOne(`SELECT COUNT(*) as count FROM commands WHERE result NOT LIKE '%error%' AND result NOT LIKE '%Error%'`);
+  // The same rule as each student's rate, over every student's commands:
+  // those that worked, first time or after a retry, out of all tries except
+  // the ones a retry replaced.
+  const classSuccess = queryOne(
+    `SELECT SUM(CASE WHEN outcome != 'superseded' THEN 1 ELSE 0 END) AS total,
+            SUM(CASE WHEN outcome IN ('success','repaired') THEN 1 ELSE 0 END) AS succeeded
+     FROM commands WHERE outcome IS NOT NULL AND student_id IS NOT NULL`
+  );
 
   // Daily trend (last 7 days)
   const dailyTrend = query(`
@@ -253,8 +509,8 @@ export function getTeacherAnalytics() {
     LIMIT 10
   `);
 
-  const totalCount = classSuccessTotal?.count || 0;
-  const okCount = classSuccessOk?.count || 0;
+  const totalCount = classSuccess?.total || 0;
+  const okCount = classSuccess?.succeeded || 0;
 
   return {
     summary: {
@@ -268,4 +524,231 @@ export function getTeacherAnalytics() {
     dailyTrend,
     commandBreakdown,
   };
+}
+
+// ── Progress Monitoring: Goals (Tier 2 KPI engine) ──
+
+export function insertGoal({ id, student_id, measure, baseline_value, baseline_date, target_value, target_date, decision_rule = '4_below_aim' }) {
+  run(
+    `INSERT INTO goals (id,student_id,measure,baseline_value,baseline_date,target_value,target_date,decision_rule,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'active',datetime('now','localtime'))`,
+    [id, student_id, measure, baseline_value, baseline_date, target_value, target_date, decision_rule]
+  );
+}
+
+export function getGoals({ studentId = null, status = null } = {}) {
+  let sql = 'SELECT * FROM goals WHERE 1=1';
+  const params = [];
+  if (studentId != null) { sql += ' AND student_id=?'; params.push(studentId); }
+  if (status) { sql += ' AND status=?'; params.push(status); }
+  sql += ' ORDER BY created_at DESC';
+  return query(sql, params);
+}
+
+export function updateGoalStatus(goalId, status) {
+  run(`UPDATE goals SET status=?, updated_at=datetime('now','localtime') WHERE id=?`, [status, goalId]);
+}
+
+// ── Progress Points ──
+
+/**
+ * Upsert a progress point. Manual points always win over auto (overwrite
+ * either); auto points only overwrite an existing auto point, never manual.
+ */
+export function upsertProgressPoint({ id, goal_id, student_id, measured_at, value, source = 'auto', sample_size = null }) {
+  if (source === 'manual') {
+    run(
+      `INSERT INTO progress_points (id,goal_id,student_id,measured_at,value,source,sample_size) VALUES (?,?,?,?,?,?,?) ON CONFLICT(goal_id,measured_at) DO UPDATE SET id=excluded.id, student_id=excluded.student_id, value=excluded.value, source=excluded.source, sample_size=excluded.sample_size`,
+      [id, goal_id, student_id, measured_at, value, source, sample_size]
+    );
+  } else {
+    run(
+      `INSERT INTO progress_points (id,goal_id,student_id,measured_at,value,source,sample_size) VALUES (?,?,?,?,?,?,?) ON CONFLICT(goal_id,measured_at) DO UPDATE SET id=excluded.id, student_id=excluded.student_id, value=excluded.value, source=excluded.source, sample_size=excluded.sample_size WHERE progress_points.source='auto'`,
+      [id, goal_id, student_id, measured_at, value, source, sample_size]
+    );
+  }
+}
+
+export function getProgressPoints(goalId) {
+  return query(`SELECT * FROM progress_points WHERE goal_id=? ORDER BY measured_at ASC`, [goalId]);
+}
+
+// ── Phase Changes ──
+
+export function insertPhaseChange({ id, goal_id, changed_at, label, note = null }) {
+  run(`INSERT INTO phase_changes (id,goal_id,changed_at,label,note) VALUES (?,?,?,?,?)`, [id, goal_id, changed_at, label, note]);
+}
+
+export function getPhaseChanges(goalId) {
+  return query(`SELECT * FROM phase_changes WHERE goal_id=? ORDER BY changed_at ASC`, [goalId]);
+}
+
+// ── Decision Flags ──
+
+export function insertDecisionFlag({ id, goal_id, rule, fired_at, detail = null }) {
+  run(`INSERT INTO decision_flags (id,goal_id,rule,fired_at,detail) VALUES (?,?,?,?,?)`, [id, goal_id, rule, fired_at, detail]);
+}
+
+export function getDecisionFlags({ goalId, unacknowledgedOnly = false } = {}) {
+  let sql = 'SELECT * FROM decision_flags WHERE goal_id=?';
+  const params = [goalId];
+  if (unacknowledgedOnly) sql += ' AND acknowledged_at IS NULL';
+  sql += ' ORDER BY fired_at DESC';
+  return query(sql, params);
+}
+
+export function acknowledgeFlag(id) {
+  run(`UPDATE decision_flags SET acknowledged_at=datetime('now','localtime') WHERE id=?`, [id]);
+}
+
+// ── Student speech profiles ──
+
+export function getStudentProfileRow(studentId) {
+  return queryOne('SELECT * FROM student_profiles WHERE student_id = ?', [studentId]);
+}
+
+export function saveStudentProfileRow(studentId, profileJson) {
+  run(`INSERT INTO student_profiles (student_id, profile, updated_at) VALUES (?, ?, datetime('now','localtime'))
+       ON CONFLICT(student_id) DO UPDATE SET profile = excluded.profile, updated_at = excluded.updated_at`,
+    [studentId, profileJson]);
+}
+
+// ── Corrections (Stage 4) ──
+
+/** Count one "no, I meant" pair; returns how many times it has happened. */
+export function recordCorrection({ student_id, heard, meant }) {
+  run(`INSERT INTO correction_pairs (student_id, heard, meant, count, last_at) VALUES (?, ?, ?, 1, datetime('now','localtime'))
+       ON CONFLICT(student_id, heard, meant) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
+    [student_id, heard, meant]);
+  return queryOne('SELECT count FROM correction_pairs WHERE student_id = ? AND heard = ? AND meant = ?', [student_id, heard, meant])?.count ?? 0;
+}
+
+// ── Voice turns (Stage 1 recognition readout) ──
+
+export function logVoiceTurn({ student_id = null, session_id = null, outcome, transcript = null, command_id = null, audio_kb = null, ms = null }) {
+  run(
+    'INSERT INTO voice_turns (student_id, session_id, outcome, transcript, command_id, audio_kb, ms) VALUES (?,?,?,?,?,?,?)',
+    [student_id, session_id, outcome, transcript == null ? null : String(transcript).slice(0, 500), command_id, audio_kb, ms]
+  );
+}
+
+/**
+ * How well a student is being heard since `since` (local datetime):
+ * - heardRate: turns with usable words over all turns
+ * - firstTimeRate: commands that worked without a retry or correction
+ * - retries: commands that were another go at a failed one
+ */
+export function getRecognitionStats(studentId, { since }) {
+  const turns = queryOne(
+    `SELECT COUNT(*) AS turns,
+            SUM(CASE WHEN outcome IN ('command','dictation','control') THEN 1 ELSE 0 END) AS heard,
+            SUM(CASE WHEN outcome = 'no_speech' THEN 1 ELSE 0 END) AS no_speech,
+            SUM(CASE WHEN outcome = 'filtered' THEN 1 ELSE 0 END) AS filtered,
+            SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+            SUM(CASE WHEN outcome = 'dictation' THEN 1 ELSE 0 END) AS dictated,
+            ROUND(AVG(ms), 0) AS avg_ms
+     FROM voice_turns WHERE student_id = ? AND created_at >= ?`,
+    [studentId, since]
+  );
+  const commands = queryOne(
+    `SELECT SUM(CASE WHEN outcome != 'superseded' THEN 1 ELSE 0 END) AS tasks,
+            SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS first_time,
+            SUM(CASE WHEN outcome = 'repaired' THEN 1 ELSE 0 END) AS repaired,
+            SUM(CASE WHEN outcome = 'superseded' THEN 1 ELSE 0 END) AS retries,
+            SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS failed
+     FROM commands WHERE student_id = ? AND created_at >= ? AND outcome IS NOT NULL`,
+    [studentId, since]
+  );
+  const t = turns || {};
+  const c = commands || {};
+  return {
+    since,
+    turns: t.turns || 0,
+    heard: t.heard || 0,
+    noSpeech: t.no_speech || 0,
+    filtered: t.filtered || 0,
+    errors: t.errors || 0,
+    dictated: t.dictated || 0,
+    avgMs: t.avg_ms || null,
+    heardRate: t.turns ? (t.heard || 0) / t.turns : null,
+    tasks: c.tasks || 0,
+    firstTime: c.first_time || 0,
+    repaired: c.repaired || 0,
+    retries: c.retries || 0,
+    failed: c.failed || 0,
+    firstTimeRate: c.tasks ? (c.first_time || 0) / c.tasks : null,
+  };
+}
+
+/**
+ * Retries per completed task in the `days` before and after a moment — the
+ * last change to the student's speech settings (Stage 4 acceptance).
+ * A completed task's prompt_count is how many tries it needed before working.
+ */
+export function getRetriesAround(studentId, { at, days = 14 }) {
+  const window = (from, to) => {
+    const row = queryOne(
+      `SELECT COUNT(*) AS tasks, SUM(prompt_count) AS retries
+       FROM commands
+       WHERE student_id = ? AND outcome IN ('success','repaired')
+         AND created_at >= datetime(?, ?) AND created_at < datetime(?, ?)`,
+      [studentId, at, from, at, to]
+    );
+    const tasks = row?.tasks || 0;
+    return { tasks, retries: row?.retries || 0, retriesPerTask: tasks ? (row.retries || 0) / tasks : null };
+  };
+  return { at, days, before: window(`-${days} days`, '+0 days'), after: window('+0 days', `+${days} days`) };
+}
+
+/** The most recent turns that were heard but set aside as noise, for review. */
+/** The latest phrases set aside as background talk, since `since` when given. */
+export function getFilteredTurns(studentId, { limit = 20, since = null } = {}) {
+  return since
+    ? query(
+      `SELECT created_at, transcript FROM voice_turns WHERE student_id = ? AND outcome = 'filtered' AND created_at >= ? ORDER BY id DESC LIMIT ?`,
+      [studentId, since, limit]
+    )
+    : query(
+      `SELECT created_at, transcript FROM voice_turns WHERE student_id = ? AND outcome = 'filtered' ORDER BY id DESC LIMIT ?`,
+      [studentId, limit]
+    );
+}
+
+// ── Desktop target resolution (Stage 2) ──
+
+export function logResolution({ app, method, action = null, found, ok = null, ms = null, student_id = null }) {
+  run(
+    'INSERT INTO resolution_log (app, method, action, found, ok, ms, student_id) VALUES (?,?,?,?,?,?,?)',
+    [app, method, action, found ? 1 : 0, ok == null ? null : (ok ? 1 : 0), ms, student_id]
+  );
+}
+
+/**
+ * Per app since `since` (local datetime): how many targets were found in the
+ * accessibility tree, by screen position, or not at all, and the resolution
+ * rate — tree hits over all attempts.
+ */
+export function getResolutionStats({ since = null } = {}) {
+  const rows = query(
+    `SELECT app,
+            SUM(CASE WHEN method = 'uia' THEN 1 ELSE 0 END) AS uia,
+            SUM(CASE WHEN method = 'coordinates' THEN 1 ELSE 0 END) AS coordinates,
+            SUM(CASE WHEN method = 'not_found' THEN 1 ELSE 0 END) AS not_found,
+            SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed_actions,
+            COUNT(*) AS attempts,
+            ROUND(AVG(ms), 0) AS avg_ms,
+            MIN(created_at) AS first_at,
+            MAX(created_at) AS last_at
+     FROM resolution_log
+     ${since ? 'WHERE created_at >= ?' : ''}
+     GROUP BY app ORDER BY attempts DESC`,
+    since ? [since] : []
+  );
+  return rows.map(r => ({ ...r, resolutionRate: r.attempts ? r.uia / r.attempts : null }));
+}
+
+// ── Commands for Probing ──
+
+/** Fetch all commands for a student on a specific date (YYYY-MM-DD). */
+export function getCommandsForStudentDate(studentId, isoDate) {
+  return query(`SELECT * FROM commands WHERE student_id=? AND date(created_at)=?`, [studentId, isoDate]);
 }
