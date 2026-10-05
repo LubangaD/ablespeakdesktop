@@ -6,6 +6,7 @@ export function useWebSocket(path = '/ws/dashboard') {
   const wsRef = useRef(null);
   const listenersRef = useRef(new Map());
   const reconnectRef = useRef(null);
+  const closedRef = useRef(false); // the page has gone: stop reconnecting
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -22,7 +23,7 @@ export function useWebSocket(path = '/ws/dashboard') {
     wsRef.current.onopen = () => setConnected(true);
     wsRef.current.onclose = () => {
       setConnected(false);
-      reconnectRef.current = setTimeout(connect, 3000);
+      if (!closedRef.current) reconnectRef.current = setTimeout(connect, 3000);
     };
     wsRef.current.onerror = () => {};
     wsRef.current.onmessage = (event) => {
@@ -36,8 +37,10 @@ export function useWebSocket(path = '/ws/dashboard') {
   }, [path]);
 
   useEffect(() => {
+    closedRef.current = false;
     connect();
     return () => {
+      closedRef.current = true;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       if (wsRef.current) wsRef.current.close();
     };

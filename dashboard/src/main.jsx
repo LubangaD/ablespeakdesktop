@@ -2,10 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
-// Bundled so the app looks right with no internet connection (DESIGN.md)
-import '@fontsource-variable/inter';
-import '@fontsource-variable/space-grotesk';
-import './components/ui/ui.css';
+// Bundled so the app looks right with no internet connection
+import '@fontsource-variable/roboto-flex';
+import '@fontsource-variable/roboto-mono';
+// The icon font several Stitch screens draw with (<span className="material-symbols-outlined">mic</span>)
+import 'material-symbols/outlined.css';
 import './index.css';
 
 const queryClient = new QueryClient({

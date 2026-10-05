@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=1280, initial-scale=1.0" name="viewport"/>
+<title>AbleSpeak Dashboard - Speech Profile</title>
+<!-- Tailwind CSS CDN with Forms and Container Queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Space Grotesk, Inter, JetBrains Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Icons -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<!-- Tailwind Configuration -->
+<script data-purpose="tailwind-config">
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            night: '#050D19',
+            cardbg: '#102038',
+            sidebar: '#0a1628',
+            amberbrand: '#F5A623',
+            cardborder: 'rgba(255, 255, 255, 0.12)'
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            heading: ['Space Grotesk', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+<!-- Typography & Base Reset Styles -->
+<style data-purpose="typography">
+    body {
+      background-color: #050D19;
+      color: #E2E8F0;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .font-tabular {
+      font-variant-numeric: tabular-nums;
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+<!-- Control Sizing & Focus Rules -->
+<style data-purpose="form-controls">
+    input:focus, select:focus, button:focus, textarea:focus, [tabindex]:focus {
+      outline: 3px solid #F5A623 !important;
+      outline-offset: 1px !important;
+    }
+    /* Slider custom styling */
+    input[type=range] {
+      accent-color: #F5A623;
+    }
+  </style>
+</head>
+<body class="bg-night text-slate-200 min-h-screen flex antialiased select-none">
+<!-- BEGIN: Sidebar -->
+<aside aria-label="Main Navigation" class="w-64 bg-sidebar border-r border-white/10 flex flex-col justify-between shrink-0 min-h-screen">
+<!-- Top Brand & Nav Menu -->
+<div class="p-4 space-y-6">
+<!-- Brand Identity -->
+<div class="px-2 pt-2">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg bg-amberbrand/20 border border-amberbrand/40 flex items-center justify-center text-amberbrand">
+<span class="material-symbols-outlined text-[20px]">graphic_eq</span>
+</div>
+<span class="font-heading font-bold text-xl tracking-tight text-white">AbleSpeak</span>
+</div>
+<div class="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 tracking-wider">
+          TIER 2 ASSISTIVE AI
+        </div>
+</div>
+<!-- Navigation Links -->
+<nav aria-label="Sidebar Sections" class="space-y-1.5">
+<!-- Home -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">dashboard</span>
+<span>Home</span>
+</a>
+<!-- Students -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">group</span>
+<span>Students</span>
+</a>
+<!-- Speech Profile (ACTIVE) -->
+<a aria-current="page" class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-amberbrand text-amberbrand bg-amberbrand/10 font-semibold" href="#">
+<span class="material-symbols-outlined text-[20px]">record_voice_over</span>
+<span>Speech Profile</span>
+</a>
+<!-- Test Console -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">terminal</span>
+<span>Test Console</span>
+</a>
+<!-- Developer Hub -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">code</span>
+<span>Developer Hub</span>
+</a>
+<!-- Settings -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span>Settings</span>
+</a>
+</nav>
+</div>
+<!-- Sidebar Bottom Status & Facilitator Profile -->
+<div class="p-4 border-t border-white/10 space-y-3 bg-black/10">
+<!-- Latency Indicator -->
+<div class="flex items-center justify-between text-xs px-2 py-1 text-slate-400 font-mono">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+<span class="text-slate-300">Connected</span>
+</div>
+<span>42ms</span>
+</div>
+<!-- Facilitator Card -->
+<div class="flex items-center gap-3 p-2 rounded-xl bg-white/[0.03] border border-white/5">
+<div class="w-9 h-9 rounded-full bg-amberbrand/20 text-amberbrand flex items-center justify-center font-bold text-sm">
+          ER
+        </div>
+<div class="flex flex-col min-w-0">
+<span class="text-xs font-semibold text-slate-200 truncate">Elena Rostova</span>
+<span class="text-[11px] text-slate-400 truncate">AT Facilitator</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- END: Sidebar -->
+<!-- BEGIN: Main Application Viewport -->
+<div class="flex-1 flex flex-col min-w-0 overflow-y-auto">
+<!-- BEGIN: TopBar -->
+<header class="h-20 bg-sidebar/80 border-b border-white/10 px-8 flex items-center justify-between shrink-0 sticky top-0 z-20 backdrop-blur-md">
+<!-- Active Student Status -->
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-3">
+<span class="relative flex h-3 w-3">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+</span>
+<span class="font-heading font-semibold text-base text-white">Amina M. · Active Session</span>
+</div>
+<span class="px-2.5 py-1 rounded-md text-xs font-mono font-medium tracking-wide bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+          IEP TRACK 2 · DWELL 450MS ACTIVE
+        </span>
+</div>
+<!-- Session Actions -->
+<div class="flex items-center gap-3">
+<button class="h-12 px-4 rounded-xl border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-slate-200 text-sm font-medium transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[18px]">swap_horiz</span>
+          Switch Student
+        </button>
+<button class="h-12 px-4 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-sm font-medium transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[18px]">power_settings_new</span>
+          End Session
+        </button>
+</div>
+</header>
+<!-- END: TopBar -->
+<!-- BEGIN: Content Container -->
+<main class="flex-1 p-8 max-w-[1240px] w-full mx-auto space-y-8" role="main">
+<!-- BEGIN: Page Header -->
+<section aria-labelledby="page-title" class="flex items-center justify-between gap-6">
+<div>
+<h1 class="font-heading text-3xl font-bold text-white tracking-tight" id="page-title">Speech profile</h1>
+<p class="text-slate-400 text-sm mt-1">How well AbleSpeak hears a student, and the settings that help.</p>
+</div>
+<!-- Student Selector dropdown (56px tall) -->
+<div class="w-72">
+<label class="sr-only" for="student-select">Choose Student</label>
+<div class="relative">
+<select class="w-full h-14 bg-cardbg border border-white/15 rounded-2xl px-4 pr-10 text-white font-medium appearance-none cursor-pointer focus:border-amberbrand" id="student-select">
+<option>Amina (in session)</option>
+<option>Liam Morales</option>
+<option>Kenji Sato</option>
+</select>
+<div class="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none text-slate-400">
+<span class="material-symbols-outlined">expand_more</span>
+</div>
+</div>
+</div>
+</section>
+<!-- END: Page Header -->
+<!-- BEGIN: Diagnostics Section -->
+<section aria-labelledby="analytics-heading" class="space-y-4">
+<h2 class="font-heading text-lg font-semibold text-slate-200" id="analytics-heading">How well AbleSpeak hears them, last 7 days</h2>
+<!-- Stat Tiles (4 Columns) -->
+<div class="grid grid-cols-4 gap-4">
+<!-- Tile 1 -->
+<div class="bg-cardbg rounded-2xl p-5 border border-cardborder flex flex-col justify-between">
+<span class="text-xs font-medium uppercase tracking-wider text-slate-400">Understood</span>
+<div class="mt-3">
+<span class="text-3xl font-bold text-white font-tabular">91%</span>
+<p class="text-xs text-slate-400 mt-1 font-tabular">212 of 233 times they spoke</p>
+</div>
+</div>
+<!-- Tile 2 -->
+<div class="bg-cardbg rounded-2xl p-5 border border-cardborder flex flex-col justify-between">
+<span class="text-xs font-medium uppercase tracking-wider text-slate-400">Worked first time</span>
+<div class="mt-3">
+<span class="text-3xl font-bold text-emerald-400 font-tabular">78%</span>
+<p class="text-xs text-slate-400 mt-1 font-tabular">140 of 180 commands</p>
+</div>
+</div>
+<!-- Tile 3 -->
+<div class="bg-cardbg rounded-2xl p-5 border border-cardborder flex flex-col justify-between">
+<span class="text-xs font-medium uppercase tracking-wider text-slate-400">Tried again</span>
+<div class="mt-3">
+<span class="text-3xl font-bold text-amberbrand font-tabular">31</span>
+<p class="text-xs text-slate-400 mt-1 font-tabular">24 then worked</p>
+</div>
+</div>
+<!-- Tile 4 -->
+<div class="bg-cardbg rounded-2xl p-5 border border-cardborder flex flex-col justify-between">
+<span class="text-xs font-medium uppercase tracking-wider text-slate-400">Set aside as noise</span>
+<div class="mt-3">
+<span class="text-3xl font-bold text-slate-300 font-tabular">18</span>
+<p class="text-xs text-slate-400 mt-1 font-tabular">6 with words</p>
+</div>
+</div>
+</div>
+<!-- Metric Change Sentence Banner -->
+<div class="bg-cardbg/70 border border-cardborder rounded-2xl px-5 py-4 flex items-center gap-3 text-slate-300 text-sm">
+<span class="material-symbols-outlined text-amberbrand shrink-0">trending_up</span>
+<p class="leading-relaxed">
+            Retries per finished command, 7 days either side of the settings change on
+            <span class="font-mono text-white text-xs bg-white/10 px-1.5 py-0.5 rounded">2026-09-10</span>:
+            <span class="font-tabular font-semibold text-white">0.9</span> before (84 commands) →
+            <span class="font-tabular font-semibold text-emerald-400">0.5</span> after (96 commands).
+            <span class="text-emerald-400 font-medium">Fewer retries since the change.</span>
+</p>
+</div>
+<!-- Collapsible Row: Noise Logs -->
+<details class="group bg-cardbg rounded-2xl border border-cardborder overflow-hidden [&amp;_summary::-webkit-details-marker]:none">
+<summary class="flex items-center justify-between p-4 cursor-pointer hover:bg-white/[0.02] transition-colors select-none">
+<div class="flex items-center gap-2 text-sm font-medium text-slate-300">
+<span class="material-symbols-outlined text-slate-400 text-base">filter_list</span>
+<span>Words set aside as background talk (6)</span>
+</div>
+<span class="material-symbols-outlined text-slate-400 transition-transform duration-200 group-open:rotate-180">expand_more</span>
+</summary>
+<div class="p-4 pt-1 border-t border-white/5 flex flex-wrap gap-2">
+<span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300">
+              coughing sound
+            </span>
+<span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300">
+              desk bump
+            </span>
+<span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300">
+              hallway bell
+            </span>
+<span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300">
+              chatter "pass the pencil"
+            </span>
+</div>
+</details>
+</section>
+<!-- END: Diagnostics Section -->
+<!-- BEGIN: Settings Panel -->
+<section aria-labelledby="settings-heading" class="bg-cardbg rounded-2xl border border-cardborder p-6 space-y-8">
+<div class="border-b border-white/10 pb-4">
+<h2 class="font-heading text-xl font-bold text-white tracking-tight" id="settings-heading">Speech settings for Amina</h2>
+<p class="text-slate-400 text-sm mt-1">Configure acoustic sensitivity, speech cadence buffer, and personalized trigger dictionaries.</p>
+</div>
+<div class="grid grid-cols-2 gap-8">
+<!-- LEFT COLUMN: Sensitivity & Pause Timers -->
+<div class="space-y-6">
+<!-- Sensitivity Radio Selection -->
+<div>
+<label class="block font-heading text-sm font-semibold text-slate-200 mb-3">How sensitive the microphone is</label>
+<div class="space-y-3" role="radiogroup">
+<!-- Option 1: Standard -->
+<label class="flex items-start gap-4 p-4 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02] cursor-pointer min-h-[56px] transition-colors">
+<input class="mt-1 h-4 w-4 text-amberbrand border-white/30 bg-transparent focus:ring-0" name="sensitivity" type="radio" value="standard"/>
+<div class="flex-1">
+<span class="block text-sm font-semibold text-slate-200">Standard</span>
+<span class="block text-xs text-slate-400 mt-0.5 leading-relaxed">Balanced for quiet classrooms with standard speaking volume.</span>
+</div>
+</label>
+<!-- Option 2: Quiet voice (SELECTED) -->
+<label class="flex items-start gap-4 p-4 rounded-xl border-2 border-amberbrand bg-amberbrand/10 cursor-pointer min-h-[56px] transition-colors">
+<input checked="" class="mt-1 h-4 w-4 text-amberbrand border-amberbrand bg-transparent focus:ring-0" name="sensitivity" type="radio" value="quiet"/>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="text-sm font-semibold text-white">Quiet voice</span>
+<span class="w-2 h-2 rounded-full bg-amberbrand"></span>
+</div>
+<span class="block text-xs text-slate-300 mt-0.5 leading-relaxed">Boosts soft speech decibels and reduces false-trigger dropouts for dysarthria.</span>
+</div>
+</label>
+<!-- Option 3: Noisy room -->
+<label class="flex items-start gap-4 p-4 rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.02] cursor-pointer min-h-[56px] transition-colors">
+<input class="mt-1 h-4 w-4 text-amberbrand border-white/30 bg-transparent focus:ring-0" name="sensitivity" type="radio" value="noisy"/>
+<div class="flex-1">
+<span class="block text-sm font-semibold text-slate-200">Noisy room</span>
+<span class="block text-xs text-slate-400 mt-0.5 leading-relaxed">Filters background chatter, cafeteria noise, and HVAC hum.</span>
+</div>
+</label>
+</div>
+</div>
+<!-- Pause Threshold Slider -->
+<div class="space-y-3 pt-2">
+<div class="flex items-center justify-between">
+<label class="font-heading text-sm font-semibold text-slate-200" for="pause-slider">
+                  Pause that ends a command
+                </label>
+<span class="px-2.5 py-1 rounded bg-black/40 border border-white/10 font-mono text-sm font-bold text-amberbrand">1.5s</span>
+</div>
+<!-- Amber Range Slider -->
+<input class="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer focus:outline-none" id="pause-slider" max="3.0" min="0.5" step="0.1" type="range" value="1.5"/>
+<div class="flex justify-between text-[11px] font-mono text-slate-400">
+<span>0.5s (Fast speech)</span>
+<span>3.0s (Deliberate pauses)</span>
+</div>
+<p class="text-xs text-slate-400 mt-1 leading-normal">
+                Longer suits a student who pauses in the middle of a command.
+              </p>
+</div>
+</div>
+<!-- RIGHT COLUMN: Dictionaries, Shortcuts & Routines -->
+<div class="space-y-6">
+<!-- Their Words -->
+<div>
+<label class="block font-heading text-sm font-semibold text-slate-200 mb-2">Their words</label>
+<!-- Chips Display -->
+<div class="flex flex-wrap gap-2 mb-3">
+<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/15 text-sm text-slate-200">
+                  Wanjiku
+                  <button aria-label="Remove Wanjiku" class="text-slate-400 hover:text-white" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</span>
+<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/15 text-sm text-slate-200">
+                  Kiswahili
+                  <button aria-label="Remove Kiswahili" class="text-slate-400 hover:text-white" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</span>
+<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/15 text-sm text-slate-200">
+                  Kisumu
+                  <button aria-label="Remove Kisumu" class="text-slate-400 hover:text-white" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</span>
+<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/15 text-sm text-slate-200">
+                  Biology
+                  <button aria-label="Remove Biology" class="text-slate-400 hover:text-white" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</span>
+</div>
+<!-- Add Word Control Group -->
+<div class="flex gap-3">
+<input class="flex-1 h-14 bg-black/20 border border-white/15 rounded-xl px-4 text-sm text-white placeholder-slate-500 focus:border-amberbrand" placeholder="Add word..." type="text"/>
+<button class="h-14 px-6 rounded-xl bg-white/10 hover:bg-white/15 text-white font-medium border border-white/15 transition-colors" type="button">
+                  Add
+                </button>
+</div>
+</div>
+<!-- Their Own Shortcuts -->
+<div>
+<label class="block font-heading text-sm font-semibold text-slate-200 mb-2">Their own shortcuts</label>
+<div class="space-y-3">
+<!-- Shortcut Row 1 (Learned) -->
+<div class="flex items-center gap-2">
+<input aria-label="Spoken trigger" class="flex-1 h-14 bg-black/20 border border-white/15 rounded-xl px-4 text-sm text-white focus:border-amberbrand" type="text" value="my music"/>
+<span class="text-slate-400">→</span>
+<input aria-label="Action command" class="flex-1 h-14 bg-black/20 border border-white/15 rounded-xl px-4 text-sm text-white focus:border-amberbrand" type="text" value="open spotify"/>
+<span class="h-14 px-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-semibold flex items-center gap-1 shrink-0">
+<span class="material-symbols-outlined text-[16px]">check_circle</span>
+                    LEARNED
+                  </span>
+<button aria-label="Delete shortcut" class="w-12 h-14 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors" type="button">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+<!-- Shortcut Row 2 -->
+<div class="flex items-center gap-2">
+<input aria-label="Spoken trigger" class="flex-1 h-14 bg-black/20 border border-white/15 rounded-xl px-4 text-sm text-white focus:border-amberbrand" type="text" value="homework"/>
+<span class="text-slate-400">→</span>
+<input aria-label="Action command" class="flex-1 h-14 bg-black/20 border border-white/15 rounded-xl px-4 text-sm text-white focus:border-amberbrand" type="text" value="open google classroom"/>
+<div class="w-[98px]"></div> <!-- alignment spacer -->
+<button aria-label="Delete shortcut" class="w-12 h-14 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors" type="button">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+<button class="h-12 px-4 rounded-xl border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-slate-200 text-sm font-medium transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                  Add a shortcut
+                </button>
+</div>
+</div>
+<!-- Routines -->
+<div>
+<label class="block font-heading text-sm font-semibold text-slate-200 mb-2">Routines</label>
+<div class="space-y-3">
+<!-- Routine Card -->
+<div class="p-4 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between">
+<div class="space-y-1">
+<div class="flex items-center gap-3">
+<span class="font-medium text-white text-sm">"start my homework"</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-mono bg-white/10 text-slate-300 font-semibold">2 STEPS</span>
+</div>
+<p class="text-xs text-slate-400">1. open word  →  2. open chrome</p>
+</div>
+<button aria-label="Edit routine" class="w-10 h-10 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 flex items-center justify-center" type="button">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+</div>
+<button class="h-12 px-4 rounded-xl border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-slate-200 text-sm font-medium transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                  Add a routine
+                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Row: Save & Export Controls -->
+<div class="pt-6 border-t border-white/10 flex flex-wrap items-center justify-between gap-4">
+<div class="flex items-center gap-3">
+<!-- Amber Primary 56px Tall Save Button -->
+<button class="h-14 px-8 rounded-xl bg-amberbrand hover:bg-[#e0961f] text-night font-bold text-sm tracking-wide transition-colors flex items-center gap-2 shadow-none" type="button">
+<span class="material-symbols-outlined text-[20px]">save</span>
+              Save speech settings
+            </button>
+<!-- Secondary Export Button -->
+<button class="h-14 px-5 rounded-xl border border-white/15 hover:border-white/25 bg-white/5 hover:bg-white/10 text-slate-200 text-sm font-medium transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[20px]">download</span>
+              Save to a file
+            </button>
+<!-- Secondary Import Button -->
+<button class="h-14 px-5 rounded-xl border border-white/15 hover:border-white/25 bg-white/5 hover:bg-white/10 text-slate-200 text-sm font-medium transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[20px]">upload</span>
+              Load from a file
+            </button>
+</div>
+<!-- Immediate Sync Status Toast -->
+<div class="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 rounded-xl text-sm font-medium">
+<span class="material-symbols-outlined text-[20px]">check_circle</span>
+<span>Saved. AbleSpeak uses these for Amina straight away.</span>
+</div>
+</div>
+</section>
+<!-- END: Settings Panel -->
+</main>
+<!-- END: Content Container -->
+</div>
+<!-- END: Main Application Viewport -->
+</body></html>
