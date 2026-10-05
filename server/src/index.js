@@ -63,6 +63,7 @@ async function openInBrowser(url) {
   spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore' }).unref();
 }
 import { startProbeScheduler, stopProbeScheduler } from './probe-computer.js';
+import { ensureExcelOpensBlankWorkbook } from './office-start-screen.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -496,6 +497,11 @@ server.listen(PORT, () => {
   // (boot: yesterday + today, then hourly recompute) — recovered from eric branch.
   startProbeScheduler();
   console.log('[ProbeScheduler] Started — daily probes + hourly recompute active');
+
+  // Excel is the one Office app with no "blank workbook" switch, so its Start
+  // screen is turned off here rather than relying on the teacher setup step.
+  // Fire-and-forget: it never blocks or fails the boot.
+  ensureExcelOpensBlankWorkbook().catch(() => {});
   process.once('SIGTERM', () => stopProbeScheduler());
   process.once('SIGINT', () => stopProbeScheduler());
 });
