@@ -99,7 +99,24 @@ AbleSpeak remembers this choice, including after the computer restarts. You
 only need to do it again when a different student uses the computer. The
 overlay shows whose session it is, for example "Amina's session".
 
-## Step 6 — Check it works
+## Step 6 — Let Excel open straight into a sheet
+
+Word and PowerPoint already open a blank page when the student asks for
+them. Excel is the exception: it opens a welcome screen first, and the
+student would have to click "Blank workbook" to get a sheet.
+
+Turn that welcome screen off once, on this computer:
+
+1. Open Excel and click **Blank workbook**.
+2. Go to **File → Options → General**.
+3. Under *Start up options*, untick **Show the Start screen when this
+   application starts**.
+4. Click **OK** and close Excel.
+
+From now on "open Excel" lands the student straight in a sheet, ready to
+dictate.
+
+## Step 7 — Check it works
 
 Sit the student in front of the computer, or try it yourself. The
 microphone button pulses green while AbleSpeak is listening. Say each of

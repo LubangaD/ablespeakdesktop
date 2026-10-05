@@ -661,8 +661,8 @@ export async function openApplication(appName) {
     chrome: 'start chrome',
     firefox: 'start firefox',
     word: 'start winword /w', // /w = open a blank document, skipping Word's Start screen
-    excel: 'start excel',
-    powerpoint: 'start powerpnt',
+    excel: 'start excel', // no blank-workbook switch exists; its Start screen is off per machine
+    powerpoint: 'start powerpnt /B', // /B = open a blank presentation
     outlook: 'start outlook',
     teams: 'start msteams:',
     vscode: 'code',

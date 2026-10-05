@@ -15,11 +15,15 @@ const APPS = [
     names: /^(?:microsoft |ms )?(?:word|one)(?: documents?| docs?| files?)?$|^(?:documents?|docs?)$/,
   },
   {
+    // Excel has no switch for "new blank workbook" (/e opens no workbook at
+    // all), so its Start screen is turned off per machine instead — see
+    // docs/INSTALL-FOR-TEACHERS.md.
     app: 'Excel', processes: ['excel'], launch: 'start excel',
     names: /^(?:microsoft |ms )?excel(?: sheets?| spreadsheets?| files?| workbooks?)?$|^(?:spreadsheets?|workbooks?)$/,
   },
   {
-    app: 'PowerPoint', processes: ['powerpnt'], launch: 'start powerpnt',
+    // /B opens a blank presentation, skipping the Start screen (as Word's /w).
+    app: 'PowerPoint', processes: ['powerpnt'], launch: 'start powerpnt /B',
     names: /^(?:microsoft |ms )?power ?point(?: slides?| presentations?| files?)?$|^(?:slides?|presentations?)$/,
   },
   {
