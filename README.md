@@ -109,6 +109,8 @@ GEMINI_API_KEY=your-gemini-key
 
 API keys can also be added later in the dashboard: **Settings → API keys**.
 
+Setting up accounts? **[SUPABASE.md](SUPABASE.md)** explains how AbleSpeak connects to Supabase: what is stored there, the project setup (email codes, Google, the photo bucket), roles, and troubleshooting.
+
 ### Run
 
 ```bash
@@ -167,7 +169,7 @@ All settings live in `server/.env` (in a packaged install: `%APPDATA%\AbleSpeak\
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | Other AI models for commands (optional) |
 | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TEMPERATURE` | Which AI model handles commands (also set in Settings) |
 | `VOICE_MODEL` | Gemini model for speech recognition (default `gemini-2.5-flash`) |
-| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Accounts and sign-in. The publishable key is safe in apps; **never** put the secret key here |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Accounts and sign-in ([SUPABASE.md](SUPABASE.md)). The publishable key is safe in apps; **never** put the secret key here |
 | `GATEWAY_PORT` | Local server port (default `3001`) |
 | `ABLESPEAK_TTS_VOICE` | Edge TTS voice for spoken replies |
 | `ADMIN_PIN_HASH`, `HELPER_PIN_HASH` | Written by the app (scrypt hashes); delete a line to reset that PIN |
