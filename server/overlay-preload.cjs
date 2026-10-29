@@ -90,4 +90,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showDashboard: () => {
     ipcRenderer.send('show-dashboard');
   },
+
+  // Open a web answer's Google search in the browser (only Google search links)
+  openLink: (url) => {
+    ipcRenderer.send('open-link', url);
+  },
 });

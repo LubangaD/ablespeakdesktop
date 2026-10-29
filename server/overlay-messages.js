@@ -18,6 +18,7 @@
     listening: 'Listening…',
     processing: 'Working…',
     dictating: 'Dictating…',
+    exam: 'Exam',
     confirmation: 'Please confirm',
     speaking: 'Speaking…',
     sleeping: 'Asleep',

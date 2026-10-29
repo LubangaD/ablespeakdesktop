@@ -56,6 +56,18 @@ test('an app that is not open, or AbleSpeak itself, is not picked', () => {
   assert.equal(pickWindow(WINDOWS, ''), null);
 });
 
+test('"Documents" and the other folders open in File Explorer, not Word (24 Oct 2026)', () => {
+  assert.equal(resolveAppName('Documents').launch, 'explorer shell:Personal');
+  assert.equal(resolveAppName('the Downloads folder').launch, 'explorer shell:Downloads');
+  assert.equal(resolveAppName('my document').app, 'Word', 'one document is still Word');
+  assert.equal(resolveAppName('Word').app, 'Word');
+});
+
+test('a window whose page is about AbleSpeak is still the student\'s (Edge, 23 Oct 2026)', () => {
+  const edge = { hwnd: '9', process: 'msedge', title: 'AbleSpeak Opportunity Intelligence and 7 more pages - Personal - Microsoft​ Edge' };
+  assert.equal(pickWindow([...WINDOWS, edge], 'edge').hwnd, '9');
+});
+
 test('"switch to", "go to" and "focus on" an app bring it to the front', () => {
   for (const [said, app] of [
     ['Switch to Word.', 'word'],

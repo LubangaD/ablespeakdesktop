@@ -9,6 +9,9 @@ import express from 'express';
 import { createHash } from 'crypto';
 import { createAccount, createAccountRouter, createAuthCallbackRouter, createSecureStore } from './account.js';
 
+// What the status says about a profile nobody has filled in yet (profile.js)
+const NEW_PROFILE = { name: null, photo: { own: false, version: null, google: null }, consentAsked: false };
+
 const URL = 'https://example.supabase.co';
 const KEY = 'sb_publishable_test';
 const CALLBACK = 'http://127.0.0.1:3001/auth/callback';
@@ -97,7 +100,7 @@ test('the right code signs in, and no token ever reaches the dashboard', async (
   assert.deepEqual(calls[0].body, { type: 'email', email: 'amina@example.com', token: '123456' });
 
   const status = await request('GET', '/api/account/status');
-  assert.deepEqual(status.body, { configured: true, signedIn: true, skipped: false, user: { email: 'amina@example.com', role: null } });
+  assert.deepEqual(status.body, { configured: true, signedIn: true, skipped: false, user: { email: 'amina@example.com', role: null, ...NEW_PROFILE } });
   assert.doesNotMatch(signedIn.text + status.text, /SECRET/);
 });
 
@@ -167,7 +170,7 @@ test('the browser coming back signs in, using the secret that matches the challe
   const exchange = calls.find(c => c.path === 'token?grant_type=pkce');
   assert.equal(exchange.body.auth_code, 'google-code-1');
   assert.equal(challengeOf(exchange.body.code_verifier), challenge);
-  assert.deepEqual((await request('GET', '/api/account/status')).body, { configured: true, signedIn: true, skipped: false, user: { email: 'derrick@gmail.com', role: null } });
+  assert.deepEqual((await request('GET', '/api/account/status')).body, { configured: true, signedIn: true, skipped: false, user: { email: 'derrick@gmail.com', role: null, ...NEW_PROFILE } });
 });
 
 test('a callback AbleSpeak did not start is refused, and a code works only once', async () => {

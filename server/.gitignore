@@ -1,0 +1,6 @@
+
+# Built-in speech recognition: engine and model are downloaded, not committed
+vendor/local-asr/
+# The voice model for "only my voice": downloaded (npm run voice-model), not committed
+vendor/voice-lock/
+tools/live-chrome-run/

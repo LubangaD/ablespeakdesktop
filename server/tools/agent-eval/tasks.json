@@ -1,5 +1,12 @@
 {
-  "about": "Stage 3 acceptance: 20 multi-step instructions across six apps. Each check is read from the screen after the task (tools/agent-eval/run.mjs). 'apps' are the processes the runner closes afterwards, but only if they were not already open.",
+  "about": "Stage 3 acceptance: multi-step instructions across the apps people use, plus six in apps that were not tested when the rules were written (Excel, a PDF, a file from Explorer, the Save dialog, Spotify, the Start menu). Each check is read from the screen after the task (tools/agent-eval/run.mjs) and is strict: a control's type and an exact phrase that is only on the page the task should reach. 'apps' are the processes the runner closes afterwards, but only if they were not already open. 'fixtures' are made in Documents before each live run.",
+  "fixtures": {
+    "create": [
+      { "name": "ablespeak-eval.txt", "text": "AbleSpeak evaluation file. Do not edit.\r\n" },
+      { "name": "ablespeak-eval.pdf", "text": "AbleSpeak evaluation file" }
+    ],
+    "remove": ["eval-saved.txt"]
+  },
   "tasks": [
     {
       "id": "notepad-type",
@@ -23,19 +30,19 @@
       "id": "calculator-add",
       "instruction": "Open Calculator and work out 12 plus 30",
       "apps": ["CalculatorApp"],
-      "checks": [{ "kind": "control", "app": "calculator", "nameIncludes": "42" }]
+      "checks": [{ "kind": "control", "app": "calculator", "type": "Text", "nameIncludes": "Display is 42" }]
     },
     {
       "id": "calculator-multiply",
       "instruction": "Open Calculator and multiply 7 by 6",
       "apps": ["CalculatorApp"],
-      "checks": [{ "kind": "control", "app": "calculator", "nameIncludes": "42" }]
+      "checks": [{ "kind": "control", "app": "calculator", "type": "Text", "nameIncludes": "Display is 42" }]
     },
     {
       "id": "calculator-scientific",
       "instruction": "Open Calculator and then switch it to the scientific calculator",
       "apps": ["CalculatorApp"],
-      "checks": [{ "kind": "control", "app": "calculator", "nameIncludes": "Scientific" }]
+      "checks": [{ "kind": "control", "app": "calculator", "type": "Button", "nameIncludes": "Scientific notation" }]
     },
     {
       "id": "explorer-downloads",
@@ -59,19 +66,19 @@
       "id": "settings-display",
       "instruction": "Open Settings and go to the Display page",
       "apps": ["SystemSettings"],
-      "checks": [{ "kind": "control", "app": "settings", "nameIncludes": "Brightness" }]
+      "checks": [{ "kind": "control", "app": "settings", "nameIncludesAny": ["Brightness & colour", "Brightness & color"] }]
     },
     {
       "id": "settings-sound",
       "instruction": "Open Settings and then open the Sound settings",
       "apps": ["SystemSettings"],
-      "checks": [{ "kind": "control", "app": "settings", "nameIncludes": "Volume" }]
+      "checks": [{ "kind": "control", "app": "settings", "nameIncludesAny": ["Choose where to play sound"] }]
     },
     {
       "id": "settings-bluetooth",
       "instruction": "Open Settings and go to Bluetooth and devices",
       "apps": ["SystemSettings"],
-      "checks": [{ "kind": "control", "app": "settings", "nameIncludes": "Bluetooth" }]
+      "checks": [{ "kind": "control", "app": "settings", "type": "Button", "nameIncludes": "Add device" }]
     },
     {
       "id": "edge-search",
@@ -121,6 +128,42 @@
       "apps": ["notepad"],
       "confirm": true,
       "checks": [{ "kind": "gone", "app": "notepad" }]
+    },
+    {
+      "id": "excel-type",
+      "instruction": "Open Excel, start a blank workbook and type Budget in the first cell",
+      "apps": ["EXCEL"],
+      "checks": [{ "kind": "control", "app": "excel", "nameIncludes": "Budget" }]
+    },
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "apps": ["notepad"],
+      "checks": [{ "kind": "window", "titleIncludes": "ablespeak-eval" }]
+    },
+    {
+      "id": "explorer-open-pdf",
+      "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+      "apps": [],
+      "checks": [{ "kind": "window", "titleIncludes": "ablespeak-eval" }]
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "apps": ["notepad"],
+      "checks": [{ "kind": "file", "name": "eval-saved.txt", "includes": ["hello there"] }]
+    },
+    {
+      "id": "spotify-search",
+      "instruction": "Open Spotify and search for Sauti Sol",
+      "apps": ["Spotify"],
+      "checks": [{ "kind": "control", "app": "spotify", "nameIncludes": "Sauti Sol", "notType": ["Edit", "ComboBox"] }]
+    },
+    {
+      "id": "start-menu-calculator",
+      "instruction": "Open the Start menu, search for Calculator and open it",
+      "apps": ["CalculatorApp"],
+      "checks": [{ "kind": "window", "app": "calculator", "titleIncludes": "Calculator" }]
     }
   ]
 }

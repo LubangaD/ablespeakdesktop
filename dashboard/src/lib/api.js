@@ -27,6 +27,7 @@ async function fetchApi(path, options = {}) {
     const err = new Error(body?.error || body?.message || `API ${path}: ${res.status}`);
     err.status = res.status;
     err.adminRequired = !!body?.adminRequired;
+    err.body = body; // anything else the server sent with it (setup steps)
     throw err;
   }
   return res.json();
@@ -53,6 +54,16 @@ export const api = {
   signOut: () => fetchApi('/account/sign-out', { method: 'POST' }),
   startGoogleSignIn: () => fetchApi('/account/sign-in/google', { method: 'POST' }),
   skipSignIn: () => fetchApi('/account/not-now', { method: 'POST' }),
+  // The account's profile (Profile page): details, photo and the analytics choice
+  getAccountProfile: () => fetchApi('/account/profile'),
+  saveAccountProfile: (fields) => fetchApi('/account/profile', { method: 'PUT', body: JSON.stringify(fields) }),
+  saveAccountConsent: (choice) => fetchApi('/account/consent', { method: 'PUT', body: JSON.stringify(choice) }),
+  saveAccountPhoto: (image) => fetchApi('/account/photo', { method: 'PUT', body: JSON.stringify({ image }) }),
+  removeAccountPhoto: () => fetchApi('/account/photo', { method: 'DELETE' }),
+  // Google Analytics keys (Settings, admin only)
+  getAnalyticsSettings: () => fetchApi('/settings/analytics'),
+  saveAnalyticsSettings: (measurementId, apiSecret) => fetchApi('/settings/analytics', { method: 'PUT', body: JSON.stringify({ measurementId, apiSecret }) }),
+  removeAnalyticsSettings: () => fetchApi('/settings/analytics', { method: 'DELETE' }),
 
   getHealth: () => fetchApi('/health'),
   getStatus: () => fetchApi('/status'),
@@ -60,6 +71,8 @@ export const api = {
   getRecentCommands: (limit = 20) => fetchApi(`/commands?limit=${limit}`),
   getSessions: () => fetchApi('/sessions'),
   getTools: () => fetchApi('/tools'),
+  // Each voice command's stage timings and today's cost (Developer › Speed)
+  getSpeed: () => fetchApi('/speed'),
   getLibrary: () => fetchApi('/library'),
   getToolDetail: (cat, tool) => fetchApi(`/library/${cat}/${tool}`),
   getContext: () => fetchApi('/context'),
@@ -116,6 +129,16 @@ export const api = {
     body: JSON.stringify(changes),
   }),
   exportProfile: (studentId) => fetchApi(`/students/${studentId}/profile/export`),
+  // "My voice" (server/src/routes/voice-profile.js): a voiceprint made and kept on this computer
+  getVoiceProfile: (studentId) => fetchApi(`/voice-profile${studentId != null ? `?student=${encodeURIComponent(studentId)}` : ''}`),
+  addVoicePerson: (name) => fetchApi('/voice-profile/people', { method: 'POST', body: JSON.stringify({ name }) }),
+  startVoiceSetup: (id, consent) => fetchApi(`/voice-profile/${id}/start`, { method: 'POST', body: JSON.stringify(consent) }),
+  sendVoicePhrase: (id, phrase, wav) => fetchApi(`/voice-profile/${id}/clips`, { method: 'POST', body: JSON.stringify({ phrase, wav }) }),
+  sendVoiceRoom: (id, wav) => fetchApi(`/voice-profile/${id}/room`, { method: 'POST', body: JSON.stringify({ wav }) }),
+  keepVoiceSetup: (id) => fetchApi(`/voice-profile/${id}/keep`, { method: 'POST' }),
+  finishVoiceSetup: (id) => fetchApi(`/voice-profile/${id}/finish`, { method: 'POST' }),
+  cancelVoiceSetup: (id) => fetchApi(`/voice-profile/${id}/enrollment`, { method: 'DELETE' }),
+  deleteVoice: (id) => fetchApi(`/voice-profile/${id}`, { method: 'DELETE' }),
   // With intoId, the file loads into that profile (a person's own settings) instead of matching by name
   importProfile: (file, intoId = null) => fetchApi(`/students/profile/import${intoId != null ? `?into=${encodeURIComponent(intoId)}` : ''}`, {
     method: 'POST',
@@ -156,4 +179,42 @@ export const api = {
     fetchApi(`/goals/${goalId}/flags${unacknowledgedOnly ? '?unacknowledged=1' : ''}`),
   acknowledgeFlag: (flagId) => fetchApi(`/flags/${flagId}/ack`, { method: 'POST' }),
   recomputeProgress: () => fetchApi('/progress/recompute', { method: 'POST' }),
+
+  // ── Exams (server/src/exam): papers, sittings, the live exam ──
+  getExams: () => fetchApi('/exams'),
+  getExam: (id) => fetchApi(`/exams/${id}`),
+  importExam: (fileName, data, settings) => fetchApi('/exams/import', {
+    method: 'POST',
+    body: JSON.stringify({ fileName, data, settings }),
+  }),
+  saveExam: (id, changes) => fetchApi(`/exams/${id}`, { method: 'PUT', body: JSON.stringify(changes) }),
+  deleteExam: (id) => fetchApi(`/exams/${id}`, { method: 'DELETE' }),
+  startExam: (id, studentId) => fetchApi(`/exams/${id}/start`, { method: 'POST', body: JSON.stringify({ studentId }) }),
+  getExamAttempts: () => fetchApi('/exams/attempts'),
+  resumeExamAttempt: (id) => fetchApi(`/exams/attempts/${id}/resume`, { method: 'POST' }),
+  getLiveExam: () => fetchApi('/exams/live'),
+  getExamFolder: () => fetchApi('/exams/folder'),
+  openExamFolder: () => fetchApi('/exams/folder/open', { method: 'POST' }),
+  pauseExam: () => fetchApi('/exams/live/pause', { method: 'POST' }),
+  unpauseExam: () => fetchApi('/exams/live/unpause', { method: 'POST' }),
+  stopExam: () => fetchApi('/exams/live/stop', { method: 'POST' }),
 };
+
+/**
+ * Save a file the server makes (a script, an audit trail) to the person's
+ * Downloads, with the unlock key sent as for any other request.
+ */
+export async function downloadFile(path) {
+  const res = await fetch(`${API_BASE}${path}`, { headers: adminToken ? { 'X-AbleSpeak-Admin': adminToken } : {} });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Download failed (${res.status})`);
+  }
+  const name = decodeURIComponent((res.headers.get('content-disposition') || '').match(/filename\*=UTF-8''([^;]+)/)?.[1] || 'download');
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

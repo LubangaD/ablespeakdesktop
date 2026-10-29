@@ -8,6 +8,61 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * The design system's values, named once.
+   *
+   * src/lib/ui.js composes these into the class strings every page uses
+   * (`bg-[var(--card)]`), so a colour or a shadow is defined here and nowhere
+   * else. Long multi-layer shadows are the reason this exists: writing them
+   * inline as Tailwind arbitrary values three times over is unreadable and
+   * drifts. Design reference: docs/design/ui-refined/.
+   */
+  :root {
+    /* Surfaces: one ramp, lit from above. A card is raised off the page;
+       a well is a recess cut into the card. (Before, the well was lighter
+       than the card, so a recess was drawn raised.) */
+    --page: #0d1627; /* the owner's blue, chosen 2026-09-22 — unchanged */
+    --sunken: #0a1220; /* wells, fields, code */
+    --card: #151f2e;
+    --raised: #1d2736; /* hover, the row you are on, the active menu item */
+    --sidebar: #111a27;
+    /* Translucent surfaces get their own token: `bg-[var(--x)]/80` compiles to
+       nothing, because Tailwind cannot derive rgba from a var. */
+    --topbar: rgba(17, 26, 39, 0.72);
+    --accent-dim: rgba(245, 166, 35, 0.14);
+
+    /* Lines: an edge, and a quieter divider inside it */
+    --line: rgba(255, 255, 255, 0.07);
+    --line-soft: rgba(255, 255, 255, 0.045);
+    --line-strong: rgba(255, 255, 255, 0.11);
+
+    /* Light: what makes a surface read as raised or sunk */
+    --sheen: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --lift: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 28px -14px rgba(0, 0, 0, 0.55);
+    --inset: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+
+    /* Ink: cool-blue surfaces, warm secondary text.
+       --ink-faint clears WCAG AAA (7:1) on card, sidebar and raised row. */
+    --ink: #e8eefa;
+    --ink-body: #dbe4f2;
+    --ink-quiet: #c6b9a9;
+    --ink-faint: #a6b2c6;
+
+    /* The accent, spent in three places only: the one action a page is for,
+       the page you are on, and focus. */
+    --accent: #f5a623;
+    --accent-soft: #ffc880;
+    --on-accent: #2a1a00;
+    --accent-grad: linear-gradient(180deg, #ffbe5e 0%, #f3a01c 100%);
+    --accent-grad-hover: linear-gradient(180deg, #ffc978 0%, #ffae2e 100%);
+
+    /* Status. A dot and a word always carry these; colour is never alone. */
+    --ok: #6fdcc6;
+    --warn: #ffc87a;
+    --bad: #ffb3aa;
+    --idle: #6b7689;
+  }
+
   html,
   body,
   #root {
@@ -26,12 +81,31 @@
     @apply bg-night font-sans text-ink antialiased;
     margin: 0;
     color-scheme: dark;
+    font-size: 14px;
+    line-height: 22px;
+    /* Roboto Flex's grade axis thickens strokes without widening letters.
+       It is what stops light-on-dark text reading thin and washed — more
+       legible and more refined at once. Each type step in lib/ui.js sets its
+       own `opsz` and `GRAD` over this baseline. */
+    font-variation-settings: 'opsz' 14, 'GRAD' 25;
+    text-rendering: optimizeLegibility;
   }
 
   h1,
   h2,
   h3 {
     @apply font-heading;
+  }
+
+  /* A fieldset defaults to `min-width: min-content`, so it refuses to shrink and
+     bursts any flex row inside it out of its column — a row of six one-character
+     code boxes blew out to 1,978px inside a 420px card while the Sign in screen
+     was being drawn. Always reset it. */
+  fieldset {
+    min-width: 0;
+    border: 0;
+    padding: 0;
+    margin: 0;
   }
 
   /* One focus ring for every control: 3px amber, never removed. */

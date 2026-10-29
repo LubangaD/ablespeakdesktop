@@ -105,6 +105,23 @@
     color: rgba(196, 181, 253, 1);
   }
 
+  /* A web answer's Google search (Google's terms: shown with the answer) */
+  .web-source {
+    display: block;
+    margin: 4px auto 0;
+    min-height: 28px;
+    padding: 2px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    font: inherit;
+    font-size: 0.8125rem;
+    cursor: pointer;
+  }
+  .web-source:hover, .web-source:focus-visible { background: rgba(255, 255, 255, 0.12); }
+  .web-source[hidden] { display: none; }
+
   .transcript-text.error {
     color: #fca5a5;
   }
@@ -193,6 +210,7 @@
   .mode[data-mode="listening"] { color: #6ee7b7; }
   .mode[data-mode="processing"] { color: #c4b5fd; }
   .mode[data-mode="dictating"] { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+  .mode[data-mode="exam"] { color: #5eead4; background: rgba(94, 234, 212, 0.12); }
   .mode[data-mode="confirmation"] { color: #fcd34d; background: rgba(252, 211, 77, 0.12); }
   .mode[data-mode="speaking"] { color: #93c5fd; }
   .mode[data-mode="sleeping"],
@@ -405,6 +423,7 @@
   .pill.compact[data-mode="listening"]    { --tone: 52, 211, 153; }
   .pill.compact[data-mode="processing"]   { --tone: 96, 165, 250; }
   .pill.compact[data-mode="dictating"]    { --tone: 167, 139, 250; }
+  .pill.compact[data-mode="exam"]         { --tone: 94, 234, 212; }
   .pill.compact[data-mode="speaking"]     { --tone: 125, 211, 252; }
   .pill.compact[data-mode="done"]         { --tone: 74, 222, 128; }
   .pill.compact[data-mode="confirmation"] { --tone: 251, 191, 36; }
@@ -432,6 +451,7 @@
   .pill.compact .btn-size { grid-area: size; position: static; width: 24px; height: 28px; }
   .pill.compact .who,
   .pill.compact .action-note,
+  .pill.compact .web-source,
   .pill.compact .last-command { display: none; }
   /* The state tile is the mic button, coloured by the state */
   .pill.compact .btn-mic {
@@ -518,6 +538,8 @@
     <div class="transcript-area" id="transcriptArea" aria-live="assertive" aria-atomic="true" role="status">
       <div class="transcript-text" id="transcriptText"></div>
     </div>
+    <!-- After a web answer: the Google search it came from, opened in the browser -->
+    <button type="button" class="web-source" id="webSource" hidden></button>
 
     <!-- Button row -->
     <div class="btn-row" role="toolbar" aria-label="Voice controls">
@@ -615,6 +637,7 @@ if (!window.electronAPI) {
   // keep listening. Users can toggle it off if ambient noise is an issue.
   let continuousMode = (localStorage.getItem('ablespeak_continuous') !== '0');
   let consecutiveErrors = 0; // Track repeated failures for backoff delay
+  let localFailedSaidAt = 0;    // "speech on this computer isn't working" was last said then
   let offlineAnnounced = false; // "No internet" was said once; said again only after it came back
   const MAX_CONSECUTIVE_ERRORS = 10; // Very forgiving — don't kill the mic
 
@@ -624,18 +647,52 @@ if (!window.electronAPI) {
   let audioCtx = null;     // Reused across turns — see openMic (Fix #7)
   let audioSource = null;  // Latest MediaStreamSource node, disconnected between turns
   let analyser = null;     // Level meter on the open mic stream
+  // Speech recognition on this computer (local-asr.js): the raw sound of each
+  // clip, sent beside it as a 16 kHz WAV. Only while the gateway says it is on.
+  let localSpeech = false;
+  let pcmNode = null;      // copies the mic's samples while a clip records
+  let pcmSink = null;      // the recording clip's sample chunks, or null
+  // Real time: at the first short pause the words so far are checked on this
+  // computer (voice_peek), and a known command runs at once instead of after
+  // the person's full pause. The clip waits for the answer before it is sent.
+  let peekSeq = 0;
+  const peekWaits = new Map();    // check id → the recorder waiting on it
+  const PEEK_MIN_PAUSE_MS = 500;  // or 40% of the person's own pause, if longer
+  const PEEK_ANSWER_MS = 2000;    // no answer by then: carry on as if it wasn't a command
+  // Real time (remote-asr.js): once speech is heard, the sound goes to AbleSpeak's
+  // speech service as it is spoken, and its live words show here. Only while
+  // the gateway says the service is ready (listening_settings.speechStream).
+  let streamMode = false;
+  // Someone's voice is set up (voice-profile.js): every clip carries its 16 kHz
+  // WAV, so AbleSpeak can work out whose voice it was (listening_settings.voiceCheck)
+  let voiceCheck = false;
+  let streamSeq = 0;
+  let streamRecorder = null;      // the recording being streamed, or null
+  // Sound from before speech was detected. A phrase can cross the speech
+  // level late, on its loudest syllable: with 0.5 s the start was lost
+  // ("minimise this tab" heard as "Tima is this tub", "play the current
+  // song" as "this is the current song")
+  const STREAM_PREROLL_S = 1.0;
+  const STREAM_PAGE = Math.random().toString(36).slice(2, 8); // utterance ids stay unique across reloads
   let micStarting = false; // startListening() is waiting for the mic
+  let micStartingSince = 0;
+  let lastStartSkip = '';   // why the last startListening() didn't record, for the log
+  const MIC_OPEN_TIMEOUT_MS = 5000; // the microphone has this long to open
   // How often the speech-end check runs. A timer, not requestAnimationFrame:
   // Windows can count this always-on-top transparent window as hidden behind
   // others and stop painting it, which froze a frame-based check — the
   // recording never ended and the bar looked hung.
   const LEVEL_CHECK_MS = 33;
   // Levels and pauses follow the student's profile (listening_settings).
+  // Until the student's own levels arrive: Standard (student-profile.js SENSITIVITY)
   let SILENCE_THRESHOLD = 15;
-  let SPEECH_THRESHOLD = 45;  // Higher = less likely to trigger on music
+  let SPEECH_THRESHOLD = 32;  // Higher = less likely to trigger on music
   let SILENCE_DURATION = 1500; // 1.5s silence after speech = done talking
   const MIN_RECORD_MS = 600;     // Minimum 600ms recording before silence check
   const MAX_RECORD_MS = 8000;    // 8s max for a command — shorter to limit music bleed
+  // In a noisy room the level never falls to SILENCE_THRESHOLD; a command
+  // also ends this long after its pause once speech-level sound has stopped.
+  const COMMAND_SPEECH_GAP_EXTRA_MS = 500;
   const COOLDOWN_MS = 500;       // 500ms between recordings
   let lastRecordEnd = 0;         // When the last recording stopped
 
@@ -651,15 +708,35 @@ if (!window.electronAPI) {
   // HFI-2 "didn't catch that" is only for a real attempt at speaking (half a
   // second of quiet, voice-level sound), and at most once every 30 seconds, so
   // room noise can't make AbleSpeak talk over the student again and again.
-  let QUIET_SPEECH_THRESHOLD = 30;
+  let QUIET_SPEECH_THRESHOLD = 21;
   let autoGain = true;          // automatic gain on the mic (off for the "Noisy room" profile)
-  let micNeedsReopen = false;   // set when autoGain changes
+  let micNeedsReopen = false;   // set when autoGain or localSpeech changes
   let nameMode = false;         // "Say AbleSpeak first" (profile listening.needsName)
   const QUIET_SPEECH_MIN_MS = 500;
   const NOT_HEARD_INTERVAL_MS = 30000;
   let lastNotHeardAt = 0;
   let ttsActive = false;         // True while TTS audio is playing (mutes the mic — Gap 3)
-  const TTS_COOLDOWN_MS = 2500;  // Wait after TTS finishes before re-opening the mic
+  // When AbleSpeak last stopped speaking. Each clip tells the server how long
+  // after that it began, so only a clip that could hold AbleSpeak's own voice
+  // is checked for it (a repeated "play the current song" was dropped as echo).
+  let lastTtsEndAt = 0;
+  function ttsOff() {
+    if (ttsActive) lastTtsEndAt = Date.now();
+    ttsActive = false;
+  }
+  // Whether AbleSpeak's voice is actually playing, from the player's own
+  // 'speaking' and 'done' (and nothing else). ttsActive can be cleared by a
+  // recovery check while the answer is still being read out; this cannot, so
+  // a clip recorded then is still checked for AbleSpeak's own voice (17 Oct 2026:
+  // a long answer was cut off and AbleSpeak took its own words as a command).
+  let voicePlaying = false;
+  let voiceDoneAt = 0;
+  // Wait after TTS finishes before re-opening the mic. Echo cancellation and the
+  // server's echo guard catch AbleSpeak's own voice, so this only has to cover
+  // the last of the sound leaving the speakers. In an exam it is longer: there
+  // nothing filters echo, and a heard echo would be written into an answer.
+  const TTS_COOLDOWN_MS = 500;
+  const EXAM_TTS_COOLDOWN_MS = 1200;
   let ttsWatchdog = null;        // Failsafe: force-clears ttsActive if 'done' is ever lost
   // The mic re-opens on the main process's 'done'. If that is ever lost, these
   // failsafes re-open it — timed from when the audio starts, and long enough
@@ -675,6 +752,7 @@ if (!window.electronAPI) {
   const STOP_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>`;
   let sleeping = false;          // True while in sleep mode (Gap 5)
   let dictationMode = false;     // True while in dictation mode (typing speech directly)
+  let examMode = false;          // True while an exam is running (everything said goes to it)
 
   // ── TTS (via Electron main process → PowerShell SAPI) ──
   // Browser speechSynthesis fails silently in transparent Electron windows.
@@ -684,13 +762,19 @@ if (!window.electronAPI) {
     if (ttsWatchdog) clearTimeout(ttsWatchdog);
     ttsWatchdog = setTimeout(() => {
       console.warn('[TTS] Watchdog fired — no done event; re-enabling mic');
-      ttsActive = false;
+      ttsOff();
+      // The 'done' was lost: by now, timed by the sentence's length, it has finished
+      voicePlaying = false;
+      voiceDoneAt = Date.now();
       ttsTexts = [];
       if (active && state !== 'listening') { setIdleUI(); startListening(); }
     }, ms);
   }
 
-  function speak(text) {
+  // `rate` (an exam's reading speed, "-25%") also lets the text be longer
+  // than one sentence: the main process reads it in pieces. `ref`: the
+  // command this replies to, so its first sound is timed (Speed tab).
+  function speak(text, rate, ref) {
     if (!text) return null;
 
     // Use Electron IPC → Edge neural TTS (SAPI fallback in main process).
@@ -699,13 +783,18 @@ if (!window.electronAPI) {
     // synchronously so nothing re-opens the mic before the 'speaking' event lands.
     if (window.electronAPI && window.electronAPI.speak) {
       console.log(`[TTS] Speaking via Electron TTS: "${text.slice(0, 50)}..."`);
-      ttsActive = true;
       if (!ttsActive) ttsTexts = []; // nothing is playing: anything left over was stopped
+      ttsActive = true;
       ttsTexts.push(text);
       // Failsafe: if the main process never sends 'tts-state' 'done' (e.g. the
       // window is destroyed mid-speech), force-clear so the mic can't deadlock.
-      armTtsWatchdog(TTS_START_MAX_MS + ttsPlayMaxMs(ttsTexts.join(' ')));
-      window.electronAPI.speak(text);
+      // An exam question can be long and read slowly: allow for all of it.
+      const all = ttsTexts.join(' ');
+      const slower = rate && rate.startsWith('-') ? 1 / (1 - parseInt(rate.slice(1), 10) / 100) : 1;
+      armTtsWatchdog(rate
+        ? TTS_START_MAX_MS * Math.ceil(all.length / 450) + (4000 + all.length * 90) * slower
+        : TTS_START_MAX_MS + ttsPlayMaxMs(all));
+      window.electronAPI.speak(rate ? { text, rate } : ref ? { text, ref: String(ref) } : text);
       return null;
     }
 
@@ -817,6 +906,7 @@ if (!window.electronAPI) {
   // ── UI helpers ──
   function setTranscript(text, className) {
     if (holdUntil > Date.now() && className === 'listening-label') { heldTranscript = [text, className]; return; }
+    transcriptArea.setAttribute('aria-live', 'assertive'); // live words had turned it off
     transcriptText.textContent = text;
     transcriptText.className = 'transcript-text' + (className ? ' ' + className : '');
     transcriptArea.style.display = text ? 'block' : 'none';
@@ -942,6 +1032,12 @@ if (!window.electronAPI) {
     // A change of automatic gain needs the microphone opened again
     const wantGain = settings.autoGain !== false;
     if (wantGain !== autoGain) { autoGain = wantGain; micNeedsReopen = true; }
+    const wantLocal = settings.localSpeech === true;
+    if (wantLocal !== localSpeech) { localSpeech = wantLocal; micNeedsReopen = true; }
+    const wantStream = settings.speechStream === true;
+    if (wantStream !== streamMode) { streamMode = wantStream; micNeedsReopen = true; }
+    const wantCheck = settings.voiceCheck === true;
+    if (wantCheck !== voiceCheck) { voiceCheck = wantCheck; micNeedsReopen = true; }
     console.log(`[Overlay] Listening: ${settings.sensitivity}, pause ${settings.commandPauseMs} ms`);
   }
 
@@ -1192,7 +1288,13 @@ if (!window.electronAPI) {
     // 'processing' until the 60s watchdog. (This was the stuck-overlay bug.)
     if (data.type === 'voice_no_speech') {
       dictationClipAnswered();
-      if (!sleeping) finishTurn('ignored', 'Ignored — it sounded like background talk');
+      if (!sleeping) {
+        finishTurn('ignored', data.reason === 'media'
+          ? 'Music is playing — start with “AbleSpeak”'
+          : data.reason === 'enrolling'
+            ? 'Paused while a voice is set up on the dashboard'
+            : 'Ignored — it sounded like background talk');
+      }
       clearWatchdog();
       if (state === 'listening') return; // already recording the next phrase
       setIdleUI();
@@ -1221,6 +1323,36 @@ if (!window.electronAPI) {
       return;
     }
 
+    // "This computer only" and the speech engine on this computer isn't
+    // working: say so plainly, at most once a minute, rather than "I didn't
+    // catch that" again and again.
+    if (data.type === 'voice_partial') {
+      showLiveWords(data.text);
+      return;
+    }
+
+    if (data.type === 'voice_peek_result') {
+      answerPeek(data.id, data.taken === true);
+      return;
+    }
+
+    if (data.type === 'voice_error' && data.error === 'local_failed') {
+      dictationClipAnswered();
+      turnOpen = true;
+      finishTurn('failed', '✗ Speech recognition on this computer isn’t working');
+      clearWatchdog();
+      const said = data.message || 'Speech recognition on this computer isn’t working right now.';
+      setTranscript(said, 'error');
+      if (Date.now() - localFailedSaidAt > 60000) {
+        localFailedSaidAt = Date.now();
+        expandFor(8000);
+        speak(said);
+      } else {
+        resumeListening(3000);
+      }
+      return;
+    }
+
     // Voice error — also terminal for this turn. Recover even while processing.
     if (data.type === 'voice_error') {
       dictationClipAnswered();
@@ -1228,7 +1360,7 @@ if (!window.electronAPI) {
       finishTurn('failed', "✗ I didn't catch that — try again, or say it another way");
       clearWatchdog();
       consecutiveErrors++;
-      setTranscript(data.error || 'Voice error', 'error');
+      setTranscript(data.message || data.error || 'Voice error', 'error');
       // Always restart — use increasing backoff delay instead of killing the mic
       const backoff = Math.min(consecutiveErrors * 500, 3000);
       resumeListening(backoff);
@@ -1282,8 +1414,21 @@ if (!window.electronAPI) {
     }
   }
 
+  // A web answer (web_answer) shows the Google search it came from, until the next reply
+  const webSource = document.getElementById('webSource');
+  function showWebSource(toolCalls) {
+    const answer = (toolCalls || []).find(c => (c.tool || c.name) === 'web_answer' && c.result?.status === 'success')?.result;
+    const query = answer?.queries?.[0];
+    webSource.hidden = !query;
+    if (!query) return;
+    webSource.textContent = `Searched Google: “${query}”`;
+    webSource.title = 'Open this Google search in the browser';
+    webSource.onclick = () => window.electronAPI.openLink?.(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
+  }
+
   function handleResponse(data) {
     dictationClipAnswered();
+    showWebSource(data.toolCalls);
     // A finished task, or one paused on a question, is no longer running.
     if (data.task || data.model === 'confirmation-prompt') taskRunning = false;
     clearWatchdog();
@@ -1349,7 +1494,7 @@ if (!window.electronAPI) {
       const repeatsTitle = result.text !== '✓ Done' && MSG.clean(responseText).startsWith(title);
       const rest = repeatsTitle ? MSG.clean(responseText).slice(title.length).replace(/^[.!]\s*/, '') : '';
       setTranscript(repeatsTitle ? (rest || (lastHeardText ? `“${lastHeardText}”` : '')) : responseText, 'response');
-      const utterance = speak(responseText);
+      const utterance = speak(responseText, undefined, data.id);
       if (utterance) {
         // Browser speechSynthesis path — restart when the utterance ends.
         utterance.onend = () => resumeListening(200);
@@ -1388,11 +1533,24 @@ if (!window.electronAPI) {
 
   // Open the microphone, or keep the one already open (dictation records
   // phrase after phrase on the same stream, so no speech is lost in between).
+  // getUserMedia, but never waiting forever: a mic that doesn't open used to
+  // leave the voice bar showing "Listening" while nothing was recorded.
+  function openMicStream(constraints) {
+    return new Promise((resolve, reject) => {
+      let late = false;
+      const timer = setTimeout(() => { late = true; reject(new Error('the microphone took too long to open')); }, MIC_OPEN_TIMEOUT_MS);
+      navigator.mediaDevices.getUserMedia(constraints).then(opened => {
+        clearTimeout(timer);
+        if (late) opened.getTracks().forEach(t => t.stop()); else resolve(opened);
+      }, err => { clearTimeout(timer); reject(err); });
+    });
+  }
+
   async function openMic() {
     if (stream && stream.active && analyser && !micNeedsReopen) return;
     micNeedsReopen = false;
     releaseMic();
-    const newStream = await navigator.mediaDevices.getUserMedia({
+    const newStream = await openMicStream({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -1427,12 +1585,58 @@ if (!window.electronAPI) {
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 512;
     audioSource.connect(analyser);
+    if (localSpeech || streamMode || voiceCheck) {
+      pcmNode = audioCtx.createScriptProcessor(4096, 1, 1);
+      pcmNode.onaudioprocess = (e) => {
+        if (!pcmSink && !streamRecorder) return;
+        const chunk = new Float32Array(e.inputBuffer.getChannelData(0));
+        if (pcmSink) pcmSink.push(chunk);
+        if (streamRecorder) streamChunk(streamRecorder, chunk);
+      };
+      audioSource.connect(pcmNode);
+      pcmNode.connect(audioCtx.destination); // plays silence; Chromium only runs a connected node
+    }
   }
 
   function releaseMic() {
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+    if (pcmNode) { try { pcmNode.disconnect(); } catch {} pcmNode.onaudioprocess = null; pcmNode = null; }
     analyser = null;
+  }
+
+  // A clip's samples as a 16 kHz, 16-bit mono WAV, base64 (what local-asr.js
+  // reads). Each output sample averages the input samples it covers, which
+  // keeps high sounds from folding down into speech. Whisper ignores clips
+  // under a second, so short ones are padded with silence.
+  function wavBase64(chunks, rate) {
+    let length = 0;
+    for (const chunk of chunks) length += chunk.length;
+    const flat = new Float32Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { flat.set(chunk, offset); offset += chunk.length; }
+    const step = rate / 16000;
+    const count = Math.floor(length / step);
+    const samples = new Int16Array(Math.max(count, 17600));
+    for (let i = 0; i < count; i++) {
+      const from = Math.floor(i * step);
+      const to = Math.max(from + 1, Math.min(length, Math.floor((i + 1) * step)));
+      let sum = 0;
+      for (let j = from; j < to; j++) sum += flat[j];
+      samples[i] = Math.max(-1, Math.min(1, sum / (to - from))) * 0x7fff;
+    }
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    const ascii = (at, text) => { for (let i = 0; i < text.length; i++) view.setUint8(at + i, text.charCodeAt(i)); };
+    ascii(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); ascii(8, 'WAVE');
+    ascii(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    ascii(36, 'data'); view.setUint32(40, samples.length * 2, true);
+    new Int16Array(buffer, 44).set(samples);
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
   }
 
   // Stop the recording in progress. With `discard`, its audio is dropped
@@ -1446,9 +1650,81 @@ if (!window.electronAPI) {
     }
   }
 
-  function sendAudio(blob, withScreenshot) {
+  // A clip that could not be sent: say so and listen again, instead of
+  // waiting for an answer that will never come.
+  function clipNotSent(err) {
+    console.warn('[Overlay] Could not send the clip:', err && err.message);
+    setTranscript('I couldn’t send that — please say it again', 'error');
+    if (state === 'processing') {
+      clearWatchdog();
+      setIdleUI();
+      resumeListening(800);
+    } else if (dictationMode) {
+      // Dictation is already recording the next phrase; just don't wait for this one
+      dictationClipAnswered();
+    }
+  }
+
+  // How loud a recording was against the speech level, in the app log (a
+  // warning, so the main process keeps it). Only when there was voice-level
+  // sound: "not taken" is someone speaking too softly to count, which is what
+  // made people shout (the level averages every pitch to 24 kHz, a voice is under 4).
+  function logLoudness(levels, taken) {
+    if (!levels || !levels.length) return;
+    const s = [...levels].sort((a, b) => a - b);
+    const at = q => Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))]);
+    const peak = Math.round(s[s.length - 1]);
+    if (peak < QUIET_SPEECH_THRESHOLD) return;
+    console.warn(`[Loudness] ${taken ? 'taken' : 'NOT taken'}: voice ${at(0.875)}, peak ${peak}, room ${at(0.125)} — speech level ${SPEECH_THRESHOLD}, quiet ${QUIET_SPEECH_THRESHOLD}`);
+  }
+
+  // ── The voice bar as the dashboard draws it (Home, "User's screen") ──
+  // Read back from this page itself, so it is exactly what the student sees,
+  // with where the bar sits, the screen it is on and how loud the mic is.
+  // Sent when anything changes, and every 2 s so a dashboard opened later fills in.
+  let meterLevel = null; // loudest level since the last report (checkSilence)
+  let lastMirror = '', lastMirrorAt = 0;
+  function sendMirror() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const listening = state === 'listening' && !!mediaRecorder && mediaRecorder.state === 'recording';
+    const shown = !lastCommand.hidden;
+    const mirror = {
+      mode: pill.dataset.mode || '',
+      label: modeText.textContent || '',
+      mini: pill.classList.contains('mini'),
+      heard: shown ? lastHeard.textContent : '',
+      outcome: shown && lastOutcome.textContent ? { kind: lastOutcome.dataset.state || '', text: lastOutcome.textContent } : null,
+      words: transcriptArea.style.display === 'none' ? '' : transcriptText.textContent,
+      bar: { x: window.screenX, y: window.screenY, w: window.outerWidth, h: window.outerHeight },
+      screen: {
+        w: screen.width, h: screen.height, availW: screen.availWidth, availH: screen.availHeight,
+        availX: screen.availLeft || 0, availY: screen.availTop || 0, dpr: window.devicePixelRatio || 1,
+      },
+      level: listening ? Math.round(meterLevel ?? 0) : null,
+      speechLevel: SPEECH_THRESHOLD,
+      quietLevel: QUIET_SPEECH_THRESHOLD,
+    };
+    meterLevel = null;
+    const key = JSON.stringify(mirror);
+    if (key === lastMirror && Date.now() - lastMirrorAt < 2000) return;
+    lastMirror = key;
+    lastMirrorAt = Date.now();
+    ws.send(JSON.stringify({ type: 'overlay_state', ...mirror }));
+  }
+  setInterval(sendMirror, 250);
+
+  function sendAudio(blob, withScreenshot, pcm, streamUtt, { afterVoiceMs, wordsAtPeek, speechEndedAt } = {}) {
+    // The WAV is extra: if it can't be made, the clip still goes without it
+    let wav;
+    try {
+      wav = pcm && pcm.length && audioCtx ? wavBase64(pcm, audioCtx.sampleRate) : undefined;
+    } catch (err) {
+      console.warn('[Overlay] Could not make the WAV for this clip:', err.message);
+    }
     const reader = new FileReader();
+    reader.onerror = () => clipNotSent(reader.error);
     reader.onload = async () => {
+     try {
       const base64 = reader.result.split(',')[1];
       console.log(`[Overlay] Sending ${Math.round(blob.size/1024)}KB audio`);
 
@@ -1467,21 +1743,123 @@ if (!window.electronAPI) {
         }
       }
 
+      if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('the connection to AbleSpeak closed');
       ws.send(JSON.stringify({
         type: 'voice_audio',
         source: 'overlay', // the student speaking (the Chat page's mic is not)
         audio: base64,
         mimeType: blob.type || 'audio/webm',
+        wav, // 16 kHz WAV for speech recognition on this computer, when it is on
+        streamUtt, // its words were streamed to the speech service (remote-asr.js)
+        afterVoiceMs, // how long after AbleSpeak last spoke it began (the server's echo check)
+        wordsAtPeek, // nothing was said after the early check: its words are the whole phrase
+        speechEndedAt, // the last speech heard: the wait for the pause, on the Speed tab
         screenshot, // base64 JPEG or null
       }));
+     } catch (err) {
+      clipNotSent(err);
+     }
     };
     reader.readAsDataURL(blob);
   }
 
+  // 48 kHz float samples → 16 kHz PCM16, chunk by chunk: each output sample
+  // averages the input samples it covers, and what is left over waits for the
+  // next chunk (the same filter as wavBase64).
+  function makeStreamEncoder(rate) {
+    const step = rate / 16000;
+    let carry = new Float32Array(0);
+    return chunk => {
+      const input = new Float32Array(carry.length + chunk.length);
+      input.set(carry);
+      input.set(chunk, carry.length);
+      const count = Math.floor(input.length / step);
+      const out = new Int16Array(count);
+      for (let i = 0; i < count; i++) {
+        const from = Math.floor(i * step);
+        const to = Math.max(from + 1, Math.floor((i + 1) * step));
+        let sum = 0;
+        for (let j = from; j < to; j++) sum += input[j];
+        out[i] = Math.max(-1, Math.min(1, sum / (to - from))) * 0x7fff;
+      }
+      carry = input.slice(Math.floor(count * step));
+      return out;
+    };
+  }
+
+  function streamChunk(recorder, chunk) {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !recorder.encode) return;
+    const pcm = recorder.encode(chunk);
+    if (!pcm.length) return;
+    const bytes = new Uint8Array(pcm.buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    ws.send(JSON.stringify({ type: 'voice_chunk', utt: recorder.streamUtt, pcm: btoa(binary) }));
+  }
+
+  // Speech was just heard: stream this recording from half a second before it
+  function beginStream(recorder) {
+    if (!streamMode || recorder.streamUtt || !recorder.pcm || !audioCtx || !ws || ws.readyState !== WebSocket.OPEN) return;
+    recorder.streamUtt = `${STREAM_PAGE}-${++streamSeq}`;
+    recorder.encode = makeStreamEncoder(audioCtx.sampleRate);
+    ws.send(JSON.stringify({ type: 'voice_stream_start', utt: recorder.streamUtt }));
+    const keep = Math.round(audioCtx.sampleRate * STREAM_PREROLL_S);
+    let from = recorder.pcm.length;
+    for (let total = 0; from > 0 && total < keep;) total += recorder.pcm[--from].length;
+    for (let i = from; i < recorder.pcm.length; i++) streamChunk(recorder, recorder.pcm[i]);
+    streamRecorder = recorder;
+  }
+
+  // Live words while the person speaks. Not announced: the transcript line
+  // stops speaking to screen readers until the final words replace them.
+  function showLiveWords(text) {
+    if (!text || (state !== 'listening' && state !== 'processing')) return;
+    transcriptArea.setAttribute('aria-live', 'off');
+    transcriptText.textContent = text;
+    transcriptText.className = 'transcript-text interim';
+    transcriptArea.style.display = 'block';
+  }
+
+  // Real time: send the words so far, while the person may still be talking
+  function sendPeek(recorder) {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !audioCtx) return;
+    let wav;
+    if (!recorder.streamUtt) {
+      if (!localSpeech) return;
+      try { wav = wavBase64(recorder.pcm, audioCtx.sampleRate); } catch { return; }
+    }
+    const id = ++peekSeq;
+    recorder.peekId = id;
+    peekWaits.set(id, recorder);
+    recorder.peekTimer = setTimeout(() => answerPeek(id, false), PEEK_ANSWER_MS);
+    ws.send(JSON.stringify({ type: 'voice_peek', id, wav, streamUtt: recorder.streamUtt, afterVoiceMs: recorder.afterVoiceMs, source: 'overlay' }));
+  }
+
+  // The answer: taken = AbleSpeak is already running those words as a command
+  function answerPeek(id, taken) {
+    const recorder = peekWaits.get(id);
+    if (!recorder) return;
+    peekWaits.delete(id);
+    clearTimeout(recorder.peekTimer);
+    recorder.peekId = 0;
+    const held = recorder.held;
+    recorder.held = null;
+    if (taken) {
+      // The rest of this clip is not needed (its reply restarts the mic)
+      if (recorder === mediaRecorder) stopActiveRecorder(true);
+      if (state !== 'processing') { setProcessingUI(); setTranscript('Processing...', ''); }
+      return;
+    }
+    if (held) held(); // it ended while being checked: send it as usual
+  }
+
   async function startListening() {
     if (!active) return;
-    if (ttsActive) return; // Don't capture our own TTS output (Gap 3)
-    if (state === 'listening' || state === 'processing' || micStarting) return;
+    if (ttsActive) { lastStartSkip = 'AbleSpeak was speaking'; return; } // Don't capture our own TTS output (Gap 3)
+    if (state === 'listening' || state === 'processing' || micStarting) {
+      lastStartSkip = micStarting ? 'the mic was still opening' : `it was ${state}`;
+      return;
+    }
 
     // Enforce cooldown. Dictation skips it: sound right after a phrase is the
     // next phrase, not an echo.
@@ -1495,16 +1873,19 @@ if (!window.electronAPI) {
     stopActiveRecorder(true);
 
     micStarting = true;
+    micStartingSince = Date.now();
     let recorder = null;
     try {
       await openMic();
-      if (!active || ttsActive) { releaseMic(); return; }
+      if (!active) { releaseMic(); return; }
+      if (ttsActive) { lastStartSkip = 'AbleSpeak started speaking'; return; } // keep the mic open, record afterwards
 
       const levels = analyser;
       const chunks = [];
       const startedAt = Date.now();
       let hasSpeechDetected = false;
       let lastSpeechAt = 0;
+      let lastVoiceAt = 0; // the last voice-level sound, speech or softer
       let silenceStart = null;
       // Time spent at a quiet voice level: louder than room hum, but below
       // SPEECH_THRESHOLD. Tells "tried to speak but too quietly" apart from
@@ -1514,8 +1895,17 @@ if (!window.electronAPI) {
       recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus' : 'audio/webm',
+        // Speech needs far less than the browser's default (~128 kbps): a
+        // smaller clip uploads faster, and recognition is no worse.
+        audioBitsPerSecond: 32000,
       });
       mediaRecorder = recorder;
+      recorder.pcm = pcmNode ? [] : null;
+      // 0 if AbleSpeak speaks during it
+      recorder.afterVoiceMs = voicePlaying ? 0 : startedAt - Math.max(voiceDoneAt, lastTtsEndAt);
+      recorder.levels = []; // every level check, for the loudness line in the log
+      pcmSink = recorder.pcm;
+      let peekedAt = 0; // when the speech last checked had ended
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
@@ -1525,16 +1915,29 @@ if (!window.electronAPI) {
       recorder.onstop = () => {
         clearInterval(hardStop);
         if (mediaRecorder === recorder) mediaRecorder = null;
+        if (pcmSink === recorder.pcm) pcmSink = null;
+        if (streamRecorder === recorder) streamRecorder = null;
+        const streamSend = type => {
+          if (recorder.streamUtt && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, utt: recorder.streamUtt }));
+        };
         lastRecordEnd = Date.now();
 
         // Dictation and running tasks keep the mic open between phrases, so
         // nothing is missed and "stop" always works.
         const keepMicOpen = (dictationMode || taskRunning) && active && !ttsActive && !recorder.discard;
-        if (!keepMicOpen && !mediaRecorder && recorder.stream === stream) releaseMic();
-        if (recorder.discard) return;
+        // The microphone itself stays open while listening is on: opening it
+        // again for every command cost time, and nothing records in between.
+        if (!active && !mediaRecorder && recorder.stream === stream) releaseMic();
+        if (recorder.discard) { streamSend('voice_stream_cancel'); return; }
 
         const blob = new Blob(chunks, { type: recorder.mimeType });
-        const heardSpeech = hasSpeechDetected && blob.size > 5000;
+        // A click or bump makes a tiny clip; any real phrase (with its pause) is
+        // bigger than this at the 32 kbps the recorder now uses. The server's
+        // own lower limit is the same (voice-handler.js).
+        const heardSpeech = hasSpeechDetected && blob.size > 3000;
+        logLoudness(recorder.levels, heardSpeech);
+        // The speech service starts on the final words now, while the clip is being packed
+        streamSend(heardSpeech ? 'voice_stream_end' : 'voice_stream_cancel');
 
         if (heardSpeech && !(ws && ws.readyState === WebSocket.OPEN)) {
           // Socket isn't open — DON'T sit in 'processing' forever. Recover and
@@ -1550,7 +1953,7 @@ if (!window.electronAPI) {
 
         if (heardSpeech && (dictationMode || taskRunning)) {
           // Send the phrase and go straight back to recording.
-          sendAudio(blob, false);
+          sendAudio(blob, false, localSpeech ? recorder.pcm : null, recorder.streamUtt, { afterVoiceMs: recorder.afterVoiceMs, speechEndedAt: lastSpeechAt || undefined });
           if (dictationMode) dictationClipsPending++;
           setIdleUI();
           if (keepMicOpen) startListening(); // otherwise TTS 'done' re-opens the mic
@@ -1560,7 +1963,12 @@ if (!window.electronAPI) {
         if (heardSpeech) {
           setProcessingUI();
           setTranscript('Processing...', '');
-          sendAudio(blob, true);
+          // Its words so far are still being checked: send it only if they weren't a command
+          const pcm = localSpeech ? recorder.pcm : null;
+          // No voice at all after the early check: the server can use its words instead of hearing the clip again
+          const clip = { afterVoiceMs: recorder.afterVoiceMs, wordsAtPeek: recorder.voiceAtPeek != null && recorder.voiceAtPeek === lastVoiceAt, speechEndedAt: lastSpeechAt || undefined };
+          if (recorder.peekId) { recorder.held = () => sendAudio(blob, true, pcm, recorder.streamUtt, clip); return; }
+          sendAudio(blob, true, pcm, recorder.streamUtt, clip);
           return;
         }
 
@@ -1604,15 +2012,28 @@ if (!window.electronAPI) {
         const frameMs = Math.min(now - lastFrameAt, 100);
         lastFrameAt = now;
         if (elapsed > maxRecordMs()) { recorder.stop(); return; }
+        if (ttsActive || voicePlaying) recorder.afterVoiceMs = 0;
         levels.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        if (recorder.levels.length < 400) recorder.levels.push(avg);
+        meterLevel = Math.max(meterLevel ?? 0, avg);
+        if (avg >= QUIET_SPEECH_THRESHOLD) lastVoiceAt = now; // any voice, soft words too
         if (avg >= SPEECH_THRESHOLD) {
+          if (!hasSpeechDetected) beginStream(recorder);
           hasSpeechDetected = true;
           lastSpeechAt = now;
         } else if (avg >= QUIET_SPEECH_THRESHOLD) {
           quietSoundMs += frameMs;
         }
         if (elapsed < MIN_RECORD_MS) { setTimeout(checkSilence, LEVEL_CHECK_MS); return; }
+        // Real time: a short pause after speech — is it a command already?
+        if (recorder.pcm && !dictationMode && !taskRunning && !examMode && hasSpeechDetected
+            && !recorder.peekId && peekedAt !== lastSpeechAt
+            && now - lastSpeechAt > Math.max(PEEK_MIN_PAUSE_MS, Math.round(SILENCE_DURATION * 0.4))) {
+          peekedAt = lastSpeechAt;
+          recorder.voiceAtPeek = lastVoiceAt;
+          sendPeek(recorder);
+        }
         if (avg < SILENCE_THRESHOLD) {
           if (!silenceStart) silenceStart = now;
           // Dictation waits longer, so a breath mid-sentence doesn't split it.
@@ -1622,9 +2043,12 @@ if (!window.electronAPI) {
         } else {
           silenceStart = null;
         }
-        // Background noise can keep the level above SILENCE_THRESHOLD forever.
-        // In dictation, end the phrase once speech-level sound has stopped.
-        if (dictationMode && hasSpeechDetected && now - lastSpeechAt > DICTATION_SPEECH_GAP_MS) {
+        // Background noise can keep the level above SILENCE_THRESHOLD forever,
+        // so a command used to run on to the 8-second limit in a noisy room.
+        // End it once speech-level sound has stopped for a little longer than
+        // the person's own pause; dictation waits longer, for mid-sentence breaths.
+        const speechGap = dictationMode ? DICTATION_SPEECH_GAP_MS : SILENCE_DURATION + COMMAND_SPEECH_GAP_EXTRA_MS;
+        if (hasSpeechDetected && now - lastSpeechAt > speechGap) {
           recorder.stop();
           return;
         }
@@ -1637,6 +2061,7 @@ if (!window.electronAPI) {
       releaseMic();
       setIdleUI();
       setTranscript('Mic error: ' + err.message, 'error');
+      lastStartSkip = 'the mic failed: ' + err.message; // the 1-second check tries again
     } finally {
       micStarting = false;
     }
@@ -1679,27 +2104,55 @@ if (!window.electronAPI) {
       startListening();
       // Start global recovery timer — catches ALL stuck states
       if (recoveryInterval) clearInterval(recoveryInterval);
+      let recoveryTick = 0;
+      let idleTicks = 0;
+      let stuckFor = 0;    // seconds working with nothing being said
+      let speakingFor = 0; // seconds ttsActive has been on
       recoveryInterval = setInterval(() => {
         if (!active) return;
-        // If stuck in 'processing' for >20s, force restart
-        if (state === 'processing') {
-          console.warn('[Recovery] Stuck in processing — forcing restart');
-          ttsActive = false;
+        // Every second: never left deaf. After a command the mic should be
+        // listening again within moments; a skipped restart used to wait for
+        // the 15-second check below (15 Oct 2026: after every scroll).
+        if (micStarting && Date.now() - micStartingSince > MIC_OPEN_TIMEOUT_MS + 2000) {
+          console.warn('[Recovery] The microphone never opened — trying again');
+          micStarting = false;
+          micNeedsReopen = true;
+        }
+        if (state === 'idle' && continuousMode && !ttsActive && !micStarting) {
+          if (++idleTicks >= 2) {
+            idleTicks = 0;
+            console.warn(`[Recovery] Not listening — restarting${lastStartSkip ? ` (last start skipped: ${lastStartSkip})` : ''}`);
+            lastStartSkip = '';
+            startListening();
+          }
+        } else {
+          idleTicks = 0;
+        }
+        // How long each state has lasted. Both checks used to fire whenever
+        // the 15-second tick came round: a long answer being read out was
+        // cut off and the mic opened on AbleSpeak's own voice (17 Oct 2026).
+        stuckFor = state === 'processing' && !ttsActive && !voicePlaying ? stuckFor + 1 : 0;
+        speakingFor = ttsActive ? speakingFor + 1 : 0;
+        if (++recoveryTick % 15 !== 0) return;
+        // Working for over 20 s with nothing being said: force restart
+        if (stuckFor > 20) {
+          console.warn(`[Recovery] Stuck in processing for ${stuckFor} s — forcing restart`);
+          stuckFor = 0;
+          ttsOff();
           setIdleUI();
           startListening();
         }
-        // If idle but should be listening (active + continuous), restart
-        if (state === 'idle' && continuousMode && !ttsActive) {
-          console.warn('[Recovery] Idle but should be listening — restarting');
-          startListening();
-        }
-        // Force-clear ttsActive if it's been true too long
-        if (ttsActive) {
+        // Speaking for longer than any answer takes: speak()'s own watchdog,
+        // timed by the sentence's length, acts long before this. Not in an
+        // exam: a question read slowly can take longer, and the mic opening
+        // mid-question would write the question down as the answer.
+        if (speakingFor > 90 && !examMode) {
           console.warn('[Recovery] Clearing stuck ttsActive flag');
-          ttsActive = false;
+          speakingFor = 0;
+          ttsOff();
           if (state !== 'listening') { setIdleUI(); startListening(); }
         }
-      }, 15000); // Check every 15 seconds
+      }, 1000); // every second; the checks after recoveryTick every 15
     }
   }
 
@@ -1724,7 +2177,7 @@ if (!window.electronAPI) {
       // Stop TTS immediately — user wants to interrupt
       if (window.electronAPI && window.electronAPI.stopTTS) window.electronAPI.stopTTS();
       window.speechSynthesis?.cancel();
-      ttsActive = false;
+      ttsOff();
       btnMic.innerHTML = MIC_SVG;
       setTranscript('Stopped', '');
       if (ttsWatchdog) { clearTimeout(ttsWatchdog); ttsWatchdog = null; }
@@ -1852,8 +2305,11 @@ if (!window.electronAPI) {
     window.electronAPI.onTTSState((s) => {
       if (s === 'speaking') {
         ttsActive = true;
-        // The audio is starting: give it as long as the sentence needs.
-        armTtsWatchdog(ttsPlayMaxMs(ttsTexts[0]));
+        voicePlaying = true;
+        // The audio is starting: give it as long as the sentence needs. An
+        // exam question comes in pieces at its own speed: speak() already
+        // allowed for all of it, so each piece starting must not cut that short.
+        if (!examMode) armTtsWatchdog(ttsPlayMaxMs(ttsTexts[0]));
         // Turn the mic button into a stop button so the user can interrupt
         btnMic.innerHTML = STOP_SVG;
         btnMic.className = 'btn btn-mic speaking';
@@ -1866,7 +2322,9 @@ if (!window.electronAPI) {
           try { mediaRecorder.stop(); } catch {}
         }
       } else if (s === 'done') {
-        ttsActive = false;
+        ttsOff();
+        voicePlaying = false;
+        voiceDoneAt = Date.now();
         ttsTexts.shift(); // that sentence has finished
         // Restore the tile's icon (a result card keeps its own until it hands over)
         btnMic.innerHTML = tileIcon(holdUntil > Date.now() ? pill.dataset.mode : 'listening');
@@ -1875,7 +2333,7 @@ if (!window.electronAPI) {
         if (active) {
           setTimeout(() => {
             if (active && !ttsActive && state !== 'listening') { setIdleUI(); startListening(); }
-          }, TTS_COOLDOWN_MS);
+          }, examMode ? EXAM_TTS_COOLDOWN_MS : TTS_COOLDOWN_MS);
         }
       }
     });
@@ -1906,11 +2364,11 @@ if (!window.electronAPI) {
     // Local fast-path: stop TTS immediately on interrupt words (the server also
     // cancels server-side so the utterance never reaches the LLM). Not while
     // dictating, where "stop" is text to type, as it is on the server.
-    if (data.type === 'voice_transcription' && !dictationMode && INTERRUPT_PHRASES.test((data.text || '').trim())) {
+    if (data.type === 'voice_transcription' && !dictationMode && !examMode && INTERRUPT_PHRASES.test((data.text || '').trim())) {
       showHeard(data.text);
       if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
       window.speechSynthesis?.cancel();
-      ttsActive = false;
+      ttsOff();
       setTranscript('Stopped', '');
       clearWatchdog();
       // Restart mic so user can give a new command immediately
@@ -1922,7 +2380,7 @@ if (!window.electronAPI) {
     if (data.type === 'voice_cancelled') {
       finishTurn('done', 'Stopped');
       if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
-      ttsActive = false;
+      ttsOff();
       setTranscript('Stopped', '');
       clearWatchdog();
       resumeListening(300);
@@ -1976,6 +2434,37 @@ if (!window.electronAPI) {
       else resumeListening(300);
       return;
     }
+
+    // ── Exam mode: the exam (server/src/exam) reads the paper and answers
+    // back; everything said goes to it. "stop" is the exam's to handle.
+    if (data.type === 'exam_mode') {
+      examMode = !!data.enabled;
+      finishTurn('done', examMode ? '✓ Exam started' : '✓ Exam ended');
+      setMode(examMode ? 'exam' : 'listening');
+      clearWatchdog();
+      if (!ttsActive) resumeListening(300);
+      return;
+    }
+    if (data.type === 'exam_speak') {
+      clearWatchdog();
+      setTranscript((data.text || '').slice(0, 140), 'listening-label');
+      speak(data.text, data.rate || '+0%'); // 'done' re-opens the mic
+      return;
+    }
+    if (data.type === 'exam_heard') {
+      clearWatchdog();
+      finishTurn('done', data.text ? `✓ ${data.text.slice(0, 60)}` : '✓ Heard');
+      if (!ttsActive) resumeListening(100);
+      return;
+    }
+    if (data.type === 'exam_stop_speaking') {
+      if (window.electronAPI.stopTTS) window.electronAPI.stopTTS();
+      ttsOff();
+      clearWatchdog();
+      resumeListening(300);
+      return;
+    }
+    if (data.type === 'exam_state') return; // for the dashboard's exam screen
 
     // ── Dictation Mode ──
     if (data.type === 'dictation_mode') {

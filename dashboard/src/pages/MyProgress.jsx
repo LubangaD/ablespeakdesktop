@@ -6,15 +6,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { TITLE, SECTION, LABEL, MUTED, NUMBER, CARD } from '../lib/ui';
 
-const TITLE = 'font-heading text-[26px] leading-8 font-semibold tracking-[-0.01em] text-[#dae3f4]';
-const SECTION = 'font-heading text-[16px] leading-6 font-semibold text-[#dae3f4]';
-const LABEL = 'text-[13px] leading-5 text-[#c9b8a5]';
-const MUTED = 'text-[13px] leading-5 text-[#c9b8a5]';
-const NUMBER = 'font-heading text-[28px] leading-9 font-semibold tracking-[-0.01em] text-[#dae3f4] tabular-nums';
-const CARD = 'bg-[#141c28] rounded-xl border border-white/[0.06]';
 
-// Worked / didn't work: validated for colour-blind readers on the #141c28 card
+// Worked / didn't work: validated for colour-blind readers on the #151f2e card
 const WORKED = '#3b9ae1';
 const MISSED = '#d4782f';
 
@@ -91,11 +86,11 @@ export default function MyProgress() {
             {since && progress.allTime.total ? ` ${progress.allTime.total} commands since ${dayLabel(since.slice(0, 10))}.` : ''}
           </p>
         </div>
-        <div className="flex gap-1 p-1 rounded-lg bg-[#0f1724] border border-white/[0.06] self-start" role="group" aria-label="Time range">
+        <div className="flex gap-1 p-1 rounded-lg bg-[var(--sunken)] border border-white/[0.06] self-start" role="group" aria-label="Time range">
           {RANGES.map(n => (
             <button key={n} type="button" aria-pressed={days === n} onClick={() => setDays(n)}
               className={`min-h-[36px] px-3 rounded-md text-[13px] transition-colors ${days === n
-                ? 'bg-[#222a37] text-[#ffc880] font-semibold' : 'text-[#c9b8a5] hover:text-[#dae3f4] hover:bg-[#18202d]'}`}>
+                ? 'bg-[var(--raised)] text-[var(--accent-soft)] font-semibold' : 'text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--sunken)]'}`}>
               {n} days
             </button>
           ))}
@@ -103,7 +98,7 @@ export default function MyProgress() {
       </header>
 
       {progressQuery.isError && (
-        <p role="alert" className="text-[13px] text-[#ffb4ab]">Couldn’t load your progress: {progressQuery.error.message}</p>
+        <p role="alert" className="text-[13px] text-[var(--bad)]">Couldn’t load your progress: {progressQuery.error.message}</p>
       )}
 
       <section aria-label="Your numbers" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -119,19 +114,19 @@ export default function MyProgress() {
         <section aria-labelledby="per-day-heading" className={`lg:col-span-8 ${CARD} p-5 flex flex-col gap-4 min-w-0`}>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 id="per-day-heading" className={SECTION}>Commands per day</h2>
-            <div className="flex items-center gap-4 text-[13px] text-[#c9b8a5]" aria-hidden="true">
+            <div className="flex items-center gap-4 text-[13px] text-[var(--ink-quiet)]" aria-hidden="true">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: WORKED }} />Worked</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: MISSED }} />Didn’t work</span>
             </div>
           </div>
           <DailyChart series={series} />
-          <details className="text-[13px] text-[#c9b8a5]">
-            <summary className="cursor-pointer w-fit hover:text-[#dae3f4]">Show as a table</summary>
+          <details className="text-[13px] text-[var(--ink-quiet)]">
+            <summary className="cursor-pointer w-fit hover:text-[var(--ink)]">Show as a table</summary>
             <table className="mt-2 w-full text-left">
               <thead><tr className="text-[12px]"><th className="font-medium py-1">Day</th><th className="font-medium py-1">Worked</th><th className="font-medium py-1">Didn’t work</th></tr></thead>
               <tbody>
                 {series.filter(d => d.total).map(d => (
-                  <tr key={d.day} className="border-t border-white/[0.06] text-[#dae3f4]">
+                  <tr key={d.day} className="border-t border-white/[0.06] text-[var(--ink)]">
                     <td className="py-1">{dayLabel(d.day)}</td><td className="py-1 tabular-nums">{d.succeeded}</td><td className="py-1 tabular-nums">{d.total - d.succeeded}</td>
                   </tr>
                 ))}
@@ -147,7 +142,7 @@ export default function MyProgress() {
             <ol className="flex flex-col divide-y divide-white/[0.06]">
               {progress.topCommands.map(c => (
                 <li key={c.text} className="flex items-center justify-between gap-3 py-2.5">
-                  <span className="text-[14px] text-[#dae3f4] truncate">“{c.text}”</span>
+                  <span className="text-[14px] text-[var(--ink)] truncate">“{c.text}”</span>
                   <span className={`${MUTED} tabular-nums shrink-0`}>{c.count}×</span>
                 </li>
               ))}
@@ -162,7 +157,7 @@ export default function MyProgress() {
         <h2 id="mine-heading" className={`${SECTION} px-5 pt-4 pb-3`}>Your recent commands</h2>
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="text-[12px] leading-4 text-[#c9b8a5] border-y border-white/[0.06]">
+            <tr className="text-[12px] leading-4 text-[var(--ink-quiet)] border-y border-white/[0.06]">
               <th scope="col" className="font-medium px-5 py-2.5 w-[140px]">When</th>
               <th scope="col" className="font-medium px-3 py-2.5">What you said</th>
               <th scope="col" className="font-medium px-5 py-2.5 w-[140px]">Result</th>
@@ -181,7 +176,7 @@ export default function MyProgress() {
 
 function Page({ children }) {
   return (
-    <div className="min-h-full w-full bg-[#0D1627] text-[#dae3f4] px-8 pt-7 pb-10">
+    <div className="min-h-full w-full bg-[var(--page)] text-[var(--ink)] px-8 pt-7 pb-10">
       <div className="flex flex-col w-full gap-6">{children}</div>
     </div>
   );
@@ -192,7 +187,7 @@ function Stat({ label, value, note }) {
     <div className={`${CARD} px-5 py-4 flex flex-col gap-1 min-w-0`}>
       <h3 className={`${LABEL} truncate`}>{label}</h3>
       {value == null || value === ''
-        ? <p className="font-heading text-[16px] leading-9 text-[#8b95a7]">No data yet</p>
+        ? <p className="font-heading text-[16px] leading-9 text-[var(--ink-faint)]">No data yet</p>
         : <p className={NUMBER}>{value}</p>}
       {note && <p className={`${MUTED} truncate`}>{note}</p>}
     </div>
@@ -222,7 +217,7 @@ function DailyChart({ series }) {
         {ticks.map(t => (
           <g key={t}>
             <line x1={AXIS_L} x2={CHART_W} y1={y(t)} y2={y(t)} stroke="#ffffff" strokeOpacity={t === 0 ? 0.16 : 0.06} />
-            <text x={AXIS_L - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill="#8b95a7">{t}</text>
+            <text x={AXIS_L - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill="#a6b2c6">{t}</text>
           </g>
         ))}
         {series.map((d, i) => {
@@ -235,7 +230,7 @@ function DailyChart({ series }) {
               {d.succeeded > 0 && <rect x={x} y={okTop} width={barW} height={Math.max(1, y(0) - okTop)} rx={Math.min(4, barW / 2)} fill={WORKED} />}
               {missed > 0 && <rect x={x} y={missTop} width={barW} height={Math.max(1, okTop - missTop - (d.succeeded ? 2 : 0))} rx={Math.min(4, barW / 2)} fill={MISSED} />}
               {i % labelEvery === (series.length - 1) % labelEvery && (
-                <text x={x + barW / 2} y={CHART_H - 6} textAnchor="middle" fontSize="11" fill="#8b95a7">{dayLabel(d.day)}</text>
+                <text x={x + barW / 2} y={CHART_H - 6} textAnchor="middle" fontSize="11" fill="#a6b2c6">{dayLabel(d.day)}</text>
               )}
               {/* A hit area taller and wider than the bar */}
               <rect x={AXIS_L + i * slot} y={TOP} width={slot} height={plotH} fill="transparent"
@@ -251,11 +246,11 @@ function DailyChart({ series }) {
         const d = series[hover];
         const left = ((AXIS_L + hover * slot + slot / 2) / CHART_W) * 100;
         return (
-          <div className="pointer-events-none absolute top-0 -translate-x-1/2 rounded-lg bg-[#222a37] border border-white/10 px-3 py-2 text-[12px] leading-5 shadow-lg whitespace-nowrap"
+          <div className="pointer-events-none absolute top-0 -translate-x-1/2 rounded-lg bg-[var(--raised)] border border-white/10 px-3 py-2 text-[12px] leading-5 shadow-lg whitespace-nowrap"
             style={{ left: `${Math.min(88, Math.max(12, left))}%` }}>
-            <p className="font-semibold text-[#dae3f4]">{dayLabel(d.day)}</p>
-            <p className="text-[#c9b8a5]"><span className="inline-block w-2 h-2 rounded-sm mr-1.5" style={{ background: WORKED }} />Worked <span className="text-[#dae3f4] tabular-nums">{d.succeeded}</span></p>
-            <p className="text-[#c9b8a5]"><span className="inline-block w-2 h-2 rounded-sm mr-1.5" style={{ background: MISSED }} />Didn’t work <span className="text-[#dae3f4] tabular-nums">{d.total - d.succeeded}</span></p>
+            <p className="font-semibold text-[var(--ink)]">{dayLabel(d.day)}</p>
+            <p className="text-[var(--ink-quiet)]"><span className="inline-block w-2 h-2 rounded-sm mr-1.5" style={{ background: WORKED }} />Worked <span className="text-[var(--ink)] tabular-nums">{d.succeeded}</span></p>
+            <p className="text-[var(--ink-quiet)]"><span className="inline-block w-2 h-2 rounded-sm mr-1.5" style={{ background: MISSED }} />Didn’t work <span className="text-[var(--ink)] tabular-nums">{d.total - d.succeeded}</span></p>
           </div>
         );
       })()}
@@ -272,11 +267,11 @@ function MyCommand({ row }) {
     ? `${isoDay(when) === isoDay(new Date()) ? 'Today' : dayLabel(isoDay(when))}, ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : '';
   return (
-    <tr className="hover:bg-[#18202d]/60">
-      <td className="px-5 py-3 text-[13px] text-[#c9b8a5] whitespace-nowrap tabular-nums">{whenText}</td>
-      <td className="px-3 py-3 text-[14px] text-[#dae3f4] break-words">{text ? `“${text}”` : <span className="text-[#c9b8a5]">Typed or follow-up command</span>}</td>
+    <tr className="hover:bg-white/[0.022]">
+      <td className="px-5 py-3 text-[13px] text-[var(--ink-quiet)] whitespace-nowrap tabular-nums">{whenText}</td>
+      <td className="px-3 py-3 text-[14px] text-[var(--ink)] break-words">{text ? `“${text}”` : <span className="text-[var(--ink-quiet)]">Typed or follow-up command</span>}</td>
       <td className="px-5 py-3">
-        <span className="flex items-center gap-1.5 text-[13px] whitespace-nowrap text-[#c9b8a5]">
+        <span className="flex items-center gap-1.5 text-[13px] whitespace-nowrap text-[var(--ink-quiet)]">
           <span className="w-2 h-2 rounded-sm" style={{ background: worked ? WORKED : MISSED }} aria-hidden="true" />
           {row.outcome === 'repaired' ? 'Worked on retry' : worked ? 'Worked' : row.outcome === 'superseded' ? 'Tried again' : 'Didn’t work'}
         </span>

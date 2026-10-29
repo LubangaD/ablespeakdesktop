@@ -109,10 +109,10 @@ export default function Context() {
           aria-pressed={showDebug}
           onClick={() => setShowDebug(on => !on)}
           className={`${BUTTON} border shrink-0 ${showDebug
-            ? 'bg-[#222a37] text-[#ffc880] border-[#f5a623]/40'
-            : 'bg-[#18202d] hover:bg-[#222a37] text-[#dae3f4] border-white/[0.08]'}`}
+            ? 'bg-[var(--raised)] text-[var(--accent-soft)] border-[#f5a623]/40'
+            : 'bg-[var(--sunken)] hover:bg-[var(--raised)] text-[var(--ink)] border-white/[0.08]'}`}
         >
-          <Icon name={showDebug ? 'check' : 'bug_report'} className={`text-[18px] ${showDebug ? '' : 'text-[#c9b8a5]'}`} />
+          <Icon name={showDebug ? 'check' : 'bug_report'} className={`text-[18px] ${showDebug ? '' : 'text-[var(--ink-quiet)]'}`} />
           <span>Show debug info</span>
         </button>
       </div>
@@ -122,7 +122,7 @@ export default function Context() {
         <div className={`w-full lg:w-[360px] border-b lg:border-b-0 lg:border-r ${DIVIDER} flex flex-col shrink-0`}>
           <div className="relative flex-1 min-h-0">
             <div className="overflow-y-auto p-3 max-h-[520px] lg:max-h-none lg:absolute lg:inset-0">
-              <div id="context-tree-label" className="px-3 py-1.5 text-[12px] leading-4 text-[#c9b8a5]">
+              <div id="context-tree-label" className="px-3 py-1.5 text-[12px] leading-4 text-[var(--ink-quiet)]">
                 Context ({topKeys.length})
               </div>
               {contextTree ? (
@@ -140,7 +140,7 @@ export default function Context() {
                   ))}
                 </ul>
               ) : (
-                <p className="px-3 py-3 text-[13px] leading-5 text-[#8b95a7]">
+                <p className="px-3 py-3 text-[13px] leading-5 text-[var(--ink-faint)]">
                   Waiting for context. The browser part appears when the Chrome extension sends an update; the desktop
                   part when AbleSpeak can read the window in front.
                 </p>
@@ -157,17 +157,17 @@ export default function Context() {
                 <div className={`flex items-start justify-between flex-wrap gap-4 pb-4 border-b ${DIVIDER}`}>
                   <div className="min-w-0 flex flex-col gap-1">
                     <div className="flex items-baseline gap-2 flex-wrap">
-                      <h2 className="font-mono text-[15px] leading-6 font-semibold text-[#dae3f4] [overflow-wrap:anywhere]" aria-live="polite">{selected.path}</h2>
+                      <h2 className="font-mono text-[15px] leading-6 font-semibold text-[var(--ink)] [overflow-wrap:anywhere]" aria-live="polite">{selected.path}</h2>
                       <span className={`${MUTED} whitespace-nowrap`}>{kindLabel(selectedValue)}</span>
                     </div>
                     <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-[13px] leading-5">
-                      <span className="flex items-center gap-1.5 text-[#c9b8a5]">
-                        <Icon name={source.icon} className="text-[16px] text-[#8b95a7]" />
+                      <span className="flex items-center gap-1.5 text-[var(--ink-quiet)]">
+                        <Icon name={source.icon} className="text-[16px] text-[var(--ink-faint)]" />
                         <span>{source.text}</span>
                       </span>
                       {live === undefined && (
                         <>
-                          <span className="text-[#4a5466]" aria-hidden="true">·</span>
+                          <span className="text-[var(--idle)]" aria-hidden="true">·</span>
                           <span className="flex items-center gap-1.5">
                             <span className={`w-2 h-2 rounded-full shrink-0 ${DOT.warn}`} aria-hidden="true" />
                             <span className={INK.warn}>No longer there; last value shown</span>
@@ -179,7 +179,7 @@ export default function Context() {
 
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={copyValue} className={QUIET}>
-                      <Icon name={copyState === 'copied' ? 'check' : 'content_copy'} className={`text-[18px] ${copyState === 'copied' ? INK.ok : 'text-[#c9b8a5]'}`} />
+                      <Icon name={copyState === 'copied' ? 'check' : 'content_copy'} className={`text-[18px] ${copyState === 'copied' ? INK.ok : 'text-[var(--ink-quiet)]'}`} />
                       <span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? "Couldn't copy" : 'Copy value'}</span>
                     </button>
                     <span className="sr-only" role="status">
@@ -196,22 +196,22 @@ export default function Context() {
                       Refreshes every {source.every}
                     </span>
                   </div>
-                  <div className="bg-[#0f1724] border border-white/[0.06] rounded-lg p-4 overflow-auto max-h-[560px]" tabIndex={0} aria-labelledby="context-value-label">
-                    <pre data-private className="font-mono text-[12px] leading-5 text-[#dae3f4] whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  <div className="bg-[var(--sunken)] border border-white/[0.06] rounded-lg p-4 overflow-auto max-h-[560px]" tabIndex={0} aria-labelledby="context-value-label">
+                    <pre data-private className="font-mono text-[12px] leading-5 text-[var(--ink)] whitespace-pre-wrap [overflow-wrap:anywhere]">
                       {valueIsJson ? <code className="block"><JsonText text={valueText} /></code> : valueText}
                     </pre>
                   </div>
                 </div>
               </div>
 
-              <div className={`pt-4 border-t ${DIVIDER} flex items-center justify-between flex-wrap gap-x-4 gap-y-1 text-[12px] leading-5 text-[#c9b8a5]`}>
-                <span>Source: <code className="font-mono text-[#dae3f4]">{source.api}</code></span>
-                <span>Read: <strong className="font-normal text-[#dae3f4]">every {source.every}</strong></span>
+              <div className={`pt-4 border-t ${DIVIDER} flex items-center justify-between flex-wrap gap-x-4 gap-y-1 text-[12px] leading-5 text-[var(--ink-quiet)]`}>
+                <span>Source: <code className="font-mono text-[var(--ink)]">{source.api}</code></span>
+                <span>Read: <strong className="font-normal text-[var(--ink)]">every {source.every}</strong></span>
               </div>
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-center">
-              <p className="text-[13px] leading-5 text-[#8b95a7]">Choose an item on the left to see its value.</p>
+              <p className="text-[13px] leading-5 text-[var(--ink-faint)]">Choose an item on the left to see its value.</p>
             </div>
           )}
         </section>
@@ -310,16 +310,16 @@ function ContextTreeNode({ label, value, keys, onSelect, selectedPath, defaultOp
   const isSelected = selectedPath === path;
 
   const rowClass = `w-full min-h-[44px] px-3 py-2 rounded-lg font-mono text-[13px] flex items-center gap-2 text-left transition-colors ${isSelected
-    ? 'bg-[#18202d] text-[#ffc880] font-medium'
-    : 'text-[#dae3f4] hover:bg-[#18202d]'}`;
+    ? 'bg-[var(--sunken)] text-[var(--accent-soft)] font-medium'
+    : 'text-[var(--ink)] hover:bg-[var(--sunken)]'}`;
 
   if (!isExpandable) {
     return (
       <li>
         <button type="button" className={rowClass} aria-current={isSelected ? 'true' : undefined} onClick={() => onSelect(path, keys, value)}>
-          <Icon name="data_object" className="text-[16px] shrink-0 text-[#4a5466]" />
+          <Icon name="data_object" className="text-[16px] shrink-0 text-[var(--idle)]" />
           <span className="shrink-0">{label}</span>
-          <span className={`truncate text-[12px] font-normal ml-auto ${isSelected ? 'text-[#ffc880]' : 'text-[#8b95a7]'}`} data-private>{preview(value)}</span>
+          <span className={`truncate text-[12px] font-normal ml-auto ${isSelected ? 'text-[var(--accent-soft)]' : 'text-[var(--ink-faint)]'}`} data-private>{preview(value)}</span>
         </button>
       </li>
     );
@@ -344,10 +344,10 @@ function ContextTreeNode({ label, value, keys, onSelect, selectedPath, defaultOp
           if (e.key === 'ArrowLeft' && open) { e.preventDefault(); setOpen(false); }
         }}
       >
-        <Icon name={open ? 'expand_more' : 'chevron_right'} className="text-[18px] shrink-0 text-[#8b95a7]" />
-        <Icon name={open ? 'folder_open' : 'folder'} className="text-[16px] shrink-0 text-[#c9b8a5]" />
+        <Icon name={open ? 'expand_more' : 'chevron_right'} className="text-[18px] shrink-0 text-[var(--ink-faint)]" />
+        <Icon name={open ? 'folder_open' : 'folder'} className="text-[16px] shrink-0 text-[var(--ink-quiet)]" />
         <span className="truncate">{label}</span>
-        <span className={`ml-auto shrink-0 text-[12px] font-sans font-normal ${isSelected ? 'text-[#ffc880]' : 'text-[#8b95a7]'}`}>
+        <span className={`ml-auto shrink-0 text-[12px] font-sans font-normal ${isSelected ? 'text-[var(--accent-soft)]' : 'text-[var(--ink-faint)]'}`}>
           {entries.length} {isArray ? (entries.length === 1 ? 'item' : 'items') : (entries.length === 1 ? 'key' : 'keys')}
         </span>
       </button>

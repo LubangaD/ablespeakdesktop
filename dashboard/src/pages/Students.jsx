@@ -174,10 +174,10 @@ const FIELD_LABEL = `block mb-1.5 ${LABEL}`;
 const SELECT = `${FIELD} cursor-pointer`;
 const INPUT = FIELD;
 const TEXTAREA = `${FIELD} py-2.5 resize-none`;
-const HELP = 'text-[13px] leading-5 text-[#c9b8a5]';
-const ERROR_TEXT = 'text-[13px] leading-5 text-[#ffb4ab]';
-const NO_DATA = 'text-[13px] text-[#8b95a7]';
-const SMALL_DANGER = 'inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-lg text-[13px] font-medium bg-[#ffb4ab]/10 hover:bg-[#ffb4ab]/15 text-[#ffb4ab] border border-[#ffb4ab]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+const HELP = 'text-[13px] leading-5 text-[var(--ink-quiet)]';
+const ERROR_TEXT = 'text-[13px] leading-5 text-[var(--bad)]';
+const NO_DATA = 'text-[13px] text-[var(--ink-faint)]';
+const SMALL_DANGER = 'inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-lg text-[13px] font-medium bg-[#ffb3aa]/10 hover:bg-[#ffb3aa]/15 text-[var(--bad)] border border-[#ffb3aa]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 /** Status as a small dot and a word. */
 function Status({ tone, children, className = '' }) {
@@ -301,23 +301,23 @@ function FlagGroup({ flags, goal, good, onAck, ackingId }) {
 
 // ── Progress chart: an SVG (1000 × 320, stretched to the card) ──
 // Auto and manual probes are blue and orange, a pair validated for
-// colour-blind readers on the #141c28 card; they also differ in shape.
+// colour-blind readers on the #151f2e card; they also differ in shape.
 
 const CHART = {
   grid: 'rgba(255,255,255,0.06)',
   axis: 'rgba(255,255,255,0.16)',
-  ink: '#8b95a7',
-  faint: '#8b95a7',
+  ink: '#a6b2c6',
+  faint: '#a6b2c6',
   phase: 'rgba(201,184,165,0.55)',
-  trend: '#dae3f4',
+  trend: '#dbe4f2',
   auto: '#3b9ae1',
   manual: '#d4782f',
-  aim: '#c9b8a5',
-  today: '#68d9c3',
-  concern: '#ffb4ab',
-  good: '#68d9c3',
-  labelBg: '#141c28',
-  pointEdge: '#141c28',
+  aim: '#c6b9a9',
+  today: '#6fdcc6',
+  concern: '#ffb3aa',
+  good: '#6fdcc6',
+  labelBg: '#151f2e',
+  pointEdge: '#151f2e',
   font: "'Roboto Flex Variable', Roboto, system-ui, sans-serif",
 };
 const VB_W = 1000, VB_H = 320;
@@ -427,7 +427,7 @@ function ProgressChart({ goal, points, phases, flags }) {
   return (
     <div>
       {/* Legend above the chart */}
-      <div className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pb-4 border-b ${DIVIDER} text-[12px] leading-4 text-[#c9b8a5]`}>
+      <div className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pb-4 border-b ${DIVIDER} text-[12px] leading-4 text-[var(--ink-quiet)]`}>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2" aria-hidden="true">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#3b9ae1] inline-block" />
@@ -438,22 +438,22 @@ function ProgressChart({ goal, points, phases, flags }) {
             <span>Manual probe</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-6 h-0 border-t-2 border-dashed border-[#c9b8a5] inline-block" />
+            <span className="w-6 h-0 border-t-2 border-dashed border-[var(--ink-quiet)] inline-block" />
             <span>Aim line (target {fmt(goal.target_value)})</span>
           </div>
           {showTrend && (
             <div className="flex items-center gap-2">
-              <span className="w-6 h-0.5 bg-[#dae3f4] inline-block" />
+              <span className="w-6 h-0.5 bg-[var(--ink)] inline-block" />
               <span>Trend line</span>
             </div>
           )}
           <div className="flex items-center gap-2">
-            <span className="h-3.5 w-0 border-l border-dashed border-[#c9b8a5] inline-block" />
+            <span className="h-3.5 w-0 border-l border-dashed border-[var(--ink-quiet)] inline-block" />
             <span>Phase change</span>
           </div>
           {todayInRange && (
             <div className="flex items-center gap-2">
-              <span className="h-3.5 w-0 border-l border-dotted border-[#68d9c3] inline-block" />
+              <span className="h-3.5 w-0 border-l border-dotted border-[var(--ok)] inline-block" />
               <span>Today</span>
             </div>
           )}
@@ -499,7 +499,7 @@ function ProgressChart({ goal, points, phases, flags }) {
               <g key={phase.id}>
                 <line x1={x} y1={20} x2={x} y2={AXIS_Y} stroke={CHART.phase} strokeWidth={1} strokeDasharray="4 4" />
                 <rect x={boxX} y={12} width={boxW} height={20} rx={4} fill={CHART.labelBg} stroke="rgba(255,255,255,0.06)" />
-                <text x={boxX + boxW / 2} y={26} fill="#c9b8a5" fontSize={11} textAnchor="middle">{label}</text>
+                <text x={boxX + boxW / 2} y={26} fill="#c6b9a9" fontSize={11} textAnchor="middle">{label}</text>
                 <title>{`Phase change on ${fmtDate(phase.changed_at)}: ${phase.label}${phase.note ? ` — ${phase.note}` : ''}`}</title>
               </g>
             );
@@ -693,7 +693,7 @@ function ProgressSection({ student, goal, goals, goalsLoading, points, phases, f
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 id="progress-heading" className={SECTION}>
           Progress{measure ? `: ${measure.label.toLowerCase()}` : ''}{' '}
-          <span className="text-[#c9b8a5] font-normal">(for {student.name})</span>
+          <span className="text-[var(--ink-quiet)] font-normal">(for {student.name})</span>
         </h2>
         {measure && <span className={MUTED}>Goal {goalNumber}: {measure.description}</span>}
       </div>
@@ -886,7 +886,7 @@ function GoalsCard({ student, goals, goalsLoading, selectedGoalId, onSelect, onC
                 onClick={() => onSelect(g.id)}
                 aria-pressed={selected}
                 className={`w-full text-left px-3 py-2.5 rounded-lg cursor-pointer flex items-center justify-between gap-3 transition-colors min-h-[56px] border ${
-                  selected ? 'bg-[#18202d] border-[#f5a623]/50' : 'border-transparent hover:bg-[#18202d]'
+                  selected ? 'bg-[var(--sunken)] border-[#f5a623]/50' : 'border-transparent hover:bg-[var(--sunken)]'
                 }`}
               >
                 <span className="min-w-0">
@@ -1150,7 +1150,7 @@ function WhoIsHerePanel({ students, active, statsById, computer }) {
               type="button"
               aria-label="Clear user name"
               onClick={() => { setNewName(''); nameRef.current?.focus(); }}
-              className="absolute right-1 w-9 h-9 rounded-md flex items-center justify-center text-[#c9b8a5] hover:text-[#dae3f4] hover:bg-[#222a37] cursor-pointer transition-colors"
+              className="absolute right-1 w-9 h-9 rounded-md flex items-center justify-center text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--raised)] cursor-pointer transition-colors"
             >
               <CloseIcon />
             </button>
@@ -1166,12 +1166,12 @@ function WhoIsHerePanel({ students, active, statsById, computer }) {
       {students.length > 0 && (
         <div className={`mt-5 pt-3 border-t ${DIVIDER}`}>
           <details className="group">
-            <summary className="flex flex-wrap items-center justify-between gap-x-4 cursor-pointer min-h-[36px] text-[13px] leading-5 text-[#c9b8a5] hover:text-[#dae3f4] transition-colors list-none [&::-webkit-details-marker]:hidden">
+            <summary className="flex flex-wrap items-center justify-between gap-x-4 cursor-pointer min-h-[36px] text-[13px] leading-5 text-[var(--ink-quiet)] hover:text-[var(--ink)] transition-colors list-none [&::-webkit-details-marker]:hidden">
               <span className="flex items-center gap-2">
                 <Svg className="w-4 h-4 transition-transform group-open:rotate-90"><polyline points="9 18 15 12 9 6" /></Svg>
                 <span>Remove a user ({students.length})</span>
               </span>
-              <span className="text-[13px] text-[#8b95a7]">Requires facilitator confirmation</span>
+              <span className="text-[13px] text-[var(--ink-faint)]">Requires facilitator confirmation</span>
             </summary>
             <div className={`${WELL} mt-2 px-4 divide-y divide-white/[0.06]`}>
               {students.map(s => {
@@ -1240,7 +1240,7 @@ function Stat({ label, value, note }) {
     <div className={`${CARD} px-5 py-4 flex flex-col gap-1 min-w-0`}>
       <h3 className={`${LABEL} truncate`}>{label}</h3>
       {empty
-        ? <p className="font-heading text-[16px] leading-9 text-[#8b95a7]">No data yet</p>
+        ? <p className="font-heading text-[16px] leading-9 text-[var(--ink-faint)]">No data yet</p>
         : <p className={NUMBER}>{value}</p>}
       {note && <p className={`${MUTED} truncate`}>{note}</p>}
     </div>
@@ -1326,7 +1326,7 @@ function RosterTable({ students, statsById, analyticsLoading, selectedId, onSele
                 <tr
                   key={s.id}
                   onClick={() => onSelect(s.id)}
-                  className={`cursor-pointer transition-colors border-l-2 ${selected ? 'bg-[#18202d] border-l-[#f5a623]' : 'hover:bg-[#18202d]/60 border-l-transparent'}`}
+                  className={`cursor-pointer transition-colors border-l-2 ${selected ? 'bg-[var(--sunken)] border-l-[var(--accent)]' : 'hover:bg-[var(--raised)] border-l-transparent'}`}
                 >
                   <th scope="row" className={`${TD} pl-5 font-normal whitespace-nowrap`}>
                     <button
@@ -1338,7 +1338,7 @@ function RosterTable({ students, statsById, analyticsLoading, selectedId, onSele
                       <span className={`w-2 h-2 rounded-full shrink-0 ${inSession ? DOT.ok : DOT.idle}`} aria-hidden="true" />
                       <span className={selected ? 'font-medium' : ''}>{s.name}</span>
                       {selected && (
-                        <span className="text-[13px] text-[#c9b8a5]" aria-hidden="true">Selected</span>
+                        <span className="text-[13px] text-[var(--ink-quiet)]" aria-hidden="true">Selected</span>
                       )}
                     </button>
                   </th>
@@ -1357,7 +1357,7 @@ function RosterTable({ students, statsById, analyticsLoading, selectedId, onSele
                   <td className={`${TD} pr-5`}>
                     {inSession
                       ? <Status tone="ok">Active now{since ? ` (${since})` : ''}</Status>
-                      : last ? <span className="text-[13px] text-[#c9b8a5] tabular-nums">{last}</span> : noData}
+                      : last ? <span className="text-[13px] text-[var(--ink-quiet)] tabular-nums">{last}</span> : noData}
                   </td>
                 </tr>
               );
@@ -1521,7 +1521,7 @@ export default function Students() {
         {/* How well they are heard lives on the Speech profile page */}
         <Link
           to={`/speech?student=${student.id}`}
-          className="inline-flex items-center gap-2 self-start min-h-[44px] rounded-lg text-[14px] text-[#ffc880] hover:underline"
+          className="inline-flex items-center gap-2 self-start min-h-[44px] rounded-lg text-[14px] text-[var(--accent-soft)] hover:underline"
         >
           <MicIcon />
           How well AbleSpeak hears {student.name}, and their speech settings

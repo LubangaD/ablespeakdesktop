@@ -100,6 +100,33 @@ test('sleep/wake still works independently of dismiss', () => {
   assert.equal(broadcasts.at(-1).type, 'voice_awake');
 });
 
+test('"Wake up, able speak." wakes it, with the name on either side, as recognition writes it', () => {
+  for (const said of ['Wake up, able speak.', 'Wake up able speak', 'AbleSpeak, wake up', 'Hey able speak', 'Okay, wake up please.', 'able speak']) {
+    const { proxy, broadcasts } = makeProxy();
+    proxy._handleVoiceControl('sleep');
+    proxy._handleVoiceControl(said);
+    assert.equal(proxy._sleeping, false, said);
+    assert.equal(broadcasts.at(-1).type, 'voice_awake', said);
+  }
+});
+
+test('while asleep, room talk that only mentions waking up is still ignored', () => {
+  for (const said of ['I need to wake up early tomorrow', 'wake up and open word', 'open word']) {
+    const { proxy } = makeProxy();
+    proxy._handleVoiceControl('sleep');
+    proxy._handleVoiceControl(said);
+    assert.equal(proxy._sleeping, true, said);
+  }
+});
+
+test('"Come back, AbleSpeak" brings back a hidden voice bar', () => {
+  const { proxy, broadcasts } = makeProxy();
+  proxy._handleVoiceControl('hide');
+  proxy._handleVoiceControl('Come back, AbleSpeak.');
+  assert.equal(proxy._dismissed, false);
+  assert.equal(broadcasts.at(-1).type, 'voice_restored');
+});
+
 // ── Interrupt (pre-existing — must survive the new dismissed-branch ordering) ──
 
 test('interrupt still cancels immediately', () => {

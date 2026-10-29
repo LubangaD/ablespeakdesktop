@@ -1,13 +1,15 @@
 /**
- * Voice & words — how well AbleSpeak hears the person signed in, and the
- * settings that help (sensitivity, pause length, their words, shortcuts,
- * routines). With the admin pages unlocked, another user can be chosen.
+ * Voice & words — how well AbleSpeak hears the person signed in, their voice
+ * ("My voice", the voiceprint), and the settings that help (sensitivity,
+ * pause length, their words, shortcuts, routines). With the admin pages
+ * unlocked, another user can be chosen.
  * Laid out in the dashboard's everyday style (src/lib/ui.js).
  */
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { RecognitionReadout, SpeechSettings } from '../components/StudentSpeech';
+import MyVoice from '../components/MyVoice';
 import { TITLE, SECTION, MUTED, PAGE, CARD, PRIMARY, FIELD, INK } from '../lib/ui';
 
 /** A Material Symbols icon, hidden from screen readers. */
@@ -19,7 +21,7 @@ function Icon({ name, className = '' }) {
 function Prompt({ icon, title, children, action }) {
   return (
     <section aria-labelledby="speech-prompt-heading" className={`${CARD} p-5 flex items-start gap-3`}>
-      <Icon name={icon} className="text-[20px] text-[#c9b8a5] mt-0.5 shrink-0" />
+      <Icon name={icon} className="text-[20px] text-[var(--ink-quiet)] mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0 flex flex-col">
         <h2 id="speech-prompt-heading" className={SECTION}>{title}</h2>
         <p className={`${MUTED} mt-0.5`}>{children}</p>
@@ -73,7 +75,7 @@ export default function SpeechProfile() {
               <div className="relative">
                 <select id="student-select" value={student ? String(student.id) : ''} onChange={choose}
                   disabled={isLoading || !!error || noStudents}
-                  className={`${FIELD} focus:ring-0 bg-none appearance-none pr-10 cursor-pointer disabled:cursor-not-allowed disabled:text-[#c9b8a5]`}>
+                  className={`${FIELD} focus:ring-0 bg-none appearance-none pr-10 cursor-pointer disabled:cursor-not-allowed disabled:text-[var(--ink-quiet)]`}>
                   {isLoading && <option value="">Loading users…</option>}
                   {error && <option value="">Users not loaded</option>}
                   {noStudents && <option value="">No users yet</option>}
@@ -84,7 +86,7 @@ export default function SpeechProfile() {
                     </option>
                   ))}
                 </select>
-                <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-[#c9b8a5]">
+                <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-[var(--ink-quiet)]">
                   <Icon name="expand_more" className="text-[20px]" />
                 </div>
               </div>
@@ -120,6 +122,7 @@ export default function SpeechProfile() {
         {student && (
           <>
             <RecognitionReadout studentId={student.id} studentName={own ? 'you' : student.name} />
+            <MyVoice key={`voice-${student.id}`} studentId={student.id} own={own} />
             <SpeechSettings key={student.id} studentId={student.id} studentName={student.name} own={own} />
           </>
         )}

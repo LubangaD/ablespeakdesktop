@@ -6,7 +6,7 @@
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { findElement, defaultAction, describeElements, TEXT_SCOPES, findDocument, isCacheFresh } from './screen-model.js';
+import { findElement, defaultAction, describeElements, TEXT_SCOPES, findDocument, isCacheFresh, nameMatch, planAction } from './screen-model.js';
 import { classifyConsequential } from './safety.js';
 import { ToolRegistry } from './tool-registry.js';
 
@@ -42,6 +42,76 @@ test('a type narrows the search, and unknown names find nothing', () => {
   assert.equal(findElement(MODEL, 'save', { type: 'Edit' }), null);
   assert.equal(findElement(MODEL, 'print'), null);
   assert.equal(findElement(MODEL, ''), null);
+});
+
+// ── Found only by part of its name: not pressed (agent eval, 23 Oct 2026) ──
+
+test('a name found only inside another is not pressed; the AI hears the closest (Calculator)', () => {
+  const calculator = { elements: [
+    { ref: 'm', type: 'Button', name: 'Memory add', actions: ['invoke'] },
+    { ref: 'p', type: 'Button', name: 'Plus', actions: ['invoke'] },
+  ] };
+  const found = findElement(calculator, 'add');
+  assert.equal(found.ref, 'm');
+  assert.deepEqual(planAction(found, { name: 'add' }), { closest: 'Memory add' });
+  assert.deepEqual(planAction(found, { ref: 'm' }), { action: 'invoke' }, 'chosen by ref, it is pressed');
+  assert.deepEqual(planAction(findElement(MODEL, 'page next'), { name: 'page next' }), { closest: 'Next page' });
+});
+
+test('a name the control begins with is still pressed, plurals too', () => {
+  assert.equal(nameMatch('Save', 'save'), 'exact');
+  assert.equal(nameMatch('Send now', 'send'), 'prefix');
+  assert.equal(nameMatch('Downloads', 'download'), 'prefix');
+  assert.equal(nameMatch('Address and search bar', 'add'), 'partial');
+  assert.equal(nameMatch('Memory add', 'add'), 'partial');
+  assert.deepEqual(planAction(findElement(MODEL, 'save'), { name: 'save' }), { action: 'invoke' });
+});
+
+test('typing into "File name:" goes to the field, not its label or the combo box (Save As, 24 Oct 2026)', () => {
+  const dialog = { elements: [
+    { ref: 'label', type: 'Text', name: 'File name:', actions: ['set_value'] },
+    { ref: 'combo', type: 'ComboBox', name: 'File name:', actions: ['set_value', 'expand_collapse'] },
+    { ref: 'edit', type: 'Edit', name: 'File name:', actions: ['set_value', 'read_text'] },
+    { ref: 'save', type: 'Button', name: 'Save', actions: ['invoke'] },
+    { ref: 'saveLabel', type: 'Text', name: 'Save', actions: [] },
+  ] };
+  assert.equal(findElement(dialog, 'File name:', { action: 'set_value' }).ref, 'edit');
+  assert.equal(findElement(dialog, 'File name', { action: 'read_text' }).ref, 'edit');
+  assert.equal(findElement(dialog, 'File name', { action: 'focus' }).ref, 'edit');
+  assert.equal(findElement(dialog, 'Save', { action: 'invoke' }).ref, 'save');
+  assert.equal(findElement(dialog, 'Save').ref, 'save', 'with no action, a control with actions still beats a label');
+});
+
+test('a digit finds the key named for it (Calculator\'s "Seven")', () => {
+  const keys = { elements: [
+    { ref: 'd', type: 'Text', name: 'Display is 7', actions: [] },
+    { ref: '7', type: 'Button', name: 'Seven', actions: ['invoke'] },
+    { ref: '0', type: 'Button', name: 'Zero', actions: ['invoke'] },
+  ] };
+  assert.equal(findElement(keys, '7').ref, '7');
+  assert.equal(findElement(keys, '0').ref, '0');
+  assert.equal(nameMatch('Seven', '7'), 'exact');
+});
+
+test('a whole word inside a name beats part of a word', () => {
+  const browser = { elements: [
+    { ref: 'a', type: 'Edit', name: 'Address and search bar', actions: ['set_value'] },
+    { ref: 'b', type: 'Button', name: 'Memory add', actions: ['invoke'] },
+  ] };
+  assert.equal(findElement(browser, 'add').ref, 'b');
+});
+
+test('reading or focusing by part of a name is still allowed', () => {
+  const doc = { ref: 'd', type: 'Document', name: 'Essay draft', actions: ['read_text'] };
+  assert.deepEqual(planAction(doc, { name: 'draft', action: 'read_text' }), { action: 'read_text' });
+  assert.deepEqual(planAction(doc, { name: 'draft', action: 'focus' }), { action: 'focus' });
+});
+
+test('a control asked to be pressed in a way it doesn\'t take is pressed the way it does (Settings)', () => {
+  assert.deepEqual(planAction({ ref: 'l', type: 'ListItem', name: 'Display', actions: ['invoke'] }, { name: 'Display', action: 'select' }), { action: 'invoke' });
+  assert.deepEqual(planAction({ ref: 't', type: 'ListItem', name: 'Sound', actions: ['select'] }, { name: 'Sound', action: 'invoke' }), { action: 'select' });
+  assert.deepEqual(planAction({ ref: 'f', type: 'Edit', name: 'Search', actions: ['set_value'] }, { name: 'Search', action: 'set_value' }), { action: 'set_value' }, 'typing is never turned into a press');
+  assert.deepEqual(planAction({ ref: 'x', type: 'Text', name: 'Status', actions: [] }, { name: 'Status', action: 'invoke' }), { action: 'invoke' }, 'nothing to press it with: it fails, and click_desktop_element clicks it instead');
 });
 
 test('"press it" uses the control\'s own action', () => {

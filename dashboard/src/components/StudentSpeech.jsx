@@ -18,15 +18,60 @@ const SENSITIVITY_CHOICES = [
   { value: 'noisy', label: 'Noisy room', hint: 'Ignores more background talk, so speak up a little.' },
 ];
 
+// Where speech is recognised (listening.speechEngine; server/src/remote-asr.js, local-asr.js)
+const ENGINE_CHOICES = [
+  { value: 'auto', label: 'Real time (recommended)', hint: 'Words are recognised by AbleSpeak’s speech service as they are spoken, and commands run as soon as the speaking stops. When it can’t be reached, the online service listens instead.' },
+  { value: 'local', label: 'This computer only', hint: 'Speech never leaves this computer and works with no internet. Needs the offline speech pack. English only.' },
+  { value: 'online', label: 'Online service only', hint: 'Every phrase goes to the online service (Google), as before. Use it for Swahili or mixed languages.' },
+];
+
+// What the speech service (speechService) and the engine on this computer
+// (speechOnComputer) are doing, from GET /api/health
+const SERVICE_STATE = {
+  ready: 'The speech service is ready.',
+  connecting: 'The speech service is waking up (up to a minute)…',
+  reconnecting: 'Reconnecting to the speech service…',
+  asleep: 'The speech service is asleep and wakes with the next phrase.',
+  failed: 'The speech service refused this computer’s key.',
+  off: 'The speech service is off.',
+  unconfigured: 'The speech service isn’t set up on this computer.',
+};
+const ENGINE_STATE = {
+  ready: 'Speech recognition on this computer is ready.',
+  starting: 'Speech recognition on this computer is loading…',
+  missing: 'The offline speech pack isn’t installed on this computer.',
+  failed: 'Speech recognition on this computer isn’t working right now.',
+  off: 'Speech recognition on this computer is off.',
+};
+
+/** One line under the engine choice: is the chosen engine working? */
+function EngineStatus({ choice, own }) {
+  const { data } = useQuery({ queryKey: ['health'], queryFn: () => api.getHealth(), refetchInterval: 10000 });
+  if (choice === 'online') return null;
+  const remote = choice === 'auto';
+  const state = remote ? data?.speechService?.state : data?.speechOnComputer?.state;
+  if (!state) return null;
+  const working = state === 'ready' || (remote && state === 'asleep');
+  const consequence = working ? ''
+    : choice === 'local' ? ` Until it works, AbleSpeak can’t hear ${own ? 'you' : 'them'}.`
+    : ' Until it works, the online service listens instead.';
+  const text = remote ? (SERVICE_STATE[state] || SERVICE_STATE.off) : (ENGINE_STATE[state] || ENGINE_STATE.off);
+  return (
+    <p role="status" className={`mt-2 ${working ? MUTED : 'text-[13px] leading-5 text-[var(--bad)]'}`}>
+      {text + consequence}
+    </p>
+  );
+}
+
 // The limits the server checks (server/src/student-profile.js)
 const PAUSE = { min: 0.8, max: 4 };
 const MAX_LENGTH = { word: 40, say: 60, means: 200, name: 60 };
 
 // A group's name inside the settings card
-const GROUP_LABEL = 'block text-[14px] leading-5 font-medium text-[#dae3f4]';
+const GROUP_LABEL = 'block text-[14px] leading-5 font-medium text-[var(--ink)]';
 const INPUT = `${FIELD} min-w-0 focus:ring-0`;
-const TEXTAREA = 'block w-full min-h-[96px] rounded-lg bg-[#0f1724] border border-white/[0.10] px-3 py-2.5 text-[14px] leading-5 text-[#dae3f4] placeholder-[#8b95a7] focus:outline-none focus:ring-0 focus:border-[#f5a623]';
-const SMALL_DANGER = 'inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-lg text-[13px] font-medium text-[#ffb4ab] hover:bg-[#ffb4ab]/10 transition-colors';
+const TEXTAREA = 'block w-full min-h-[96px] rounded-lg bg-[var(--sunken)] border border-white/[0.10] px-3 py-2.5 text-[14px] leading-5 text-[var(--ink)] placeholder-[var(--ink-faint)] focus:outline-none focus:ring-0 focus:border-[var(--accent)]';
+const SMALL_DANGER = 'inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-lg text-[13px] font-medium text-[var(--bad)] hover:bg-[#ffb3aa]/10 transition-colors';
 
 /** A Material Symbols icon, hidden from screen readers. */
 function Icon({ name, className = '' }) {
@@ -43,7 +88,7 @@ function Tile({ label, value, note }) {
     <div className={`${CARD} px-5 py-4 flex flex-col gap-1 min-w-0`}>
       <span className={`${LABEL} truncate`}>{label}</span>
       {empty
-        ? <span className="font-heading text-[16px] leading-9 text-[#8b95a7]">No data yet</span>
+        ? <span className="font-heading text-[16px] leading-9 text-[var(--ink-faint)]">No data yet</span>
         : <span className={NUMBER}>{value}</span>}
       <p className={`${MUTED} truncate`}>{note}</p>
     </div>
@@ -63,16 +108,16 @@ function RetriesComparison({ around }) {
     else verdict = 'No difference yet.';
   }
   const icon = trend === 'fewer' ? 'trending_down' : trend === 'more' ? 'trending_up' : 'trending_flat';
-  const tone = trend === 'fewer' ? INK.ok : trend === 'more' ? INK.warn : 'text-[#dae3f4]';
+  const tone = trend === 'fewer' ? INK.ok : trend === 'more' ? INK.warn : 'text-[var(--ink)]';
   return (
     <div className={`${CARD} px-5 py-4 flex items-start gap-3`}>
-      <Icon name={icon} className="text-[20px] text-[#c9b8a5] shrink-0" />
-      <p className={`${BODY} text-[#c9b8a5]`}>
+      <Icon name={icon} className="text-[20px] text-[var(--ink-quiet)] shrink-0" />
+      <p className={`${BODY} text-[var(--ink-quiet)]`}>
         Retries per finished command, {days} days either side of the settings change on{' '}
-        <span className="font-mono text-[13px] text-[#dae3f4]">{changed}</span>:{' '}
-        <span className="tabular-nums font-medium text-[#dae3f4]">{per(before.retriesPerTask)}</span> before ({plural(before.tasks, 'command')}) →{' '}
+        <span className="font-mono text-[13px] text-[var(--ink)]">{changed}</span>:{' '}
+        <span className="tabular-nums font-medium text-[var(--ink)]">{per(before.retriesPerTask)}</span> before ({plural(before.tasks, 'command')}) →{' '}
         <span className={`tabular-nums font-medium ${tone}`}>{per(after.retriesPerTask)}</span> after ({plural(after.tasks, 'command')}).{' '}
-        <span className={trend ? tone : 'text-[#dae3f4]'}>{verdict}</span>
+        <span className={trend ? tone : 'text-[var(--ink)]'}>{verdict}</span>
       </p>
     </div>
   );
@@ -122,17 +167,17 @@ export function RecognitionReadout({ studentId, studentName }) {
 
             {data.recentlyFiltered.length > 0 && (
               <details className={`group ${CARD}`}>
-                <summary className="flex items-center justify-between gap-3 min-h-[44px] px-5 py-2.5 rounded-xl group-open:rounded-b-none cursor-pointer hover:bg-[#18202d]/60 transition-colors select-none list-none [&::-webkit-details-marker]:hidden">
+                <summary className="flex items-center justify-between gap-3 min-h-[44px] px-5 py-2.5 rounded-xl group-open:rounded-b-none cursor-pointer hover:bg-[var(--raised)] transition-colors select-none list-none [&::-webkit-details-marker]:hidden">
                   <span className={BODY}>
                     Words set aside as background talk ({Math.max(data.filtered, data.recentlyFiltered.length)})
                   </span>
-                  <Icon name="expand_more" className="text-[20px] text-[#c9b8a5] transition-transform duration-200 group-open:rotate-180" />
+                  <Icon name="expand_more" className="text-[20px] text-[var(--ink-quiet)] transition-transform duration-200 group-open:rotate-180" />
                 </summary>
                 <div className="px-5 pb-4 pt-3 border-t border-white/[0.06] flex flex-col gap-3">
                   <ul className="flex flex-col divide-y divide-white/[0.06]">
                     {data.recentlyFiltered.map((turn, i) => (
                       <li key={i} className="flex items-baseline gap-3 py-2">
-                        <span className="font-mono text-[12px] text-[#8b95a7] tabular-nums shrink-0">{turn.created_at.slice(5, 16)}</span>
+                        <span className="font-mono text-[12px] text-[var(--ink-faint)] tabular-nums shrink-0">{turn.created_at.slice(5, 16)}</span>
                         <span className={`${BODY} break-words min-w-0`}>"{turn.transcript}"</span>
                       </li>
                     ))}
@@ -169,6 +214,8 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
   const [sensitivity, setSensitivity] = useState('standard');
   const [pause, setPause] = useState(1.5);
   const [needsName, setNeedsName] = useState(false); // "Say AbleSpeak first" (noisy places)
+  const [cleanUpDictation, setCleanUpDictation] = useState(true); // dictation autocorrect (Gemini)
+  const [speechEngine, setSpeechEngine] = useState('auto');
   const [words, setWords] = useState([]);
   const [newWord, setNewWord] = useState('');
   const [wordNote, setWordNote] = useState('');
@@ -187,6 +234,8 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
     setSensitivity(saved.listening.sensitivity);
     setPause(saved.listening.pauseSeconds);
     setNeedsName(!!saved.listening.needsName);
+    setCleanUpDictation(saved.listening.cleanUpDictation !== false);
+    setSpeechEngine(saved.listening.speechEngine || 'auto');
     setWords([...saved.vocabulary]);
     setShortcuts(saved.aliases.map(a => withUid({ ...a })));
     setRoutines(saved.macros.map(m => withUid({ name: m.name, steps: m.steps.join('\n'), open: false })));
@@ -235,7 +284,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
     setResult(null);
     try {
       await api.saveProfile(studentId, {
-        listening: { sensitivity, pauseSeconds: Number(pause), needsName },
+        listening: { sensitivity, pauseSeconds: Number(pause), needsName, speechEngine, cleanUpDictation },
         vocabulary: vocabulary.map(w => w.trim()).filter(Boolean),
         aliases: shortcuts
           .map(({ uid, ...shortcut }) => shortcut)
@@ -365,16 +414,16 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                   const on = sensitivity === choice.value;
                   return (
                     <label key={choice.value}
-                      className={`flex items-start gap-3 rounded-lg border bg-[#18202d] px-4 py-3 min-h-[56px] cursor-pointer transition-colors focus-within:border-[#f5a623] ${on
+                      className={`flex items-start gap-3 rounded-lg border bg-[var(--sunken)] px-4 py-3 min-h-[56px] cursor-pointer transition-colors focus-within:border-[var(--accent)] ${on
                         ? 'border-[#f5a623]/60'
                         : 'border-white/[0.06] hover:border-white/[0.14]'}`}>
                       <input type="radio" name="sensitivity" value={choice.value} checked={on}
                         onChange={() => { setSensitivity(choice.value); edited(); }}
                         aria-label={choice.label}
                         aria-describedby={`sensitivity-${choice.value}-hint`}
-                        className={`form-radio mt-0.5 h-4 w-4 shrink-0 bg-transparent text-[#f5a623] focus:ring-0 focus:ring-offset-0 ${on ? 'border-[#f5a623]' : 'border-white/30'}`} />
+                        className={`form-radio mt-0.5 h-4 w-4 shrink-0 bg-transparent text-[var(--accent)] focus:ring-0 focus:ring-offset-0 ${on ? 'border-[var(--accent)]' : 'border-white/30'}`} />
                       <div className="flex-1 min-w-0">
-                        <span className={`block text-[14px] leading-5 font-medium ${on ? 'text-[#dae3f4]' : 'text-[#dae3f4]/90'}`}>{choice.label}</span>
+                        <span className={`block text-[14px] leading-5 font-medium ${on ? 'text-[var(--ink)]' : 'text-[var(--ink-body)]'}`}>{choice.label}</span>
                         <span id={`sensitivity-${choice.value}-hint`} className={`block ${MUTED}`}>
                           {choice.hint}
                         </span>
@@ -386,9 +435,9 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
             </div>
 
             {/* Noisy places: only act on phrases that start with AbleSpeak's name */}
-            <div className="flex items-start justify-between gap-4 rounded-lg border border-white/[0.06] bg-[#18202d] px-4 py-3">
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-white/[0.06] bg-[var(--sunken)] px-4 py-3">
               <div className="min-w-0">
-                <p id="needs-name-label" className="text-[14px] leading-5 font-medium text-[#dae3f4]">Say “AbleSpeak” first</p>
+                <p id="needs-name-label" className="text-[14px] leading-5 font-medium text-[var(--ink)]">Say “AbleSpeak” first</p>
                 <p id="needs-name-hint" className={MUTED}>
                   For noisy places. AbleSpeak only acts when {own ? 'you start' : 'they start'} with its name —
                   “AbleSpeak, open Word” — and ignores other people, TV and music. Saying just “AbleSpeak” makes it listen for the next phrase.
@@ -398,13 +447,64 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                 type="button" role="switch" aria-checked={needsName}
                 aria-labelledby="needs-name-label" aria-describedby="needs-name-hint"
                 onClick={() => { setNeedsName(v => !v); edited(); }}
-                className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[#222a37]"
+                className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[var(--raised)]"
               >
-                <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${needsName ? 'bg-[#f5a623] justify-end' : 'bg-[#2d3543] justify-start'}`} aria-hidden="true">
-                  <span className={`w-5 h-5 rounded-full ${needsName ? 'bg-[#3d2600]' : 'bg-[#c9b8a5]'}`} />
+                <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${needsName ? 'bg-[#1f9c89] justify-end' : 'bg-white/[0.13] justify-start'}`} aria-hidden="true">
+                  <span className={`w-5 h-5 rounded-full ${needsName ? 'bg-[#04201c]' : 'bg-[#d8c7b3]'}`} />
                 </span>
-                <span className="text-[14px] leading-5 text-[#dae3f4]">{needsName ? 'On' : 'Off'}</span>
+                <span className="text-[14px] leading-5 text-[var(--ink)]">{needsName ? 'On' : 'Off'}</span>
               </button>
+            </div>
+
+            {/* Dictation autocorrect: misheard words, punctuation and capitals fixed before typing */}
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-white/[0.06] bg-[var(--sunken)] px-4 py-3">
+              <div className="min-w-0">
+                <p id="clean-up-label" className="text-[14px] leading-5 font-medium text-[var(--ink)]">Autocorrect dictation</p>
+                <p id="clean-up-hint" className={MUTED}>
+                  Before dictated words are typed, Gemini fixes misheard words from the sentence’s meaning,
+                  adds punctuation and capitals, and drops “um” and “uh”. The words go to Google to be corrected,
+                  and it adds about a second per phrase. Never used in an exam.
+                </p>
+              </div>
+              <button
+                type="button" role="switch" aria-checked={cleanUpDictation}
+                aria-labelledby="clean-up-label" aria-describedby="clean-up-hint"
+                onClick={() => { setCleanUpDictation(v => !v); edited(); }}
+                className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[var(--raised)]"
+              >
+                <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${cleanUpDictation ? 'bg-[#1f9c89] justify-end' : 'bg-white/[0.13] justify-start'}`} aria-hidden="true">
+                  <span className={`w-5 h-5 rounded-full ${cleanUpDictation ? 'bg-[#04201c]' : 'bg-[#d8c7b3]'}`} />
+                </span>
+                <span className="text-[14px] leading-5 text-[var(--ink)]">{cleanUpDictation ? 'On' : 'Off'}</span>
+              </button>
+            </div>
+
+            <div>
+              <p id="engine-label" className={`${GROUP_LABEL} mb-2`}>Where speech is recognised</p>
+              <div role="radiogroup" aria-labelledby="engine-label" className="flex flex-col gap-2">
+                {ENGINE_CHOICES.map(choice => {
+                  const on = speechEngine === choice.value;
+                  return (
+                    <label key={choice.value}
+                      className={`flex items-start gap-3 rounded-lg border bg-[var(--sunken)] px-4 py-3 min-h-[56px] cursor-pointer transition-colors focus-within:border-[var(--accent)] ${on
+                        ? 'border-[#f5a623]/60'
+                        : 'border-white/[0.06] hover:border-white/[0.14]'}`}>
+                      <input type="radio" name="speech-engine" value={choice.value} checked={on}
+                        onChange={() => { setSpeechEngine(choice.value); edited(); }}
+                        aria-label={choice.label}
+                        aria-describedby={`engine-${choice.value}-hint`}
+                        className={`form-radio mt-0.5 h-4 w-4 shrink-0 bg-transparent text-[var(--accent)] focus:ring-0 focus:ring-offset-0 ${on ? 'border-[var(--accent)]' : 'border-white/30'}`} />
+                      <div className="flex-1 min-w-0">
+                        <span className={`block text-[14px] leading-5 font-medium ${on ? 'text-[var(--ink)]' : 'text-[var(--ink-body)]'}`}>{choice.label}</span>
+                        <span id={`engine-${choice.value}-hint`} className={`block ${MUTED}`}>
+                          {choice.hint}
+                        </span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <EngineStatus choice={speechEngine} own={own} />
             </div>
 
             <div className="flex flex-col gap-2">
@@ -412,16 +512,16 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                 <label className={GROUP_LABEL} htmlFor="pause-slider">
                   Pause that ends a command
                 </label>
-                <span className="font-mono text-[13px] tabular-nums text-[#dae3f4]" aria-hidden="true">
+                <span className="font-mono text-[13px] tabular-nums text-[var(--ink)]" aria-hidden="true">
                   {pauseText}
                 </span>
               </div>
               <input id="pause-slider" type="range" min={PAUSE.min} max={PAUSE.max} step="0.1" value={pause}
-                className="w-full h-6 m-0 cursor-pointer accent-[#f5a623]"
+                className="w-full h-6 m-0 cursor-pointer accent-[var(--accent)]"
                 onChange={e => { setPause(e.target.value); edited(); }}
                 aria-valuetext={`${Number(pause).toFixed(1)} seconds`}
                 aria-describedby="pause-hint" />
-              <div className="flex justify-between gap-3 text-[12px] leading-4 text-[#8b95a7]" aria-hidden="true">
+              <div className="flex justify-between gap-3 text-[12px] leading-4 text-[var(--ink-faint)]" aria-hidden="true">
                 <span><span className="font-mono">{PAUSE.min.toFixed(1)} s</span> fast speech</span>
                 <span><span className="font-mono">{PAUSE.max.toFixed(1)} s</span> deliberate pauses</span>
               </div>
@@ -439,10 +539,10 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
               {words.length > 0 ? (
                 <ul aria-labelledby="words-label" className="flex flex-wrap gap-1.5 mb-3">
                   {words.map((word, i) => (
-                    <li key={`${i}-${word}`} className="inline-flex items-center min-h-[36px] pl-3 rounded-lg bg-[#18202d] border border-white/[0.06] text-[13px] leading-5 text-[#dae3f4]">
+                    <li key={`${i}-${word}`} className="inline-flex items-center min-h-[36px] pl-3 rounded-lg bg-[var(--sunken)] border border-white/[0.06] text-[13px] leading-5 text-[var(--ink)]">
                       {word}
                       <button type="button" aria-label={`Remove ${word}`} onClick={() => removeWord(i)}
-                        className="w-9 h-9 rounded-md flex items-center justify-center text-[#c9b8a5] hover:text-[#dae3f4] hover:bg-[#222a37] transition-colors">
+                        className="w-9 h-9 rounded-md flex items-center justify-center text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--raised)] transition-colors">
                         <Icon name="close" className="text-[16px]" />
                       </button>
                     </li>
@@ -480,7 +580,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                       autoFocus={shortcut.uid === focusUid}
                       className={`${INPUT} flex-1`}
                       onChange={e => updateShortcut(i, 'say', e.target.value)} />
-                    <span className="text-[#8b95a7]" aria-hidden="true">→</span>
+                    <span className="text-[var(--ink-faint)]" aria-hidden="true">→</span>
                     <input type="text" value={shortcut.means} maxLength={MAX_LENGTH.means}
                       aria-label={`Shortcut ${i + 1}: what it does`} placeholder="open spotify"
                       className={`${INPUT} flex-1`}
@@ -494,7 +594,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                     ) : anyLearned && <div className="w-[76px] shrink-0" aria-hidden="true" />}
                     <button type="button" onClick={() => removeShortcut(i)}
                       aria-label={`Delete shortcut ${i + 1}${shortcut.say.trim() ? `, "${shortcut.say.trim()}"` : ''}`}
-                      className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center text-[#c9b8a5] hover:text-[#ffb4ab] hover:bg-[#ffb4ab]/10 transition-colors">
+                      className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center text-[var(--ink-quiet)] hover:text-[var(--bad)] hover:bg-[#ffb3aa]/10 transition-colors">
                       <Icon name="delete" className="text-[20px]" />
                     </button>
                   </div>
@@ -524,9 +624,9 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                         <div className="min-w-0">
                           <p className="text-[14px] leading-5">
                             {name
-                              ? <span className="font-medium text-[#dae3f4]">"{name}"</span>
-                              : <span className="text-[#c9b8a5]">No name yet</span>}
-                            <span className="text-[#c9b8a5]"> · {plural(steps.length, 'step')}</span>
+                              ? <span className="font-medium text-[var(--ink)]">"{name}"</span>
+                              : <span className="text-[var(--ink-quiet)]">No name yet</span>}
+                            <span className="text-[var(--ink-quiet)]"> · {plural(steps.length, 'step')}</span>
                           </p>
                           <p className={`${MUTED} break-words`}>
                             {steps.length ? steps.map((step, j) => `${j + 1}. ${step}`).join('  →  ') : 'No steps yet'}
@@ -539,7 +639,7 @@ export function SpeechSettings({ studentId, studentName, own = false }) {
                             ? `Close the editor for routine ${i + 1}`
                             : `Edit routine ${i + 1}${name ? `, "${name}"` : ''}`}
                           onClick={() => updateRoutine(i, 'open', !routine.open)}
-                          className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center hover:text-[#dae3f4] hover:bg-[#222a37] transition-colors ${routine.open ? 'text-[#ffc880]' : 'text-[#c9b8a5]'}`}>
+                          className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center hover:text-[var(--ink)] hover:bg-[var(--raised)] transition-colors ${routine.open ? 'text-[var(--accent-soft)]' : 'text-[var(--ink-quiet)]'}`}>
                           <Icon name={routine.open ? 'expand_less' : 'edit'} className="text-[20px]" />
                         </button>
                       </div>

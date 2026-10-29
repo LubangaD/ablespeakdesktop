@@ -28,7 +28,10 @@ export function invalidateScreenModel() {
   cache = null;
 }
 
-const isOwnWindow = w => /^AbleSpeak/i.test(w.title || '');
+// "AbleSpeak", "AbleSpeak Overlay" and "AbleSpeak — …" only, as in
+// system-tools.js: a tab or document that merely starts with "AbleSpeak" is
+// the student's window
+const isOwnWindow = w => /^AbleSpeak(?:$| Overlay$| [-—–] )/.test(String(w.title || '').trim());
 
 /**
  * The window to read: the named app's, or else the front-most window that
@@ -73,7 +76,8 @@ ${snapshot}`
     return { status: 'error', message: `Could not read "${win.title}": ${String(raw).slice(0, 160)}` };
   }
   if (parsed.error === 'MINIMIZED') {
-    return { status: 'error', code: 'MINIMIZED', message: `"${win.title}" is minimized. Bring it to the front first.` };
+    // Which window, so the dashboard can show it on the taskbar
+    return { status: 'error', code: 'MINIMIZED', window: win.title, app: win.process, message: `"${win.title}" is minimized. Bring it to the front first.` };
   }
   if (parsed.error) {
     return { status: 'error', message: `Could not read "${win.title}": ${parsed.message || parsed.error}` };
@@ -143,6 +147,9 @@ export async function screenContextForAgent({ extensionConnected = false, limit 
     if (model.status !== 'success' || !model.elements.length) return null;
     // Excel and Word also say what is in the cell or word the student is on.
     const office = describeOfficeContext(await readOfficeContext(win).catch(() => null));
+    // Notepad: its whole text, so the AI can read it out and edit it (document-text.js)
+    const { isTextApp, readDocumentText, MAX_DOCUMENT_CHARS } = await import('./document-text.js');
+    const doc = isTextApp(model.app) ? await readDocumentText().catch(() => null) : null;
     return {
       window: model.window,
       app: model.app,
@@ -150,6 +157,7 @@ export async function screenContextForAgent({ extensionConnected = false, limit 
       truncated: model.total > limit,
       summary: describeElements(model, limit),
       ...(office ? { office } : {}),
+      ...(doc ? { document: { text: doc.text.slice(0, MAX_DOCUMENT_CHARS), chars: doc.text.length } } : {}),
     };
   })().catch(() => null);
   const left = Math.max(0, timeoutMs - (Date.now() - started));
@@ -177,25 +185,81 @@ export function describeElements(model, limit = 60) {
 const normalise = text => String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /**
- * The control a spoken name most likely means. Exact names beat prefixes,
- * prefixes beat partial matches; enabled controls with actions come first.
+ * The one element whose name is exactly the spoken name (case and punctuation
+ * aside), or null when none or several are: certain enough to act on without
+ * asking the AI. `nameOf` reads the name (a web page's elements call it label).
  */
-export function findElement(model, name, { type } = {}) {
+export function uniqueByName(elements, name, nameOf = e => e.name) {
+  const wanted = normalise(name);
+  if (!wanted) return null;
+  const hits = (elements || []).filter(e => normalise(nameOf(e)) === wanted);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// The spoken words begin the name, as whole words or with a plural ending:
+// "send" → "Send now", "download" → "Downloads"; not "add" → "Address bar"
+const startsWithWords = (label, wanted) => label.startsWith(wanted) && /^(?:s|es)?(?: |$)/.test(label.slice(wanted.length));
+
+// A digit and its name are the same control: Calculator's keys are "Seven",
+// "Zero", and "press 7" found nothing (agent eval, 23 Oct 2026)
+const DIGIT_NAMES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const sameName = (label, wanted) => label === wanted || (/^\d$/.test(wanted) && label === DIGIT_NAMES[wanted]);
+
+/**
+ * How well a control's name matches the spoken one: 'exact', 'prefix' (it
+ * begins with the spoken words), 'partial' (the words are only somewhere
+ * inside it: "add" → "Memory add") or null.
+ */
+export function nameMatch(controlName, spoken) {
+  const label = normalise(controlName);
+  const wanted = normalise(spoken);
+  if (!label || !wanted) return null;
+  if (sameName(label, wanted)) return 'exact';
+  if (startsWithWords(label, wanted)) return 'prefix';
+  if (label.includes(wanted) || wanted.split(' ').every(word => label.includes(word))) return 'partial';
+  return null;
+}
+
+// Which kinds of control suit an action: a Save As dialog has a Text label,
+// a ComboBox and an Edit all called "File name:", and typing went to the
+// label (agent eval, 24 Oct 2026). Typing wants the field; pressing wants
+// the button; a label is never the one meant.
+const SUITS = {
+  set_value: { Edit: 15, Document: 12, ComboBox: 10, Text: -20 },
+  read_text: { Document: 15, Edit: 12, Text: 5 },
+  invoke: { Button: 10, MenuItem: 10, ListItem: 8, TreeItem: 8, Hyperlink: 8, SplitButton: 8, TabItem: 6, Text: -10 },
+  toggle: { CheckBox: 15, Button: 8, Text: -10 },
+  select: { ListItem: 12, TabItem: 12, TreeItem: 12, RadioButton: 12, Text: -10 },
+  expand: { MenuItem: 10, TreeItem: 10, ComboBox: 10, Button: 5, Text: -10 },
+};
+SUITS.collapse = SUITS.expand;
+SUITS.focus = SUITS.set_value; // "focus the File name box": the field, not its label
+
+/**
+ * The control a spoken name most likely means. Exact names beat prefixes,
+ * prefixes beat whole words inside the name, which beat parts of words;
+ * enabled controls with actions come first, and the kind of control that
+ * suits the `action` (typing wants a field, not its label) beats the rest.
+ */
+export function findElement(model, name, { type, action } = {}) {
   const wanted = normalise(name);
   if (!wanted) return null;
   const words = wanted.split(' ');
   const candidates = model.elements.filter(e => !type || e.type.toLowerCase() === String(type).toLowerCase());
+  const suits = SUITS[action] || {};
   const score = e => {
     const label = normalise(e.name);
     if (!label) return 0;
     let points = 0;
-    if (label === wanted) points = 100;
-    else if (label.startsWith(wanted)) points = 70;
-    else if (label.includes(wanted)) points = 50;
+    if (sameName(label, wanted)) points = 100;
+    else if (startsWithWords(label, wanted)) points = 70;
+    else if (` ${label} `.includes(` ${wanted} `)) points = 50;
+    else if (label.includes(wanted)) points = 35;
     else if (words.every(word => label.includes(word))) points = 30;
     else return 0;
     if (e.actions.length) points += 10;
     if (e.enabled !== false) points += 5;
+    points += suits[e.type] || 0;
     return points - Math.min(label.length - wanted.length, 20) * 0.1;
   };
   let best = null;
@@ -217,6 +281,29 @@ export function findDocument(model) {
     || readable.find(e => e.type === 'Document')
     || readable.find(e => e.type === 'Edit')
     || null;
+}
+
+// Ways of pressing a control, and actions that only look at it or move to it
+const PRESS_ACTIONS = new Set(['invoke', 'toggle', 'select', 'expand', 'collapse']);
+const LOOK_ACTIONS = new Set(['read_text', 'focus', 'scroll_into_view']);
+const supports = (element, action) => element.actions.includes(action === 'expand' || action === 'collapse' ? 'expand_collapse' : action);
+
+/**
+ * What to do with a control found for a request: { action } to carry out,
+ * or { closest } when it was found only by part of its name and is not to
+ * be acted on.
+ *  - Calculator's "Memory add" was pressed for "Add" (agent eval, 23 Oct
+ *    2026): a name found only inside another is not acted on, and the AI is
+ *    told the closest name, to ask again with it if it is the one.
+ *  - A control asked to be pressed in a way it doesn't take ("select" on a
+ *    Settings link that only invokes, and the other way round) is pressed
+ *    the way it does.
+ */
+export function planAction(element, { ref, name, action } = {}) {
+  const wanted = action || defaultAction(element);
+  if (!ref && name && !LOOK_ACTIONS.has(wanted) && nameMatch(element.name, name) === 'partial') return { closest: element.name };
+  if (PRESS_ACTIONS.has(wanted) && !supports(element, wanted) && PRESS_ACTIONS.has(defaultAction(element))) return { action: defaultAction(element) };
+  return { action: wanted };
 }
 
 /** What "press it" means for this control. */
@@ -244,7 +331,7 @@ export async function actOnElement({ app, ref, name, type, action, value, studen
 
   const element = ref
     ? model.elements.find(e => e.ref === ref)
-    : name ? findElement(model, name, { type })
+    : name ? findElement(model, name, { type, action })
     : action === 'read_text' ? findDocument(model)
     : null;
   if (!element) {
@@ -258,7 +345,17 @@ export async function actOnElement({ app, ref, name, type, action, value, studen
     };
   }
 
-  const chosen = action || defaultAction(element);
+  const plan = planAction(element, { ref, name, action });
+  if (plan.closest) {
+    record({ app: model.app, method: 'not_found', action, started, studentId });
+    return {
+      status: 'error',
+      message: `Nothing in ${model.window} is called "${name}". The closest is "${plan.closest}": if that is the one, ask for it by that name.`,
+      notFound: true,
+      closest: plan.closest,
+    };
+  }
+  const chosen = plan.action;
   if (!ACTIONS.has(chosen)) return { status: 'error', message: `Unknown action "${chosen}"` };
   if (!REF_RE.test(element.ref)) return { status: 'error', message: 'That control cannot be reached' };
 

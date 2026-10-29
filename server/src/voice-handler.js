@@ -21,6 +21,9 @@ const NETWORK_CODES = new Set([
 ]);
 const REQUEST_TIMEOUT_MS = 12000;
 export const OFFLINE_MESSAGE = 'AbleSpeak needs the internet right now. I’ll reconnect automatically.';
+export const SLOW_MESSAGE = 'Speech recognition is slow right now. Please say that again.';
+// A timeout this soon after Gemini last answered is a slow reply, not a lost connection
+const ONLINE_RECENTLY_MS = 2 * 60000;
 
 /** Whether a fetch failure means the internet (or Google) can't be reached. */
 export function isNetworkError(err) {
@@ -37,17 +40,22 @@ export function isInventedTranscript(text) {
 
 const BASE_PROMPT = 'Transcribe this audio clip. Rules:\n1. Return ONLY the exact words spoken by a human voice. No quotes, no explanations.\n2. If you hear SILENCE, background noise, music, humming, or any non-speech audio, return exactly: SILENCE\n3. Do NOT invent or hallucinate text. If you are unsure whether speech was spoken, return SILENCE.\n4. Common hallucinations to avoid: "The quick brown fox", "I\'m not sure if", "Thank you for watching", generic sentences about meetings or weather.\n5. Only transcribe clear, intentional human speech directed at a microphone.';
 
+// In an exam the words become the student's answer, so they must be exactly
+// what was said: nothing corrected, completed or answered.
+const EXAM_PROMPT = 'Transcribe this audio clip of a student answering an exam by voice. Rules:\n1. Return ONLY the exact words spoken, in the order spoken. No quotes, no explanations.\n2. Do NOT correct grammar, do NOT fix or improve wording, do NOT complete unfinished sentences, and NEVER answer any question you hear. Keep repeated words and false starts.\n3. Write spoken punctuation words (comma, full stop, question mark, new paragraph) as words, exactly as said.\n4. If you hear SILENCE, background noise, music, or any non-speech audio, return exactly: SILENCE\n5. Do NOT invent text. If you are unsure whether speech was spoken, return SILENCE.';
+
 /**
  * The transcription instructions, with the speaker's own words when known.
  * The words only guide spelling; they must never be returned unless spoken.
  */
-export function transcriptionPrompt(vocabulary = []) {
+export function transcriptionPrompt(vocabulary = [], { exam = false } = {}) {
+  const base = exam ? EXAM_PROMPT : BASE_PROMPT;
   const words = (Array.isArray(vocabulary) ? vocabulary : [])
     .map(word => String(word).replace(/[\r\n"]+/g, ' ').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .slice(0, 100);
-  if (!words.length) return BASE_PROMPT;
-  return `${BASE_PROMPT}\n6. This speaker often says these names and words. When you hear one, spell it exactly like this: ${words.join(', ')}. Do not include them unless they were said.`;
+  if (!words.length) return base;
+  return `${base}\n6. This speaker often says these names and words. When you hear one, spell it exactly like this: ${words.join(', ')}. Do not include them unless they were said.`;
 }
 
 export class VoiceHandler {
@@ -142,7 +150,12 @@ export class VoiceHandler {
    * `vocabulary`: names and words this speaker uses, spelled as they should
    * appear (Stage 1 per-student vocabulary).
    */
-  async transcribe(audioBase64, mimeType = 'audio/webm', { vocabulary = [] } = {}) {
+  /**
+   * `signal` cancels the request when its words are no longer needed (the
+   * words heard on this computer were used instead); it then returns
+   * { error: 'cancelled' } at once, with no retry.
+   */
+  async transcribe(audioBase64, mimeType = 'audio/webm', { vocabulary = [], exam = false, signal } = {}) {
     if (!this.apiKey) {
       return { text: '', error: 'GEMINI_API_KEY not configured' };
     }
@@ -161,13 +174,19 @@ export class VoiceHandler {
       console.log(`[VoiceHandler] Rate limited — waiting ${delay}ms`);
       await new Promise(r => setTimeout(r, delay));
     }
+    const cancelled = { text: '', error: 'cancelled' };
+    if (signal?.aborted) return cancelled;
 
     const audioSizeKB = Math.round(audioBase64.length / 1024);
-    
+    // The last answer's tokens (audio counted apart: it costs more), for the Speed tab
+    this.lastUsage = null;
+
     // Try up to 2 times (initial + 1 retry)
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        if (signal?.aborted) return cancelled;
         this._recordRequest();
+        const askedAt = Date.now();
         console.log(`[VoiceHandler] Transcribing ${audioSizeKB}KB (${cleanMimeType})${attempt > 0 ? ' [retry]' : ''}`);
 
         const url = `${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`;
@@ -175,7 +194,8 @@ export class VoiceHandler {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), // a half-dead connection must not hang the turn
+          // A half-dead connection must not hang the turn
+          signal: signal ? AbortSignal.any([AbortSignal.timeout(REQUEST_TIMEOUT_MS), signal]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -186,19 +206,33 @@ export class VoiceHandler {
                   }
                 },
                 {
-                  text: transcriptionPrompt(vocabulary),
+                  text: transcriptionPrompt(vocabulary, { exam }),
                 }
               ]
             }],
             generationConfig: {
               temperature: 0.1,
-              maxOutputTokens: 256,
+              maxOutputTokens: exam ? 1024 : 256, // an exam answer can be long
+              // Gemini 2.5 "thinks" before answering unless told not to. Writing
+              // down words needs no reasoning: measured 15 Oct 2026 on the same
+              // clip, thinking on took 2.7–6.2 s, thinking off 1.5–2.0 s.
+              ...(/2\.5/.test(this.model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
             }
           }),
         });
 
         if (response.ok) {
+          this._lastOkAt = Date.now();
           const data = await response.json();
+          const u = data.usageMetadata || {};
+          this.lastUsage = {
+            model: this.model, calls: 1, ms: Date.now() - askedAt,
+            input: u.promptTokenCount || 0,
+            audio: (u.promptTokensDetails || []).filter(d => d.modality === 'AUDIO').reduce((sum, d) => sum + (d.tokenCount || 0), 0),
+            cached: u.cachedContentTokenCount || 0,
+            output: u.candidatesTokenCount || 0,
+            thoughts: u.thoughtsTokenCount || 0,
+          };
           const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
 
           // ── SILENCE marker handling ──
@@ -213,6 +247,15 @@ export class VoiceHandler {
           // enough to plausibly be a real, terse command that had noise on
           // either side. Long leftover text means the model is still
           // hallucinating even though it also emitted the marker.
+          // In an exam "silence" may be in the answer ("the silence of the
+          // lambs"): only a reply that is SILENCE and nothing else means no speech.
+          if (exam) {
+            const words = rawText.replace(/\s*\b(transcribe this audio clip|return only the exact words)\b[^\n]*/gi, '').trim();
+            if (!words || /^silence[.!]?$/i.test(words)) return { text: '', error: 'no_speech' };
+            console.log(`[VoiceHandler] Transcribed (exam): "${words}"`);
+            return { text: words };
+          }
+
           const hadSilenceMarker = /\bsilence\b/i.test(rawText);
           const text = rawText
             .replace(/^\s*silence\b[.,!]?\s*/i, '')
@@ -227,7 +270,7 @@ export class VoiceHandler {
 
           if (hadSilenceMarker && text.split(/\s+/).length > 8) {
             console.log(`[VoiceHandler] Filtered hallucination (SILENCE-wrapped): "${rawText.slice(0, 80)}"`);
-            return { text: '', error: 'no_speech' };
+            return { text: '', error: 'no_speech', filtered: true };
           }
 
           // Post-processing: catch common Gemini hallucinations
@@ -246,7 +289,8 @@ export class VoiceHandler {
             'is anybody there',
             'hello is anyone there',
           ];
-          if (KNOWN_HALLUCINATIONS.some(h => lower.includes(h)) || isInventedTranscript(text)) {
+          // Not in an exam: "I don't know what to say" may be a real answer there
+          if (!exam && (KNOWN_HALLUCINATIONS.some(h => lower.includes(h)) || isInventedTranscript(text))) {
             console.log(`[VoiceHandler] Filtered hallucination: "${text}"`);
             return { text: '', error: 'no_speech' };
           }
@@ -285,13 +329,18 @@ export class VoiceHandler {
         return { text: '', error: `Transcription failed: ${status}` };
 
       } catch (err) {
-        const offline = isNetworkError(err);
-        console.error(`[VoiceHandler] Transcription error${offline ? ' (no connection)' : ''}:`, err.message);
+        if (signal?.aborted) return cancelled;
+        // Timed out although Gemini answered a moment ago: slow, not offline
+        const slow = err.name === 'TimeoutError' && Date.now() - (this._lastOkAt || 0) < ONLINE_RECENTLY_MS;
+        const offline = !slow && isNetworkError(err);
+        console.error(`[VoiceHandler] Transcription error${slow ? ' (slow reply)' : offline ? ' (no connection)' : ''}:`, err.message);
         if (attempt === 0) {
           await new Promise(r => setTimeout(r, 2000)); // ride out a short blip
+          if (signal?.aborted) return cancelled;
           continue;
         }
         // Say plainly that the connection is down, so nobody repeats themselves for nothing.
+        if (slow) return { text: '', error: 'slow', message: SLOW_MESSAGE };
         if (offline) return { text: '', error: 'offline', message: OFFLINE_MESSAGE };
         return { text: '', error: err.message };
       }

@@ -14,7 +14,32 @@ export const NAME_WORD = 'AbleSpeak'; // added to the speech recognition vocabul
 export const NAME_WINDOW_MS = 8000;   // after just "AbleSpeak", the next phrase needs no name
 
 // Includes what Gemini has actually heard for it: "I both speak", "A bull speak"
-const NAME_RE = /^\s*(?:(?:hey|hi|hello|ok|okay)[\s,]+)?(?:able[\s-]*speak|abel[\s-]*speak|able[\s-]*speech|ablespeech|i[\s-]*both[\s-]*speak|a[\s-]*bull[\s-]*speak)\b[\s,.:;!?-]*/i;
+const NAME = '(?:able[\\s-]*speak|abel[\\s-]*speak|able[\\s-]*speech|ablespeech|i[\\s-]*both[\\s-]*speak|a[\\s-]*bull[\\s-]*speak)';
+const NAME_RE = new RegExp(`^\\s*(?:(?:hey|hi|hello|ok|okay)[\\s,]+)?${NAME}\\b[\\s,.:;!?-]*`, 'i');
+const NAME_AT_END_RE = new RegExp(`[\\s,.:;!?-]+${NAME}[\\s.,!?]*$`, 'i');
+
+// What wakes AbleSpeak from sleep, or brings back a hidden voice bar.
+const WAKE_WORDS = /^(?:wake up|wake|wake up now|i'?m back|i am back|listen|start listening|resume|come back|show yourself)$/;
+
+/**
+ * A wake phrase, however it is said: "wake up", "Wake up, AbleSpeak.",
+ * "AbleSpeak, wake up", "Hey AbleSpeak", "okay wake up please", or just the
+ * name. Anything more ("wake up and open Word") is not, so room talk that
+ * happens to contain "wake up" does not wake it.
+ */
+export function isWakePhrase(text) {
+  const { named, rest } = stripName(text);
+  let core = rest.replace(NAME_AT_END_RE, '');
+  const namedAtEnd = core !== rest;
+  core = core.toLowerCase()
+    .replace(/[.,!?;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:(?:please|okay|ok|hey|hi|hello|now) )+/, '')
+    .replace(/(?: (?:please|now|again))+$/, '');
+  if (!core) return named || namedAtEnd;
+  return WAKE_WORDS.test(core);
+}
 
 /**
  * "AbleSpeak, open Word." → { named: true, rest: 'open Word.' }
@@ -27,6 +52,21 @@ export function stripName(text) {
   const rest = said.slice(match[0].length).trim();
   // "AbleSpeak." alone leaves only punctuation
   return { named: true, rest: /^[\s.,!?]*$/.test(rest) ? '' : rest };
+}
+
+/**
+ * The words after the name, wherever in the phrase it was said: with music
+ * playing a recording often starts on the song ("…a melody in. AbleSpeak,
+ * pause the music" → "pause the music"). '' for the name last; null without it.
+ */
+export function afterName(text) {
+  const said = String(text || '');
+  const inside = new RegExp(`(?:^|[\\s,.:;!?-])(?:(?:hey|hi|hello|ok|okay)[\\s,]+)?${NAME}\\b[\\s,.:;!?-]*`, 'ig');
+  let last = null;
+  for (const match of said.matchAll(inside)) last = match;
+  if (!last) return null;
+  const rest = said.slice(last.index + last[0].length).trim();
+  return /^[\s.,!?]*$/.test(rest) ? '' : rest;
 }
 
 /**

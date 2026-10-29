@@ -29,6 +29,10 @@ const ADMIN_PAGE_WORDS = new Set(['tools', 'context', 'logs', 'settings', 'prefe
 const isDashboardName = name => !!NAV_MAP[name] || ADMIN_PAGE_NAMES.has(name) || ADMIN_PAGE_WORDS.has(name);
 
 // ── Silent commands: these execute without TTS feedback ──
+// Apps that "open …" opens at once, without the AI: the names openApplication
+// (system-tools.js) knows. Anything else is left to the AI to work out.
+const QUICK_OPEN_APPS = /^(?:notepad|calculator|paint|(?:file )?explorer|task manager|terminal|powershell|cmd|spotify|(?:microsoft )?edge|firefox|word|excel|powerpoint|outlook|teams|vs ?code|visual studio code|snipping(?: tool)?)$/;
+
 const SILENT_COMMANDS = new Set([
   'scroll', 'scroll_to_top', 'scroll_to_bottom',
   'go_back', 'go_forward', 'focus_next', 'focus_prev',
@@ -61,10 +65,35 @@ const BROWSER_TOOLS = new Set([
  * Clean transcription text: remove punctuation, trailing filler words.
  * Gemini often outputs "Scroll down." or "Scroll down on this tab." 
  */
+const UNITS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+
+/**
+ * A number said in words or digits, 0–100: "3", "three", "twenty five",
+ * "twenty-five", "a hundred". Null for anything else, so a phrase that only
+ * starts like a number is left alone.
+ */
+export function spokenNumber(words) {
+  const said = String(words || '').toLowerCase().trim().replace(/-/g, ' ').replace(/\s+/g, ' ');
+  if (/^\d{1,3}$/.test(said)) return Number(said) <= 100 ? Number(said) : null;
+  if (/^(?:a|one) hundred$/.test(said)) return 100;
+  if (Object.hasOwn(UNITS, said)) return UNITS[said];
+  const [tens, unit, extra] = said.split(' ');
+  if (extra || !Object.hasOwn(TENS, tens)) return null;
+  if (!unit) return TENS[tens];
+  return Object.hasOwn(UNITS, unit) && UNITS[unit] >= 1 && UNITS[unit] <= 9 ? TENS[tens] + UNITS[unit] : null;
+}
+
 function cleanTranscription(text) {
   return text
     .toLowerCase()
     .trim()
+    // Speech recognition writes 'Press "escape"', "press-escape", "pagedown", "newtab"
+    .replace(/["“”]/g, '')
+    .replace(/(?<=[a-z])-(?=[a-z])/g, ' ')
+    .replace(/\bpage(down|up)\b/g, 'page $1')
+    .replace(/\bnewtab\b/g, 'new tab')
     // Remove trailing punctuation
     .replace(/[.,!?;:]+$/g, '')
     // Remove common filler suffixes
@@ -83,6 +112,16 @@ const SEARCH_PAGE = /^https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\
  * `activeUrl` is the browser's active tab, when known; it decides whether a
  * search happens on the current page or as a new Google search.
  */
+const ORDINALS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+
+/** "second", "2nd", "2", "two" → 2: a place in a list (1–20), or null. */
+export function placeNumber(word) {
+  const w = String(word || '').toLowerCase();
+  if (ORDINALS[w]) return ORDINALS[w];
+  const n = /^(\d+)(?:st|nd|rd|th)?$/.test(w) ? Number(w.replace(/\D/g, '')) : spokenNumber(w);
+  return Number.isInteger(n) && n >= 1 && n <= 20 ? n : null;
+}
+
 export function matchFastCommand(text, { activeUrl = '' } = {}) {
   // A short stammer before the command ("st start dictating") is dropped
   const t = cleanTranscription(text).replace(/^[a-z]{1,3}[\s,.-]+(?=(start|starts|begin|stop|end)\b)/, '');
@@ -140,11 +179,16 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
   }
 
   // ── Scrolling ──
-  if (/^scroll\s+(down|up|left|right)(\s+\d+)?$/.test(t)) {
-    const parts = t.split(/\s+/);
-    const dir = parts[1];
-    const amount = parts[2] || undefined;
-    return { tool: 'scroll', args: { direction: dir, ...(amount && { amount }) }, silent: true };
+  // "scroll down", "scroll down 3", "scroll down three", "scroll down twenty five"
+  const scrollBy = t.match(/^scroll\s+(down|up|left|right)(?:\s+(.+))?$/);
+  // "scroll down again", "scroll down a bit more": one more scroll
+  if (scrollBy && /^(?:again|more|some more|a (?:bit|little)(?: more)?|further)$/.test(scrollBy[2] || '')) {
+    return { tool: 'scroll', args: { direction: scrollBy[1] }, silent: true };
+  }
+  if (scrollBy && (!scrollBy[2] || spokenNumber(scrollBy[2]) != null)) {
+    // A number said is how many scrolls (a scroll is 400 px); the tool takes pixels
+    const amount = scrollBy[2] ? String(Math.min(spokenNumber(scrollBy[2]), 20) * 400 || 400) : undefined;
+    return { tool: 'scroll', args: { direction: scrollBy[1], ...(amount && { amount }) }, silent: true };
   }
   if (/^(go to |scroll to )?(the )?top$/.test(t)) {
     return { tool: 'scroll_to_top', args: {}, silent: true };
@@ -184,6 +228,16 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
     return { tool: 'focus_prev', args: {}, silent: true };
   }
 
+  // ── A question to answer from the web, like Google's AI mode (web_answer) ──
+  // "tell me who Derrick Lubanga is from Google", "google who won the match",
+  // "look up when the exams start": answered out loud from a live search.
+  // "search for Michael Jackson" (not a question) still opens Google below.
+  const ASKS = '(?:who|whom|whose|what|when|where|why|how|which|is|are|was|were|do|does|did|can|will|tell\\s+me|explain)\\b';
+  const webCue = t.match(new RegExp(`^(${ASKS}.+?)\\s+(?:from|on|using|with|according\\s+to)\\s+(?:google|the\\s+(?:internet|web))$|^(${ASKS}.+?)\\s+online$`));
+  const webAsk = t.match(new RegExp(`^(?:google|ask\\s+google|look\\s+up|search\\s+(?:google\\s+|online\\s+|the\\s+(?:web|internet)\\s+)?for)\\s+(${ASKS}.+)$`));
+  const webQuestion = (webCue?.[1] || webCue?.[2] || webAsk?.[1] || '').trim();
+  if (webQuestion) return { tool: 'web_answer', args: { question: webQuestion }, silent: false };
+
   // ── Search — "search for X", "google X", "look up X" ──
   const searchMatch = t.match(/^(?:search\s+(?:for\s+)?|google\s+|look\s+up\s+)(.+)$/);
   if (searchMatch) {
@@ -217,15 +271,53 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
     return { tool: 'mute_tab', args: {}, silent: true };
   }
 
+  // ── On YouTube: next / previous video, "play the second one" ──
+  // (the Voqal library's youtube profile): videos open by ID from the page's own list
+  if (/^https?:\/\/([a-z0-9-]+\.)*youtube\.com\//i.test(activeUrl)) {
+    if (/^(?:play\s+)?(?:the\s+)?next\s+video$/.test(t)) return { tool: 'youtube_next_video', args: {}, silent: true };
+    if (/^(?:play\s+)?(?:the\s+)?(?:previous|last)\s+video$|^go\s+back\s+a\s+video$/.test(t)) {
+      return { tool: 'youtube_previous_video', args: {}, silent: true };
+    }
+    const pick = t.match(/^(?:play|open|watch|start|click)\s+(?:on\s+)?(?:the\s+)?(?:video\s+)?(?:number\s+)?(\w+)(?:\s+(?:one|video|result))?$/);
+    const number = pick && placeNumber(pick[1]);
+    if (number) return { tool: 'youtube_play_result', args: { number }, silent: false };
+    // "Skip the sponsor" (the parts viewers marked on SponsorBlock)
+    if (/^skip\s+(?:past\s+|over\s+)?(?:the\s+|this\s+)?(?:sponsor(?:s|ship|ed\s+(?:part|bit|segment))?|ad\s+read|promo(?:tion)?)$/.test(t)) {
+      return { tool: 'youtube_skip_sponsor', args: {}, silent: false };
+    }
+    // Moving in the video: "back to the start", "go forward thirty seconds",
+    // "rewind 10 seconds", "go back a minute" (plain "go back" is still the browser's)
+    if (/^(?:go\s+)?back\s+to\s+the\s+(?:start|beginning)$|^restart\s+(?:the\s+)?video$|^(?:start|play)\s+(?:the\s+video\s+|it\s+)?(?:again|over|from\s+the\s+(?:start|beginning))$/.test(t)) {
+      return { tool: 'youtube_seek', args: { to: 0 }, silent: true };
+    }
+    const move = t.match(/^(?:(?:go|skip|jump|fast)\s+)?(forward|ahead|back|backward|backwards)\s+(?:by\s+)?(.+?)\s+(seconds?|secs?|minutes?|mins?)$/)
+      || t.match(/^(rewind)\s+(?:by\s+)?(.+?)\s+(seconds?|secs?|minutes?|mins?)$/);
+    const amount = move && (/^an?$/.test(move[2]) ? 1 : spokenNumber(move[2]));
+    if (amount) {
+      const seconds = amount * (/^min/.test(move[3]) ? 60 : 1) * (/^(back|backward|backwards|rewind)$/.test(move[1]) ? -1 : 1);
+      return { tool: 'youtube_seek', args: { seconds }, silent: true };
+    }
+  }
+
+  // ── An ad on YouTube: "skip the ad", "click skip ad", "skip ads", "close this ad" ──
+  // Its own action: YouTube refuses the script a click would use (17 Oct 2026)
+  if (/^(?:(?:click|press)\s+(?:on\s+)?)?(?:skip|close)\s+(?:the\s+|this\s+)?(?:ad|ads|advert|adverts|advertisement)$/.test(t)
+      || /^(?:click|press)\s+(?:on\s+)?skip$/.test(t)) {
+    return { tool: 'media_control', args: { action: 'skip_ad' }, silent: false };
+  }
+
   // ── System Media (Spotify, VLC, etc.) ──
   // When the user NAMES the app, target it directly — global media keys go to
   // whichever app played media last (often the browser), not the named app.
-  const namedMedia = t.match(/^(pause|play|resume)\s+(spotify|vlc)$/);
+  // Play and pause are sent as said, so "play" never pauses a song already playing.
+  // "pause Spotify", "play the current song on Spotify", "resume the music in VLC"
+  const namedMedia = t.match(/^(pause|play|resume)\s+(?:(?:the\s+)?(?:current\s+)?(?:song|music|track)\s+(?:on|in)\s+)?(spotify|vlc)$/);
   if (namedMedia) {
-    return { tool: 'system_media_control', args: { action: 'play_pause', app_name: namedMedia[2] }, silent: true };
+    return { tool: 'system_media_control', args: { action: namedMedia[1] === 'pause' ? 'pause' : 'play', app_name: namedMedia[2] }, silent: true };
   }
-  if (/^(pause|play|resume)\s+(music|media\s+player)$/.test(t)) {
-    return { tool: 'system_media_control', args: { action: 'play_pause' }, silent: true };
+  const music = t.match(/^(pause|play|resume)\s+(?:the\s+)?(music|media\s+player)$/);
+  if (music) {
+    return { tool: 'system_media_control', args: { action: music[1] === 'pause' ? 'pause' : 'play' }, silent: true };
   }
   const namedSkip = t.match(/^(next|previous|prev)\s+(song|track)\s+on\s+(spotify|vlc)$/);
   if (namedSkip) {
@@ -239,7 +331,7 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
     return { tool: 'system_media_control', args: { action: 'previous' }, silent: true };
   }
   if (/^stop\s+(the\s+)?(music|song|playback|media)$/.test(t)) {
-    return { tool: 'system_media_control', args: { action: 'play_pause' }, silent: true };
+    return { tool: 'system_media_control', args: { action: 'pause' }, silent: true };
   }
 
   // ── Volume ──
@@ -254,6 +346,11 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
   }
   if (/^unmute(\s+(the\s+)?(sound|volume|audio))?$/.test(t)) {
     return { tool: 'system_volume', args: { action: 'unmute' }, silent: true };
+  }
+  // "set the volume to fifty", "volume 30 percent", "volume to twenty five"
+  const volumeTo = t.match(/^(?:set\s+(?:the\s+)?)?volume\s+(?:to\s+)?(.+?)(?:\s*(?:percent|per cent|%))?$/);
+  if (volumeTo && spokenNumber(volumeTo[1]) != null) {
+    return { tool: 'system_volume', args: { action: 'set', value: spokenNumber(volumeTo[1]) }, silent: true };
   }
 
   // ── Keyboard Shortcuts ──
@@ -295,7 +392,8 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
   }
 
   // ── Window management ──
-  if (/^minimi(z|s)e( (this|the|that))?( window| app)?$/.test(t)) {
+  // "minimise this tab" too: a tab can't be minimised, so the window in front is
+  if (/^minimi(z|s)e( (this|the|that))?( window| app| tab)?$/.test(t)) {
     return { tool: 'window_control', args: { action: 'minimize' }, silent: true };
   }
   if (/^maximi(z|s)e( (this|the|that))?( window| app)?$/.test(t) || /^full\s*screen$/.test(t)) {
@@ -363,6 +461,15 @@ export function matchFastCommand(text, { activeUrl = '' } = {}) {
   const goToApp = t.match(/^go to\s+(.+)$/);
   if (goToApp && resolveAppName(goToApp[1]).app) {
     return { tool: 'focus_application', args: { app_name: goToApp[1].trim() }, silent: true };
+  }
+
+  // ── Open an app — "open Word", "launch Spotify", "start the calculator" ──
+  // Only apps AbleSpeak knows how to open (system-tools.js openApplication), so
+  // "open my email" or "open the File menu" still go to the AI; dashboard pages
+  // ("open settings") keep their own meaning below. Said aloud, as the AI path did.
+  const openApp = t.match(/^(?:open|launch|start|run)\s+(?:up\s+)?(?:the\s+|my\s+)?(.+?)(?:\s+(?:app|application|program))?$/);
+  if (openApp && !isDashboardName(openApp[1]) && (QUICK_OPEN_APPS.test(openApp[1]) || resolveAppName(openApp[1]).launch)) {
+    return { tool: 'open_application', args: { app_name: openApp[1].trim() }, silent: false };
   }
 
   // ── AbleSpeak Dashboard Navigation — "go to settings", "open chat" ──

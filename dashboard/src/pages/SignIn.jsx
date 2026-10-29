@@ -4,6 +4,7 @@ import { skipSignInForNow } from '../lib/signInFirst';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { MUTED, BODY, QUIET, PRIMARY, FIELD, LABEL, INK } from '../lib/ui';
+import AbleSpeakGlobe from '../components/AbleSpeakGlobe';
 
 /**
  * Sign in to an AbleSpeak account (Phase 2, docs/AbleSpeak-Tier2-Phase2-Accounts-Plan.md).
@@ -118,11 +119,13 @@ export default function SignIn() {
   const field = `${FIELD} min-h-[52px] text-[18px] focus:ring-0`;
 
   return (
-    <div className="min-h-full w-full bg-[#0D1627] text-[#dae3f4] flex items-center justify-center px-6 py-10">
+    <div className="min-h-full w-full bg-[var(--page)] text-[var(--ink)] flex items-center justify-center px-6 py-10">
       <div className="w-full max-w-[920px] grid grid-cols-1 lg:grid-cols-[1fr_440px] gap-10 lg:gap-16 items-center">
 
         {/* Why sign in */}
         <section aria-labelledby="why-heading" className="flex flex-col gap-6">
+          {/* The turning AbleSpeak globe; left out on narrow windows so the sign-in card stays near the top */}
+          <AbleSpeakGlobe className="hidden lg:block h-[300px] -mt-4 -mb-2" />
           <div className="flex items-center gap-3">
             <img src="/ablespeak-logo.png" alt="" className="w-12 h-12 rounded-full" draggable="false" />
             <span className="font-heading text-[22px] leading-7 font-semibold tracking-tight">AbleSpeak</span>
@@ -144,7 +147,7 @@ export default function SignIn() {
         </section>
 
         {/* Sign in */}
-        <section aria-labelledby="sign-in-heading" className="bg-[#141c28] rounded-2xl border border-white/[0.06] p-8 flex flex-col gap-6 shadow-[0_8px_32px_rgba(0,0,0,0.25)]">
+        <section aria-labelledby="sign-in-heading" className="bg-[var(--card)] rounded-2xl border border-white/[0.06] p-8 flex flex-col gap-6 shadow-[0_8px_32px_rgba(0,0,0,0.25)]">
           {isLoading ? null : account?.signedIn ? (
             <SignedIn email={account.user?.email} onSignOut={signOut} busy={busy} buttonRef={fieldRef} />
           ) : (
@@ -153,7 +156,7 @@ export default function SignIn() {
                 <h1 id="sign-in-heading" className="font-heading text-[26px] leading-8 font-semibold tracking-[-0.01em]">
                   {step === 'code' ? 'Enter your code' : 'Sign in'}
                 </h1>
-                <p className={`${BODY} text-[#c9b8a5]`}>
+                <p className={`${BODY} text-[var(--ink-quiet)]`}>
                   {step === 'code'
                     ? 'Look for an email from AbleSpeak, then say or type the number in it.'
                     : 'No password. We email you a short code, and you say or type it here.'}
@@ -226,20 +229,20 @@ export default function SignIn() {
                     {busy ? 'Checking…' : 'Sign in'}
                   </button>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <button type="button" onClick={sendCode} disabled={busy || resendIn > 0} className="min-h-[44px] px-2 rounded-lg text-[14px] font-medium text-[#ffc880] hover:bg-[#18202d] disabled:text-[#8b95a7] disabled:cursor-not-allowed">
+                    <button type="button" onClick={sendCode} disabled={busy || resendIn > 0} className="min-h-[44px] px-2 rounded-lg text-[14px] font-medium text-[var(--accent-soft)] hover:bg-[var(--sunken)] disabled:text-[var(--ink-faint)] disabled:cursor-not-allowed">
                       {resendIn > 0 ? `Send a new code in ${resendIn}s` : 'Send a new code'}
                     </button>
-                    <button type="button" onClick={() => { setStep('email'); setMessage(null); }} className="min-h-[44px] px-2 rounded-lg text-[14px] font-medium text-[#dae3f4] hover:bg-[#18202d]">
+                    <button type="button" onClick={() => { setStep('email'); setMessage(null); }} className="min-h-[44px] px-2 rounded-lg text-[14px] font-medium text-[var(--ink)] hover:bg-[var(--sunken)]">
                       Use a different email
                     </button>
                   </div>
                 </form>
               )}
 
-              <div className="rounded-xl bg-[#18202d] border border-white/[0.06] p-4 flex gap-3">
-                <span className="material-symbols-outlined text-[22px] text-[#ffc880] shrink-0" aria-hidden="true">diversity_3</span>
+              <div className="rounded-xl bg-[var(--sunken)] border border-white/[0.06] p-4 flex gap-3">
+                <span className="material-symbols-outlined text-[22px] text-[var(--accent-soft)] shrink-0" aria-hidden="true">diversity_3</span>
                 <p className={`${MUTED} text-[14px]`}>
-                  <span className="text-[#dae3f4] font-medium">Setting this up for someone?</span>{' '}
+                  <span className="text-[var(--ink)] font-medium">Setting this up for someone?</span>{' '}
                   Use their own email, and stay with them while the code arrives.
                 </p>
               </div>
@@ -273,11 +276,11 @@ function SignedIn({ email, onSignOut, busy, buttonRef }) {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
-        <span className="w-12 h-12 rounded-full bg-[#68d9c3]/15 flex items-center justify-center" aria-hidden="true">
-          <span className="material-symbols-outlined text-[26px] text-[#68d9c3]">check</span>
+        <span className="w-12 h-12 rounded-full bg-[#6fdcc6]/15 flex items-center justify-center" aria-hidden="true">
+          <span className="material-symbols-outlined text-[26px] text-[var(--ok)]">check</span>
         </span>
         <h1 id="sign-in-heading" className="font-heading text-[26px] leading-8 font-semibold tracking-[-0.01em]">You’re signed in</h1>
-        <p className={`${BODY} text-[#c9b8a5] break-all`}>{email}</p>
+        <p className={`${BODY} text-[var(--ink-quiet)] break-all`}>{email}</p>
       </div>
       <p className={`${MUTED} text-[14px]`}>
         AbleSpeak stays signed in on this computer. Your settings will start to follow you once syncing is switched on.
@@ -292,8 +295,8 @@ function SignedIn({ email, onSignOut, busy, buttonRef }) {
 /** Google is open in the browser; AbleSpeak notices by itself when it has finished. */
 function Waiting({ onCancel }) {
   return (
-    <div className="rounded-xl bg-[#18202d] border border-white/[0.08] p-5 flex flex-col items-center gap-4 text-center">
-      <span className="w-8 h-8 rounded-full border-[3px] border-[#f5a623]/30 border-t-[#f5a623] animate-spin motion-reduce:animate-none" aria-hidden="true" />
+    <div className="rounded-xl bg-[var(--sunken)] border border-white/[0.08] p-5 flex flex-col items-center gap-4 text-center">
+      <span className="w-8 h-8 rounded-full border-[3px] border-[#f5a623]/30 border-t-[var(--accent)] animate-spin motion-reduce:animate-none" aria-hidden="true" />
       <div className="flex flex-col gap-1">
         <p className="text-[16px] leading-6 font-semibold">Finish signing in in your browser</p>
         <p className={`${MUTED} text-[14px]`}>Google opened in your browser. When it says you’re signed in, come back here.</p>
@@ -318,11 +321,11 @@ function GoogleMark() {
 function Benefit({ icon, title, children }) {
   return (
     <li className="flex gap-4">
-      <span className="w-10 h-10 rounded-xl bg-[#18202d] border border-white/[0.06] flex items-center justify-center shrink-0" aria-hidden="true">
-        <span className="material-symbols-outlined text-[22px] text-[#ffc880]">{icon}</span>
+      <span className="w-10 h-10 rounded-xl bg-[var(--sunken)] border border-white/[0.06] flex items-center justify-center shrink-0" aria-hidden="true">
+        <span className="material-symbols-outlined text-[22px] text-[var(--accent-soft)]">{icon}</span>
       </span>
       <span className="flex flex-col gap-0.5">
-        <span className="text-[16px] leading-6 font-semibold text-[#dae3f4]">{title}</span>
+        <span className="text-[16px] leading-6 font-semibold text-[var(--ink)]">{title}</span>
         <span className={`${MUTED} text-[14px]`}>{children}</span>
       </span>
     </li>

@@ -30,16 +30,26 @@ export const TOOL_CATEGORIES = [
   { name: 'Search', tools: ['search_web', 'search_youtube', 'search_in_page'] },
   { name: 'Media & volume', tools: ['media_control', 'system_media_control', 'system_volume'] },
   {
+    name: 'YouTube',
+    tools: ['youtube_open_video', 'youtube_play_result', 'youtube_next_video', 'youtube_previous_video',
+      'youtube_seek', 'youtube_skip_sponsor'],
+  },
+  {
+    name: 'Gmail',
+    tools: ['gmail_open_email', 'gmail_back_to_inbox', 'gmail_select_emails', 'gmail_mark_selected',
+      'gmail_delete_selected', 'gmail_draft_reply'],
+  },
+  {
     name: 'Desktop apps',
     tools: ['open_application', 'close_application', 'focus_application', 'window_control',
-      'system_type_text', 'send_system_keys'],
+      'system_type_text', 'send_system_keys', 'save_document_as'],
   },
   {
     name: 'Desktop screen reading',
     tools: ['uia_query', 'uia_act', 'list_desktop_elements', 'click_desktop_element', 'read_desktop_window',
-      'desktop_scroll', 'list_running_apps', 'fix_spelling'],
+      'desktop_scroll', 'list_running_apps', 'fix_spelling', 'set_document_text'],
   },
-  { name: 'Conversation', tools: ['answer_question'] },
+  { name: 'Conversation', tools: ['answer_question', 'web_answer', 'ignore'] },
   {
     name: 'Dashboard control',
     tools: ['navigate_dashboard', 'switch_ai_provider', 'toggle_continuous_mode',

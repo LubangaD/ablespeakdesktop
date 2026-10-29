@@ -5,6 +5,14 @@
  * Supports multiple providers with runtime switching.
  */
 
+// The voice bar's wording for failures (globalThis.AbleSpeakMessages), so a
+// reply never carries advice meant for the AI ("Use click_desktop_element with …")
+import '../overlay-messages.js';
+import { newSpend, addSpend } from './speed-meter.js';
+import { describeProfiles } from './app-profiles.js';
+import { classifyFailure, CircuitBreaker, pickFallbackModel, FALLBACK_PREFER } from './llm-reliability.js';
+import { screenFingerprint, screenChangeNote } from './screen-change.js';
+
 // NOTE: `models` is only a STATIC FALLBACK — the live list is fetched from each
 // provider's API at runtime (listModels). `prefer` is an ordered list of regex
 // patterns used to auto-pick the best available model (autoSelectModel), so
@@ -49,6 +57,31 @@ export function cleanReply(text) {
   return typeof text === 'string' ? text.replace(EXECUTED_MARKER_RE, '').trim() : text;
 }
 
+// Tools that read the screen or a page for the AI. What they return is data
+// for its next step ("42.393288.4.7.1.5 ComboBox …"), never words to say.
+const READ_TOOLS = new Set([
+  'uia_query', 'list_desktop_elements', 'read_desktop_window', 'list_running_apps',
+  'get_page_content', 'get_page_state', 'find_tab',
+  'gmail_open_email', // the whole email, for the AI to read out or sum up in its next step
+]);
+
+/**
+ * After a page change, wait until the Chrome extension reports the new page
+ * with its elements: a report after `before.at` with elements, for a new
+ * address (or, for a reload, at least 800 ms on). At most `maxMs`; the time
+ * waited is returned.
+ */
+export async function waitForFreshPage(wsHub, before, { maxMs = 2000, stepMs = 100 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const ctx = wsHub.browserContext;
+    const fresh = (ctx?.receivedAt || 0) > before.at && ctx?.pageContext?.viewportElements?.length > 0;
+    if (fresh && (ctx.activeTab?.url !== before.url || Date.now() - before.at >= 800)) return Date.now() - start;
+    await new Promise(r => setTimeout(r, stepMs));
+  }
+  return Date.now() - start;
+}
+
 // Extract a numeric version from a model name for "newest first" sorting
 function versionScore(name) {
   const m = String(name).match(/(\d+(?:\.\d+)?)/);
@@ -66,7 +99,28 @@ const TERMINAL_TOOLS = new Set([
   'open_url', 'make_tab_active', 'zoom_tab', 'pin_tab', 'mute_tab',
   'media_control', 'press_key_combination', 'click_element', 'select_option', 'type_text',
   'search_in_page', 'clear_field', 'focus_next', 'focus_prev', 'answer_question',
+  'youtube_open_video', 'youtube_play_result', 'youtube_next_video', 'youtube_previous_video', 'ignore',
+  'youtube_seek', 'youtube_skip_sponsor',
+  'gmail_back_to_inbox', 'gmail_mark_selected', 'gmail_delete_selected', 'gmail_draft_reply',
+  'set_document_text', 'web_answer',
 ]);
+
+/**
+ * A web answer (web-answer.js) is said exactly as Google's search grounded
+ * it: Google's terms allow no changes, and the model's own words around the
+ * call ("Let me look that up") must not replace it.
+ */
+const webAnswerText = results => results.findLast(r => r.tool === 'web_answer' && r.result?.status === 'success' && r.result.text)?.result.text || '';
+
+// Desktop actions whose effect shows in the window's controls. A round made
+// only of these is checked against the screen afterwards (screen-change.js);
+// browser pages update later through the extension, and volume, media keys
+// or reads change nothing on screen, so those rounds are not.
+const SCREEN_ACTIONS = new Set([
+  'click_desktop_element', 'mouse_click', 'uia_act', 'open_application',
+  'focus_application', 'close_application', 'system_type_text', 'desktop_scroll',
+]);
+const changesScreen = tc => SCREEN_ACTIONS.has(tc.name) && !(tc.name === 'uia_act' && tc.arguments?.action === 'read_text');
 
 export class AIEngine {
   constructor({ toolRegistry, wsHub }) {
@@ -90,6 +144,8 @@ export class AIEngine {
     this.maxHistory = 20;
     this.llmTimeoutMs = 15000;
     this._modelCache = {}; // provider → { models, at }
+    // A model busy three times in a row is skipped for a minute (llm-reliability.js)
+    this._breaker = new CircuitBreaker();
   }
 
   // ── Dynamic Model Discovery ──
@@ -243,7 +299,9 @@ export class AIEngine {
       try {
         return await this._fetchWithTimeout(url, options, timeoutMs);
       } catch (err) {
-        if (attempt === retries) throw err;
+        // A timeout or a spoken "stop" is not retried here: _reliably moves a
+        // call that timed out to the backup model, and a stop stays stopped.
+        if (attempt === retries || err.name === 'AbortError') throw err;
         const backoff = 1000 * (attempt + 1);
         console.warn(`[AIEngine] Attempt ${attempt + 1} failed (${err.name}), retrying in ${backoff}ms...`);
         await new Promise(r => setTimeout(r, backoff));
@@ -308,12 +366,34 @@ export class AIEngine {
 
   // ── Chat Processing ──
 
+  /**
+   * A question answered without the AI (a quick web answer), kept in the
+   * conversation so a follow-up ("and where did he study?") makes sense.
+   */
+  rememberExchange(said, answer) {
+    if (!said || !answer) return;
+    this.conversationHistory.push({ role: 'user', content: String(said) }, { role: 'assistant', content: String(answer) });
+    if (this.conversationHistory.length > this.maxHistory) this.conversationHistory = this.conversationHistory.slice(-this.maxHistory);
+  }
+
   async processChat(userText, context = {}) {
     const startTime = Date.now();
+    // This command's AI calls, their time and tokens: `usage` in the result (speed-meter.js)
+    const spend = newSpend(this.model);
 
-    // Build the system prompt with available tools and context
-    const systemPrompt = this._buildSystemPrompt(context);
-    const tools = this.toolRegistry.getToolsForContext(context);
+    // During an exam the AI must not see the paper or the answers, or act at all
+    if (this.examLock?.()) {
+      return { text: 'An exam is running, so the AI assistant is switched off until it ends.', toolCalls: null, noAction: true, error: true, latency: 0, provider: 'exam', model: 'exam' };
+    }
+
+    // Gemini gets the fixed instructions as its system prompt, and what is on
+    // the screen now goes with the person's words: every request then starts
+    // the same, and Gemini serves that part from its cache. Measured 17 Oct
+    // 2026: a one-step command took 1.55 s (median, spikes to 3.5 s) and
+    // 1.1 s this way. Other providers get it all in the system prompt, as before.
+    const splitMoment = this.provider === 'gemini';
+    const systemPrompt = splitMoment ? this._instructions() : this._buildSystemPrompt(context);
+    const tools = this.toolRegistry.getToolsForContext(context, userText);
 
     // Debug: log what context the AI is getting
     const vpCount = context.pageContext?.viewportElements?.length || 0;
@@ -328,8 +408,10 @@ export class AIEngine {
       : '';
     console.log(`[AIEngine] Context: ${vpCount} viewport elements, ${mediaCount} media, browser tab: ${activeUrl}${desk}${hasScreenshot ? ', +screenshot' : ''}`);
 
-    // Add user message to history
-    this.conversationHistory.push({ role: 'user', content: userText });
+    // Add user message to history (the screen details are added only when sent)
+    const turn = { role: 'user', content: userText };
+    this.conversationHistory.push(turn);
+    this._moment = splitMoment ? { turn, text: this._describeMoment(context) } : null;
 
     // Trim history
     if (this.conversationHistory.length > this.maxHistory) {
@@ -343,7 +425,25 @@ export class AIEngine {
     this._activeAbortController = new AbortController();
 
     try {
-      let result = await this._callLLM(systemPrompt, tools);
+      let result = await this._callLLM(systemPrompt, tools, { spend });
+
+      // The model sometimes answers with nothing at all — no words, no tool
+      // ("Click on sign up button", with the button in its list). Ask once
+      // more, this time requiring a tool, before telling the person to rephrase.
+      if (!result.toolCalls?.length && !cleanReply(result.text)?.trim() && tools.length > 0) {
+        console.warn('[AIEngine] Empty reply — asking again with a tool required');
+        // Gemini refuses "a tool is required" with this many tools ("too much
+        // branching for serving"), so it is asked in words instead
+        const gemini = this.provider === 'gemini';
+        const retryPrompt = gemini
+          ? `${systemPrompt}\n\nYour last reply was empty. Reply now: call the tool that does what the person asked, or answer in one short spoken sentence.`
+          : systemPrompt;
+        try {
+          result = await this._callLLM(retryPrompt, tools, { requireTool: !gemini, spend });
+        } catch (err) {
+          console.error('[AIEngine] Second try failed:', err.message);
+        }
+      }
 
       const latency = Date.now() - startTime;
 
@@ -352,7 +452,9 @@ export class AIEngine {
       const allToolResults = [];
       let currentResult = result;
       let rounds = 0;
-      const MAX_ROUNDS = 3; // allows focus → list_desktop_elements → click chains
+      // Allows try → look → act chains: "play the song on Spotify" took
+      // play key → click → uia_query → uia_act, and the 4th step was cut off
+      const MAX_ROUNDS = 4;
 
       // Navigation tools trigger a page load — after they run we must wait for the
       // extension to send an updated context_update, then inject the fresh viewport
@@ -369,6 +471,10 @@ export class AIEngine {
       // Jackson" was opened three times while nothing was said)
       const doneCalls = new Set();
       const callKey = tc => `${tc.name}:${JSON.stringify(tc.arguments || {})}`;
+      // The screen before each round of desktop actions, so the AI is told
+      // when a round changed nothing or went back to an earlier screen
+      let screens = [];
+      let screenNow = null; // the screen after the last round, while it is still current
       while (currentResult.toolCalls && currentResult.toolCalls.length > 0 && rounds < MAX_ROUNDS) {
         if (currentResult.toolCalls.every(tc => failedCalls.has(callKey(tc)))) {
           console.log('[AIEngine] Not repeating a call that already failed');
@@ -377,6 +483,15 @@ export class AIEngine {
         rounds++;
         const roundResults = [];
         const usedNavigation = currentResult.toolCalls.some(tc => NAVIGATION_TOOLS.has(tc.name));
+        const pageBefore = { url: this.wsHub?.browserContext?.activeTab?.url, at: Date.now() };
+        const watchScreen = currentResult.toolCalls.every(changesScreen);
+        if (watchScreen) {
+          // Usually the read made for this command, still in the screen model's cache
+          screens.push(screenNow ?? screenFingerprint(await this._readScreen({ fresh: false })));
+        } else {
+          screens = [];
+        }
+        screenNow = null;
 
         for (const toolCall of currentResult.toolCalls) {
           const key = callKey(toolCall);
@@ -388,18 +503,14 @@ export class AIEngine {
           }
           console.log(`[AIEngine] Tool call (round ${rounds}): ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
           const toolResult = await this.toolRegistry.executeTool(toolCall.name, toolCall.arguments, this.wsHub);
-          roundResults.push({ tool: toolCall.name, result: toolResult });
+          // A tool that asks a model itself (web_answer): its time, tokens and search count too
+          if (toolResult?.usage?.calls) addSpend(spend, toolResult.usage, toolResult.usage.ms);
+          // With its arguments, so a command that worked can be learned and replayed
+          roundResults.push({ tool: toolCall.name, args: toolCall.arguments || {}, result: toolResult });
           if (toolResult?.status === 'error' || toolResult?.error) failedCalls.add(key);
           else doneCalls.add(key);
         }
         allToolResults.push(...roundResults);
-
-        // ── After navigation: wait for extension to push fresh page context ──
-        // Without this, round 2 still sees the OLD viewport elements and can't
-        // click the right video after search_youtube redirects the page.
-        if (usedNavigation && this.wsHub) {
-          await new Promise(r => setTimeout(r, 2000));
-        }
 
         // ── Latency short-circuit ──
         // If every tool was a "terminal" action and all succeeded, the command
@@ -409,15 +520,34 @@ export class AIEngine {
         if (allTerminal && allSucceeded) {
           this.conversationHistory.push({
             role: 'assistant',
-            content: currentResult.text || `[executed: ${roundResults.map(r => r.tool).join(', ')}]`,
+            // What was said, so "and where does he work?" follows on from it
+            content: webAnswerText(roundResults) || currentResult.text || `[executed: ${roundResults.map(r => r.tool).join(', ')}]`,
           });
           return {
-            text: cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
+            text: webAnswerText(allToolResults) || cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
             toolCalls: allToolResults,
             latency: Date.now() - startTime,
             provider: this.provider,
             model: this.model,
+            usage: spend,
           };
+        }
+
+        // ── After navigation: the next round needs the new page's elements ──
+        // Without them round 2 sees the OLD page and can't click the right video
+        // after search_youtube. Only now, once the command is known not to be
+        // finished: a fixed 2 s used to run first, even after a plain "open YouTube".
+        if (usedNavigation && this.wsHub) {
+          const waited = await waitForFreshPage(this.wsHub, pageBefore);
+          console.log(`[AIEngine] New page ready for the next step after ${waited} ms`);
+        }
+
+        // Did the round change anything? (After ARTEMIS's unchanged-screen hints)
+        let screenNote = '';
+        if (watchScreen) {
+          screenNow = await this._settledScreen(screens[screens.length - 1]);
+          screenNote = screenChangeNote(screens, screenNow);
+          if (screenNote) console.log(`[AIEngine] After round ${rounds}: ${screenNote.replace(/^Screen check: /, '').split('. ')[0]}`);
         }
 
         // Add assistant tool call + results to history
@@ -438,18 +568,26 @@ export class AIEngine {
             ).join('\n');
         }
 
+        // What a read found (uia_act read_text, read_desktop_window) goes with
+        // it: the AI is to say it, and the message only names what was read
+        const forAI = roundResults.map(r => {
+          const res = r.result || {};
+          const text = typeof res.text === 'string' && res.text.trim() && res.text !== res.message ? res.text.slice(0, 1500) : '';
+          return { tool: r.tool, status: res.status || 'done', message: res.message || '', ...(text ? { text } : {}) };
+        });
         this.conversationHistory.push({
           role: 'user',
           content: this._truncateContent(
-            `Tool results: ${JSON.stringify(roundResults.map(r => ({ tool: r.tool, status: r.result?.status || 'done', message: r.result?.message || '' })))}${freshContext}
+            `${screenNote ? `${screenNote}\n\n` : ''}Tool results: ${JSON.stringify(forAI)}${freshContext}
 
-IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP action (like "play [song]" which requires search then click). Do NOT add extra actions the user did not ask for. If the user asked a QUESTION or for information, ANSWER IT NOW in 2-4 plain spoken sentences (from the page you read, or your own knowledge) — the person may not be able to see the screen. Otherwise, if the command is complete, respond with a SHORT confirmation.`
+IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP action (like "play [song]" which requires search then click). Do NOT add extra actions the user did not ask for. If the user asked a QUESTION or for information, ANSWER IT NOW in 2-4 plain spoken sentences (from the page you read, or your own knowledge) — the person may not be able to see the screen. Otherwise, if the command is complete, respond with a SHORT confirmation.`,
+            4000 // room for a paragraph that was read, with the instructions after it
           )
         });
 
         // Ask AI for next step
         try {
-          currentResult = await this._callLLM(systemPrompt, tools);
+          currentResult = await this._callLLM(systemPrompt, tools, { spend });
         } catch (err) {
           console.error('[AIEngine] Multi-turn error:', err.message);
           break;
@@ -460,11 +598,12 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       if (allToolResults.length > 0) {
         this.conversationHistory.push({ role: 'assistant', content: currentResult.text || '' });
         return {
-          text: cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
+          text: webAnswerText(allToolResults) || cleanReply(currentResult.text) || this._summarizeToolResults(allToolResults),
           toolCalls: allToolResults,
           latency: Date.now() - startTime,
           provider: this.provider,
           model: this.model,
+          usage: spend,
         };
       }
 
@@ -477,8 +616,12 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
         finalText = context.extensionConnected === false
           ? 'The Chrome extension is not connected, so I could not do that in the browser. Click the AbleSpeak extension icon in Chrome to reconnect it.'
           : 'I did not perform any action for that command. Could you rephrase it?';
+        // A turn where nothing happened is not kept: with it in the history
+        // the model answers the next command the same way.
+        this.conversationHistory.pop();
+      } else {
+        this.conversationHistory.push({ role: 'assistant', content: finalText });
       }
-      this.conversationHistory.push({ role: 'assistant', content: finalText });
 
       return {
         text: finalText,
@@ -487,6 +630,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
         latency,
         provider: this.provider,
         model: this.model,
+        usage: spend,
       };
 
     } catch (err) {
@@ -497,6 +641,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
         latency: Date.now() - startTime,
         provider: this.provider,
         model: this.model,
+        usage: spend,
       };
     } finally {
       // Clean up screenshot so it doesn't persist across requests
@@ -510,7 +655,11 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
    * plan and check steps without touching the conversation history.
    * Returns { text, toolCalls }.
    */
-  async complete({ system, messages, tools = [] }) {
+  // `temperature` 0 for the agent's plans and checks (JSON); `spend` adds
+  // these calls to a command's time and tokens, like _callLLM.
+  async complete({ system, messages, tools = [], temperature, spend = null }) {
+    // The task agent and its evaluation routes come through here: no AI during an exam
+    if (this.examLock?.()) throw new Error('An exam is running, so the AI assistant is switched off until it ends.');
     const send = () => {
       const history = this.conversationHistory;
       const screenshot = this._currentScreenshot;
@@ -518,20 +667,31 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       this._currentScreenshot = null;
       try {
         // Each provider reads the messages before its first await.
-        return this._dispatch(system, tools);
+        return this._dispatch(system, tools, { temperature });
       } finally {
         this.conversationHistory = history;
         this._currentScreenshot = screenshot;
       }
     };
-    try {
-      return await send();
-    } catch (err) {
-      if (!this._isModelError(err)) throw err;
-      const replacement = await this.autoSelectModel(true);
-      if (!replacement) throw err;
-      return send();
+    return this._reliably(send, { spend });
+  }
+
+  /** The front window's controls, for checking a round changed something; null if they can't be read. */
+  _readScreen({ fresh = true } = {}) {
+    return this.wsHub?.readScreenForAgent ? this.wsHub.readScreenForAgent({ fresh }).catch(() => null) : Promise.resolve(null);
+  }
+
+  /**
+   * The screen's fingerprint after a round. Apps take a moment to redraw,
+   * so a screen that looks unchanged is read once more after `waitMs`.
+   */
+  async _settledScreen(before, { waitMs = 500 } = {}) {
+    let now = screenFingerprint(await this._readScreen());
+    if (now && now === before) {
+      await new Promise(r => setTimeout(r, waitMs));
+      now = screenFingerprint(await this._readScreen());
     }
+    return now;
   }
 
   clearHistory() {
@@ -541,6 +701,13 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
   // ── System Prompt Builder ──
 
   _buildSystemPrompt(context) {
+    const moment = this._describeMoment(context);
+    return moment ? `${this._instructions()}\n${moment}` : this._instructions();
+  }
+
+  /** What never changes between commands: sent first, so Gemini can reuse it from its cache. */
+  _instructions() {
+    if (this._instructionsText) return this._instructionsText;
     const parts = [
       'You are AbleSpeak, a voice-native AI assistant that controls the user\'s ENTIRE computer hands-free.',
       'You help users with disabilities interact with their computer using voice commands.',
@@ -571,7 +738,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **Read the window first**: `uia_query` lists the controls in a desktop window through Windows accessibility — ref, type, name, state and the actions each supports. The controls of the window the student is using are often already listed below under "Controls in".',
       '- **Act through the control**: `uia_act` with a ref presses buttons (invoke), switches checkboxes (toggle), picks tabs and list items (select), opens menus (expand), types into a field (set_value), scrolls a pane, moves a slider to a number (set_range), or reads a document (read_text, with value "selection", "line", "paragraph" etc. for "read what I selected" / "read this paragraph"). This is reliable and does not move the mouse.',
       '- **By name**: `click_desktop_element` with the visible name also works in every Windows app — it uses the same accessibility actions.',
-      '- **Screen positions are the fallback**: only when a control is not in the uia_query list (some apps draw their own controls), use the SCREENSHOT to find it and call `click_desktop_element` with x and y.',
+      '- **A control that is not listed**: call `uia_query` with part of its name to search the whole window. If it is still not there (some apps draw their own controls), tell the person you cannot find it and ask them to name something near it. Never guess x and y: click by position only when a screenshot is attached.',
       '- **Read a window**: `read_desktop_window`, or `uia_act` with action "read_text" on a Document control.',
       '- **Scroll desktop apps**: `uia_act` with scroll_down / scroll_up on the pane, or `desktop_scroll` (browser pages use `scroll` instead).',
       '- **Double-click** to open files/icons: `click_desktop_element` with double_click:true.',
@@ -592,9 +759,9 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **To search on the current page** (clear search bar and type new query): use the `search_in_page` tool — works on Google, YouTube, Wikipedia, etc.',
       '- **To clear a text field**: use the `clear_field` tool',
       '- **To select radio buttons, checkboxes, tabs, or dropdown options**: use the `select_option` tool with the visible label text — it finds and activates the actual form element. MUCH more reliable than click_element for form controls.',
-      '- **To click ANYTHING ELSE in browser**: use the `click_element` tool with the xpath from the Visible Interactive Elements list below',
+      '- **To click ANYTHING ELSE in browser**: use the `click_element` tool with the xpath from the Visible Interactive Elements list below AND the label (the words on the element). ALWAYS call the tool — never reply with nothing to a click command',
       '- **To play/pause browser video or audio**: use the `media_control` tool with action "play", "pause", or "toggle"',
-      '- **To play/pause desktop media (Spotify, VLC)**: use the `system_media_control` tool with action "play_pause"',
+      '- **To play/pause desktop media (Spotify, VLC)**: use the `system_media_control` tool with action "play" or "pause"',
       '- **To type text in browser**: use the `type_text` tool',
       '- **To press keyboard shortcuts**: use `press_key_combination` (browser) or `send_system_keys` (any app)',
       '- **To scroll**: use `scroll` with direction "up" or "down"',
@@ -602,18 +769,18 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **To switch apps**: use `focus_application` with the app name',
       '',
       '## Examples',
-      '- User: "play Finale by Bien" → No app mentioned → call `search_youtube` with query "Finale Bien". After results load, use `navigate_to_link` with label:"Finale Bien" to open the first matching video. NEVER use click_element for YouTube videos — it is silently ignored.',
+      '- User: "play Finale by Bien" → No app mentioned → call `search_youtube` with query "Finale Bien". After results load, use `youtube_play_result` with number 1 (or `youtube_open_video` with the ID of the matching video). NEVER use click_element for YouTube videos.',
       '- User: "play Finale by Bien on Spotify" → Spotify mentioned! → `focus_application` app_name:"spotify", then `click_desktop_element` name:"search", app_name:"spotify", then `system_type_text` text:"Finale Bien", then `send_system_keys` keys:"enter"',
-      '- User: "play Carisma Sinanoma" → No app → call `search_youtube` with query "Charisma Sina Noma". After results load, use `navigate_to_link` with label:"Charisma" to open the video.',
-      '- User: "pause Spotify" → Use `system_media_control` with action:"play_pause", app_name:"spotify" (ALWAYS pass app_name when the user names the app!)',
-      '- User: "play the song on Spotify" → Use `system_media_control` with action:"play_pause", app_name:"spotify"',
+      '- User: "play Carisma Sinanoma" → No app → call `search_youtube` with query "Charisma Sina Noma". After results load, use `youtube_play_result` with number 1 to open the video.',
+      '- User: "pause Spotify" → Use `system_media_control` with action:"pause", app_name:"spotify" (ALWAYS pass app_name when the user names the app!)',
+      '- User: "play the song on Spotify" → Use `system_media_control` with action:"play", app_name:"spotify"',
       '- User: "next song" → Use `system_media_control` with action:"next" (no app named → global media key)',
       '- User: "type hello world in Notepad" → Use `focus_application` with app_name:"notepad", then `system_type_text` with text:"hello world"',
       '- User: "click the like button in Spotify" → Use `click_desktop_element` with name:"like", app_name:"spotify"',
       '- User: "click play on the song in Spotify" → Use `click_desktop_element` with name:"play", app_name:"spotify". If not found, `list_desktop_elements` app_name:"spotify" then click the closest match.',
       '- User: "what does this dialog say" → Use `read_desktop_window`, then tell the user the content',
-      '- User: "what\'s on my screen" → Look at the SCREENSHOT attached and describe what you see',
-      '- User: "read that error" → Look at the SCREENSHOT for error messages/dialogs and read them out',
+      '- User: "what\'s on my screen" → Describe it from the controls listed below (see "Reading the screen")',
+      '- User: "read that error" → Use `read_desktop_window` and read the message out',
       '- User: "open the file report.docx in File Explorer" → Use `click_desktop_element` with name:"report", app_name:"explorer", double_click:true',
       '- User: "open Notepad" → Use `open_application` with app_name:"notepad"',
       '- User: "switch to Chrome" → Use `focus_application` with app_name:"Chrome"',
@@ -650,24 +817,25 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- **Spotify / desktop media players**: Use `focus_application` to bring the app forward, then `click_desktop_element` to interact with it (search, play, etc.). For play/pause/next/previous, use `system_media_control` with `app_name`.',
       '- **YouTube / browser**: Only use `search_youtube` when the user says "on YouTube" OR does not mention any specific app.',
       '- **Default behavior**: If the user just says "play [song]" with NO app mentioned, use `search_youtube`.',
-      '- **ALREADY on YouTube search results**: If the active tab URL contains "youtube.com/results" AND the user asks to play a specific video, use `navigate_to_link` with the video title — do NOT call search_youtube again.',
-      '- NEVER use click_element for YouTube video thumbnails or titles — YouTube SPA ignores programmatic clicks. ALWAYS use navigate_to_link instead.',
+      '- **ALREADY on YouTube search results**: If the active tab URL contains "youtube.com/results" AND the user asks to play a specific video, use `youtube_open_video` with the ID of the matching video from the YouTube section ("the second one" → `youtube_play_result` 2) — do NOT call search_youtube again.',
+      '- NEVER use click_element for YouTube video thumbnails or titles — YouTube ignores programmatic clicks. Open videos with youtube_open_video (by ID) or youtube_play_result (by position). Next / previous video: youtube_next_video / youtube_previous_video. Skip an ad: media_control action skip_ad.',
       '- NEVER click on random videos from the YouTube homepage. ALWAYS search first (unless you are already on a search results page with matching videos).',
-      '- After search_youtube, the page reloads with new results. Use `navigate_to_link` with the song/video title to open the first matching result.',
+      '- After search_youtube, the page reloads with new results. Use `youtube_play_result` with number 1 to open the first result.',
       '- Use the song/artist name from what the user said as the search query. Fix obvious misspellings (e.g. "Carisma" → "Charisma").',
       '- Do NOT open a new tab for YouTube if YouTube is already open — just search in the existing tab.',
       '',
       '## CRITICAL: Interacting with Desktop Apps',
       '- When the user mentions a SPECIFIC desktop app (Spotify, Notepad, Word, Excel, etc.), use DESKTOP tools to interact with it.',
       '- **Workflow**: `focus_application` → `uia_query` (if the controls are not already listed below) → `uia_act` with the right ref. Use `system_type_text` to type at the cursor.',
-      '- Use the SCREENSHOT to understand the screen, but act through the listed controls whenever the control is listed.',
+      '- Act through the listed controls: they are what the window really has.',
       '- If the user says "click play" or "click the search bar" in a desktop app, find the control in the list and use `uia_act` with its ref.',
       '',
       '## Questions: answer out loud',
       '- The person may be blind or unable to see the screen: what you SAY is what they get.',
-      '- "Tell me about X", "who is X", "what is X", "explain X", "how does X work": ANSWER in your reply, in 2-4 plain spoken sentences, from your own knowledge. Do NOT open a search page for this.',
-      '- Search the web only when they ask to search or look something up, or the answer needs current information (news, weather, prices, scores, today\'s events). After searching, call `get_page_content` and SAY the answer — never stop at an open results page.',
-      '- Never answer a question with only a tool call or an empty reply.',
+      '- Questions about the world — people, places, organisations, news, weather, prices, scores, dates, facts — and any question they ask you to search, google or look up: call `web_answer` with the whole question (names from the conversation filled in: "and where does he work?" → "Where does Derrick Lubanga work?"). It searches Google and answers out loud with sources, like Google\'s AI mode. Do NOT open a search page for this, and add nothing to its answer.',
+      '- From your own knowledge, answer only what needs no checking: what a word means, spelling, sums, how to do something on the computer, well-known ideas. Answer in your reply, in 2-4 plain spoken sentences.',
+      '- Open Google in the browser (`search_web`) only when they want to SEE the results ("search Google for…", "show me results for…").',
+      '- Never leave a question unanswered: answer it in words, or with `web_answer`.',
       '',
       '## Dictation',
       '- AbleSpeak HAS dictation. If the user asks to dictate, start typing or type for them without giving the text, reply: Say "start dictation", speak, then say "stop dictation". Never say there is no dictation function.',
@@ -676,12 +844,20 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       '- Do NOT open new tabs unless explicitly asked.',
       '- You can call multiple tools in sequence. After a tool executes, you will see the result and can call more tools.',
       '- Use xpaths from the Visible Interactive Elements list for clicking browser elements.',
-      '- When the user says "play [song]" without mentioning an app, use search_youtube THEN click_element on the first video result.',
+      '- When the user says "play [song]" without mentioning an app, use search_youtube THEN youtube_play_result with number 1.',
+      '- If what was heard was not said to you (song lyrics, a video or TV playing, other people talking, a cough, empty or garbled words), call `ignore` and nothing else. Never ask the person to rephrase these. A real request, even an unclear one, is never ignored.',
       '- When the user says "play [song] on Spotify", use focus_application("spotify") THEN click_desktop_element to search and play.',
       '- YOU CAN CONTROL DESKTOP APPS. Never say "I cannot control Spotify" — use system_media_control instead!',
       '- When creating new documents (Google Docs, Sheets, Slides), ALWAYS use the direct /create URL instead of trying to click UI elements.',
       '- If a click_element does not seem to work, try using open_url with a direct URL as a fallback.',
     ];
+    this._instructionsText = parts.join('\n');
+    return this._instructionsText;
+  }
+
+  /** What is on the screen and in the browser now: changes with every command. */
+  _describeMoment(context) {
+    const parts = [];
 
     // ── Screen Vision (borrowed from Clicky) ──
     if (context.screenshot) {
@@ -699,7 +875,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
     if (context.screenModel?.summary) {
       const model = context.screenModel;
       parts.push('', `## Controls in "${model.window}" (${model.app}) — the window the student is using`);
-      parts.push('Format: ref Type "name" [actions] (state). Act with `uia_act` using the ref. If what the student wants is not here, use the screenshot and click_desktop_element with x and y.');
+      parts.push(`Format: ref Type "name" [actions] (state). Act with \`uia_act\` using the ref. If what the student wants is not here, call uia_query with part of its name${context.screenshot ? ', or find it in the attached screenshot and click_desktop_element with x and y' : ''}.`);
       parts.push(model.summary);
       if (model.truncated) parts.push(`(${model.total} controls in total; call uia_query with a name to find others.)`);
       if (model.office) parts.push('', '### Where the student is in the document', model.office);
@@ -732,7 +908,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       parts.push('The Chrome extension is NOT connected. You CANNOT control the browser right now — no tabs, clicking, YouTube, page reading, or scrolling.');
       parts.push('If the user asks for ANY browser action, do NOT stay silent. Tell them clearly: "The Chrome extension is not connected — click the AbleSpeak extension icon in Chrome to reconnect it."');
       parts.push('Desktop tools still work: system_media_control (pause ANY media via media keys), system_volume, open/close/focus applications, send_system_keys.');
-      parts.push('TIP: "pause the video" can still be done with system_media_control action:"play_pause" — the media keys reach the browser too.');
+      parts.push('TIP: "pause the video" can still be done with system_media_control action:"pause" — the media keys reach the browser too.');
     }
 
     // Add context info
@@ -743,6 +919,10 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
         parts.push(`- Tab ${tab.id}: ${tab.title || tab.url}${marker}`);
       });
     }
+
+    // The app the student is in, with its own rules and what it shows now:
+    // YouTube, Gmail, Notepad (app-profiles.js, after the Voqal library)
+    parts.push(...describeProfiles(context));
 
     if (context.activeTab) {
       parts.push('', `## Active Tab: ${context.activeTab.title || context.activeTab.url}`);
@@ -850,23 +1030,33 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       'search_web', 'search_youtube', 'search_in_page', 'type_text',
       'make_tab_active', 'scroll_element', 'clear_field',
       'right_click', 'zoom_tab', 'pin_tab', 'mute_tab',
-      'execute_javascript', 'get_page_state',
+      'execute_javascript', 'get_page_state', 'ignore', 'youtube_next_video', 'youtube_previous_video',
     ]);
 
     // Several link-follows in one command: say the first, the link the person asked for
     const firstLink = toolResults.findIndex(r => r.tool === 'navigate_to_link' && r.result?.status === 'success');
 
+    // Only the failure that ended the command is said, once, in plain words:
+    // not each step that failed on the way ("Sent the key…", "I couldn't
+    // find Play…"), and not one a later step got past
+    const failed = r => r.result?.status === 'error' || !!r.result?.error;
+    const lastFailure = toolResults.findLastIndex(failed);
+    const doneAfter = toolResults.some((r, i) => i > lastFailure && !failed(r) && !READ_TOOLS.has(r.tool));
+    const sayFailure = raw => globalThis.AbleSpeakMessages.friendlyFailure(raw).message;
+
     const parts = toolResults.map((r, i) => {
       const res = r.result;
       if (r.tool === 'navigate_to_link' && res?.status === 'success' && i !== firstLink) return '';
+      if (failed(r)) return i === lastFailure && !doneAfter ? sayFailure(res.message || res.error) : '';
+      if (READ_TOOLS.has(r.tool)) return '';
 
       // Silent action tools: return nothing (no TTS)
       if (SILENT.has(r.tool) && res?.status !== 'error') {
         return '';
       }
 
-      // answer_question returns the actual spoken text — use it directly
-      if (r.tool === 'answer_question' && res?.text) {
+      // answer_question and web_answer return the actual spoken text — use it directly
+      if ((r.tool === 'answer_question' || r.tool === 'web_answer') && res?.text) {
         return res.text;
       }
 
@@ -874,16 +1064,6 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       if (res?.tabs) {
         return `Found ${res.tabs.length} tab(s):\n` +
           res.tabs.map(t => `  • [${t.id}] ${t.title || t.url}${t.active ? ' (active)' : ''}`).join('\n');
-      }
-
-      // Extension returned an error message
-      if (res?.status === 'error' && res?.message) {
-        return `⚠ ${res.message}`;
-      }
-
-      // Generic error
-      if (res?.error) {
-        return `⚠ ${res.error}`;
       }
 
       // Success with a descriptive message (non-silent tools)
@@ -907,32 +1087,83 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       .test(err?.message || '');
   }
 
-  _dispatch(systemPrompt, tools) {
-    if (this.provider === 'gemini') return this._callGemini(systemPrompt, tools);
-    if (this.provider === 'anthropic') return this._callAnthropic(systemPrompt, tools);
+  _dispatch(systemPrompt, tools, opts = {}) {
+    if (this.provider === 'gemini') return this._callGemini(systemPrompt, tools, opts);
+    if (this.provider === 'anthropic') return this._callAnthropic(systemPrompt, tools, opts);
     // OpenAI
-    return this._callOpenAICompatible(systemPrompt, tools);
+    return this._callOpenAICompatible(systemPrompt, tools, opts);
+  }
+
+  // `spend` (speed-meter.js newSpend) adds up the command's calls: their time and tokens
+  async _callLLM(systemPrompt, tools, { spend = null, ...opts } = {}) {
+    return this._reliably(() => this._dispatch(systemPrompt, tools, opts), { spend });
   }
 
   /**
-   * Call the current provider. If the configured model has been retired
-   * (404 / "no longer available"), auto-select a live replacement and retry once.
+   * One AI call, made by `send` with the current model. A retired model
+   * (404 / "no longer available") is replaced for good (autoSelectModel). A
+   * busy one (rate limit, overloaded) or one that timed out is tried once on
+   * the backup model, and after three busy answers in a row it is skipped
+   * for a minute (llm-reliability.js, after ARTEMIS).
    */
-  async _callLLM(systemPrompt, tools) {
-    try {
-      return await this._dispatch(systemPrompt, tools);
-    } catch (err) {
-      if (!this._isModelError(err)) throw err;
-      console.warn(`[AIEngine] Model "${this.model}" appears unavailable — auto-selecting a replacement...`);
-      const replacement = await this.autoSelectModel(true);
-      if (!replacement) throw err;
-      return await this._dispatch(systemPrompt, tools);
+  async _reliably(send, { spend = null } = {}) {
+    const primary = this.model;
+    const attempt = async model => {
+      const started = Date.now();
+      const result = await this._withModel(model, send);
+      // Each call timed, so speed changes can be measured (17 Oct 2026)
+      const u = result?.usage;
+      const size = u?.input != null ? ` · ${u.input} tokens in${u.cached ? `, ${u.cached} cached` : ''}${u.thoughts ? `, ${u.thoughts} thinking` : ''}` : '';
+      console.log(`[AIEngine] ${model} answered in ${Date.now() - started} ms${size}${result?.toolCalls?.length ? ` (${result.toolCalls.map(tc => tc.name).join(', ')})` : ''}`);
+      if (spend) { addSpend(spend, u, Date.now() - started); spend.model = model; }
+      return result;
+    };
+
+    if (this._breaker.isOpen(primary)) {
+      const backup = await this._backupModel(primary);
+      if (backup) return attempt(backup);
     }
+    try {
+      const result = await attempt(primary);
+      this._breaker.success(primary);
+      return result;
+    } catch (err) {
+      if (this._isModelError(err)) {
+        console.warn(`[AIEngine] Model "${primary}" appears unavailable — auto-selecting a replacement...`);
+        const replacement = await this.autoSelectModel(true);
+        if (!replacement) throw err;
+        return attempt(replacement);
+      }
+      const kind = classifyFailure(err, { stopped: !!this._activeAbortController?.signal.aborted });
+      if (kind !== 'busy' && kind !== 'timeout') throw err;
+      if (kind === 'busy') this._breaker.failure(primary);
+      const backup = await this._backupModel(primary);
+      console.warn(`[AIEngine] ${primary} ${kind === 'busy' ? 'is busy' : 'did not answer in time'} — ${backup ? `asking ${backup}` : 'asking once more'} (${String(err.message).slice(0, 120)})`);
+      if (!backup && kind === 'busy') await new Promise(r => setTimeout(r, 1000));
+      return attempt(backup || primary);
+    }
+  }
+
+  /** Dispatch with `model` for this one call: every provider reads this.model before its first await. */
+  _withModel(model, send) {
+    const current = this.model;
+    this.model = model;
+    try {
+      return send();
+    } finally {
+      this.model = current;
+    }
+  }
+
+  /** The backup for a busy model: LLM_FALLBACK_MODEL, else a lighter live model of the same provider. */
+  async _backupModel(current) {
+    const models = await this.listModels(this.provider).catch(() => []);
+    return pickFallbackModel(models, current, FALLBACK_PREFER[this.provider], (process.env.LLM_FALLBACK_MODEL || '').trim());
   }
 
   // ── OpenAI ──
 
-  async _callOpenAICompatible(systemPrompt, tools) {
+  async _callOpenAICompatible(systemPrompt, tools, opts = {}) {
     const config = PROVIDERS[this.provider];
     const apiKey = process.env[config.envKey] || '';
 
@@ -944,7 +1175,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
     const body = {
       model: this.model,
       messages,
-      temperature: this.temperature,
+      temperature: opts.temperature ?? this.temperature,
     };
 
     // Add tools if available
@@ -957,7 +1188,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
           parameters: t.parameters,
         },
       }));
-      body.tool_choice = 'auto';
+      body.tool_choice = opts.requireTool ? 'required' : 'auto';
     }
 
     const url = `${config.baseUrl}/chat/completions`;
@@ -996,12 +1227,14 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
 
   // ── Google Gemini Provider ──
 
-  async _callGemini(systemPrompt, tools) {
+  async _callGemini(systemPrompt, tools, opts = {}) {
     const apiKey = process.env.GEMINI_API_KEY;
     const model = this.model;
 
     const contents = this.conversationHistory.map((m, idx) => {
-      const parts = [{ text: m.content }];
+      // This command's message carries what is on the screen now (processChat)
+      const moment = this._moment?.turn === m && this._moment.text ? this._moment.text : '';
+      const parts = [{ text: moment ? `What is on the screen now:${moment}\n\nWhat the person said: ${m.content}` : m.content }];
 
       // ── Screen Vision (borrowed from Clicky) ──
       // Attach desktop screenshot to the LAST user message so Gemini can see
@@ -1022,7 +1255,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       };
     });
 
-    const generationConfig = { temperature: this.temperature };
+    const generationConfig = { temperature: opts.temperature ?? this.temperature };
     // Gemini 2.5+ models "think" by default, adding seconds of latency.
     // Voice commands need speed, not deep reasoning — disable thinking.
     if (/^gemini-2\.5/.test(model)) {
@@ -1044,6 +1277,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
           parameters: t.parameters,
         })),
       }];
+      if (opts.requireTool) body.tool_config = { function_calling_config: { mode: 'ANY' } };
     }
 
     const url = `${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent?key=${apiKey}`;
@@ -1069,16 +1303,80 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       name: p.functionCall.name,
       arguments: p.functionCall.args || {},
     }));
+    if (!textParts && functionCalls.length === 0) {
+      console.warn(`[AIEngine] Gemini returned nothing (finishReason: ${candidate.finishReason || 'none'}${candidate.finishMessage ? ` — ${String(candidate.finishMessage).slice(0, 120)}` : ''})`);
+    }
 
+    // How big the request was, and how much Gemini had cached, for the timing line
+    const u = data.usageMetadata || {};
     return {
       text: textParts,
       toolCalls: functionCalls.length > 0 ? functionCalls : null,
+      usage: { input: u.promptTokenCount ?? null, cached: u.cachedContentTokenCount ?? 0, output: u.candidatesTokenCount ?? null, thoughts: u.thoughtsTokenCount ?? 0 },
     };
+  }
+
+  /**
+   * Dictation autocorrect, like Claude's or Wispr Flow's: the words heard,
+   * corrected before they are typed: misheard words from the sentence's
+   * meaning, punctuation, capitals, um/uh dropped. Never adds, answers or
+   * summarises. Slow (over `timeoutMs`), failing or very different: the words
+   * as heard. → { text, changed, ms }
+   */
+  async cleanDictation(heard, { before = '', vocabulary = [], timeoutMs = 2500 } = {}) {
+    const started = Date.now();
+    const asHeard = { text: heard, changed: false, ms: 0 };
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || !String(heard || '').trim()) return asHeard;
+    const model = this.provider === 'gemini' && /^gemini-/.test(this.model) ? this.model : PROVIDERS.gemini.defaultModel;
+    const instructions = [
+      'You correct text that speech recognition heard a person dictate. Reply with the corrected text only.',
+      '- Fix words that were clearly misheard, using the meaning of the sentence and the text before it.',
+      '- Add punctuation and capital letters. Remove fillers (um, uh, er) and words the speaker repeated by mistake.',
+      '- Keep the person\'s own words, style and meaning. Never add anything, answer, summarise, translate or explain.',
+      '- Leave these words exactly as they are, they are formatting commands: comma, full stop, period, question mark, exclamation mark, colon, new line, new paragraph.',
+      '- If you are not sure about a word, leave it as it is.',
+    ].join('\n');
+    const prompt = [
+      before ? `Text already typed just before (for context only, do not repeat it):\n${String(before).slice(-400)}\n` : '',
+      vocabulary.length ? `Words this person uses (spell them like this): ${vocabulary.slice(0, 40).join(', ')}\n` : '',
+      `Dictated words to correct:\n${heard}`,
+    ].join('\n');
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abort.signal,
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: instructions }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 400, ...(/^gemini-2\.5/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}) },
+        }),
+      });
+      if (!res.ok) return { ...asHeard, ms: Date.now() - started };
+      const data = await res.json();
+      // Paid for even when the correction isn't used (speed-meter.js)
+      const u = data.usageMetadata || {};
+      const usage = addSpend(newSpend(model), { input: u.promptTokenCount, cached: u.cachedContentTokenCount, output: u.candidatesTokenCount, thoughts: u.thoughtsTokenCount }, Date.now() - started);
+      const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim()
+        .replace(/^["“]|["”]$/g, '');
+      // A correction is about as long as what was said; anything else is not one
+      const count = s => s.split(/\s+/).filter(Boolean).length;
+      const ratio = count(text) / Math.max(1, count(heard));
+      if (!text || ratio < 0.5 || ratio > 1.5) return { ...asHeard, ms: Date.now() - started, usage };
+      return { text, changed: text !== heard, ms: Date.now() - started, usage };
+    } catch {
+      return { ...asHeard, ms: Date.now() - started };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ── Anthropic Claude Provider ──
 
-  async _callAnthropic(systemPrompt, tools) {
+  async _callAnthropic(systemPrompt, tools, opts = {}) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
     const messages = this.conversationHistory.map(m => ({
@@ -1092,6 +1390,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
       system: systemPrompt,
       messages,
     };
+    if (opts.temperature !== undefined) body.temperature = opts.temperature;
 
     // Add tools if available
     if (tools.length > 0) {
@@ -1100,6 +1399,7 @@ IMPORTANT: ONLY call another tool if the user explicitly asked for a MULTI-STEP 
         description: t.description,
         input_schema: t.parameters,
       }));
+      if (opts.requireTool) body.tool_choice = { type: 'any' };
     }
 
     const res = await this._fetchWithRetry(`${PROVIDERS.anthropic.baseUrl}/messages`, {

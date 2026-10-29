@@ -1,28 +1,36 @@
 import forms from '@tailwindcss/forms';
 
 /**
- * The Stitch screens (docs/design/stitch/) are written in Tailwind, so the
- * dashboard uses it too. Colours are written as the screens write them
- * (bg-[#102038]); the named ones below are the few used everywhere.
+ * The screens (docs/design/ui/) are written in Tailwind, so the dashboard uses
+ * it too. The single source of truth for the look is src/lib/ui.js, which
+ * writes colours as arbitrary values (bg-[#141c28]); the names below are the
+ * same values, for the few places that want a name.
  * Fonts are bundled (main.jsx) so the app looks right with no internet.
+ *
+ * These held the earlier navy palette (#0A1628 / #102038 / #EDF0F5) until
+ * 13 Oct 2026. Every page had already moved to the grey-blue values in
+ * lib/ui.js, so the names here disagreed with the whole app — `text-ink`
+ * alone put #EDF0F5 behind every page's #dae3f4.
  */
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
       colors: {
-        night: '#0D1627',   // page (one blue behind every section)
-        panel: '#0A1628',   // sidebar, top bar, side panels
-        card: '#102038',    // cards
-        raised: '#152A4A',  // selected rows, hover
-        well: '#0F1F38',    // quiet buttons, chips
-        ink: '#EDF0F5',     // text
-        muted: '#94A3B8',   // secondary text
-        brand: { DEFAULT: '#F5A623', hover: '#E6960E' },
-        teal: { DEFAULT: '#1D9E8A' },
-        ok: '#34D399',
-        warn: '#FBBF24',
-        bad: '#FB7185',
+        night: '#0d1627',   // page (one blue behind every section)
+        panel: '#141c28',   // sidebar, top bar, side panels
+        card: '#141c28',    // cards
+        raised: '#222a37',  // selected rows, hover
+        well: '#18202d',    // quiet areas, chips
+        field: '#0f1724',   // anything you type into
+        ink: '#dae3f4',     // text
+        muted: '#c9b8a5',   // secondary text (the warm quiet grey)
+        faint: '#8b95a7',   // placeholders, menu group headings
+        brand: { DEFAULT: '#f5a623', hover: '#ffb955' },
+        teal: { DEFAULT: '#24a28e' },
+        ok: '#68d9c3',
+        warn: '#ffc880',
+        bad: '#ffb4ab',
       },
       fontFamily: {
         sans: ['"Roboto Flex Variable"', 'Roboto', 'system-ui', 'sans-serif'],

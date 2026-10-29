@@ -52,6 +52,13 @@ let tray = null;
 let serverReady = false;
 let appIcon = null;
 let currentTTSProcess = null; // PowerShell playback child — killable on "stop"/"cancel"
+// One speaker that stays loaded: a new PowerShell per reply cost seconds each time.
+const { TtsHost } = require('./tts-host.cjs');
+const ttsHost = new TtsHost();
+// Edge's online voice is an unofficial service that refuses connections now
+// and then. After a failure, Windows' voice is used for this long.
+const EDGE_TTS_RETRY_MS = 10 * 60 * 1000;
+let edgeTtsRetryAt = 0;
 
 // ── TTS helpers ──
 // Play an audio file (MP3 or WAV) through Windows' media player and resolve
@@ -98,7 +105,28 @@ if (-not $loaded) { exit 3 }
 // to sidestep all PowerShell quoting issues, then speaks via EncodedCommand.
 // Picks an English female voice (Zira on most computers) so the fallback
 // sounds like Aria rather than switching to a man's voice.
-function speakViaSapi(text) {
+/** An Edge rate ("-25%") as a SAPI rate (-10…10; AbleSpeak's normal is 1). */
+function sapiRate(rate) {
+  const pct = parseInt(String(rate || '+0%'), 10) || 0;
+  return Math.max(-10, Math.min(10, 1 + Math.round(pct / 10)));
+}
+
+/** Long text in pieces of at most `max` characters, broken between sentences where it can be. */
+function speechPieces(text, max = 450) {
+  const pieces = [];
+  let rest = String(text).replace(/\s+/g, ' ').trim();
+  while (rest.length > max) {
+    const window = rest.slice(0, max);
+    const cut = Math.max(window.lastIndexOf('. '), window.lastIndexOf('? '), window.lastIndexOf('! '), window.lastIndexOf(': '));
+    const at = cut > max * 0.4 ? cut + 1 : (window.lastIndexOf(' ') > 0 ? window.lastIndexOf(' ') : max);
+    pieces.push(rest.slice(0, at).trim());
+    rest = rest.slice(at).trim();
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}
+
+function speakViaSapi(text, rate = 1) {
   return new Promise((resolve, reject) => {
     const { exec } = require('child_process');
     const { writeFileSync, unlinkSync } = require('fs');
@@ -111,7 +139,7 @@ function speakViaSapi(text) {
     const psScript = `
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$synth.Rate = 1
+$synth.Rate = ${Number(rate) || 0}
 $wanted = $env:ABLESPEAK_SAPI_VOICE
 $voices = @($synth.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo })
 $voice = $null
@@ -232,6 +260,8 @@ async function startServer() {
     : path.join(__dirname, '.env');
   // The dashboard's Settings page saves API keys to this same file.
   process.env.ABLESPEAK_ENV_PATH = envPath;
+  // The exam folder lives in the person's real Documents (OneDrive may have moved it)
+  try { process.env.ABLESPEAK_DOCUMENTS = app.getPath('documents'); } catch {}
 
   // First launch of a packaged install with no keys yet — seed a template and
   // tell the adult doing setup where to fill it in, rather than the app just
@@ -641,54 +671,102 @@ function setupOverlayIPC() {
   // mic while audio is playing (breaks the mic↔speaker feedback loop — Gap 3).
   // One voice at a time: each request waits for the one before it, and
   // "stop" drops everything still waiting.
-  const speakNow = async (safeText) => {
-    const sendTtsState = (state) => {
-      if (overlayWindow && !overlayWindow.isDestroyed()) {
-        overlayWindow.webContents.send('tts-state', state);
-      }
-    };
+  const sendTtsState = (state) => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send('tts-state', state);
+    }
+  };
 
-    // ── Primary: Edge neural TTS (network) ──
-    try {
-      const { join } = require('path');
-      const { tmpdir } = require('os');
-      const audioFile = join(tmpdir(), `ablespeak_tts_${Date.now()}.mp3`);
-
-      await synthesizeToFile(safeText, audioFile, { voice: TTS_VOICE, timeoutMs: 10000 });
-
-      sendTtsState('speaking');
+  // One piece of speech: Edge neural voice, or SAPI when Edge can't be reached.
+  // Leaves the 'done' state to the caller. `onSound(voice)` is told as it starts.
+  const speakPiece = async (safeText, rate, generation, onSound) => {
+    // ── Primary: Edge neural TTS (network) — skipped for a while after it fails,
+    // so each reply doesn't first wait for a refusal ──
+    if (Date.now() >= edgeTtsRetryAt) {
       try {
-        await playAudioFile(audioFile);
-      } finally {
-        sendTtsState('done');
+        const { join } = require('path');
+        const { tmpdir } = require('os');
+        const audioFile = join(tmpdir(), `ablespeak_tts_${Date.now()}.mp3`);
+        await synthesizeToFile(safeText, audioFile, { voice: TTS_VOICE, rate, timeoutMs: 6000 });
+        if (generation !== ttsGeneration) return true; // "stop" came while the audio was being made
+        onSound?.('edge');
+        sendTtsState('speaking');
+        await ttsHost.play(audioFile);
+        console.log(`[TTS] Edge neural (${TTS_VOICE}${rate !== '+0%' ? `, ${rate}` : ''}): "${safeText.slice(0, 50)}..."`);
+        return true;
+      } catch (err) {
+        edgeTtsRetryAt = Date.now() + EDGE_TTS_RETRY_MS;
+        console.warn(`[TTS] Edge TTS failed (${err.message}) — using Windows' voice for the next ${EDGE_TTS_RETRY_MS / 60000} minutes`);
       }
-
-      console.log(`[TTS] Edge neural (${TTS_VOICE}): "${safeText.slice(0, 50)}..."`);
-      return true;
-    } catch (err) {
-      console.warn('[TTS] Edge TTS failed, falling back to SAPI:', err.message);
     }
 
-    // ── Fallback: Windows SAPI via EncodedCommand (offline-safe) ──
+    // ── Windows' own voice (SAPI), offline, from the always-running speaker ──
     try {
+      if (generation !== ttsGeneration) return true;
+      onSound?.('windows');
       sendTtsState('speaking');
-      await speakViaSapi(safeText);
-      sendTtsState('done');
-      console.log(`[TTS] SAPI fallback: "${safeText.slice(0, 50)}..."`);
+      await ttsHost.say(safeText, sapiRate(rate));
+      return true;
+    } catch (err) {
+      console.warn('[TTS] Speaker failed, starting a one-off voice:', err.message);
+    }
+    try {
+      onSound?.('windows');
+      await speakViaSapi(safeText, sapiRate(rate));
       return true;
     } catch (err) {
       console.error('[TTS] SAPI fallback failed:', err.message);
-      sendTtsState('done'); // never leave the overlay's mic muted
       return false;
     }
   };
 
+  // Text, piece by piece, so the mic stays muted between pieces of a long
+  // exam question. A "stop" (generation change) ends it.
+  const speakNow = async (pieces, rate, generation, onSound) => {
+    let ok = true;
+    for (const piece of pieces) {
+      if (generation !== ttsGeneration) break;
+      ok = (await speakPiece(piece, rate, generation, onSound)) && ok;
+    }
+    return ok;
+  };
+
+  // How long a reply took to start sounding, and in which voice, for its
+  // command on the Speed tab (src/speed-meter.js; the server runs in this process)
+  const reportFirstSound = (ref, askedAt) => {
+    let told = false;
+    return voice => {
+      if (told || !ref) return;
+      told = true;
+      const ms = Date.now() - askedAt;
+      import('./src/speed-meter.js').then(m => m.speedMeter.addVoice({ ref, ms, voice })).catch(() => {});
+    };
+  };
+
   let ttsQueue = Promise.resolve();
   let ttsGeneration = 0;
-  ipcMain.handle('speak-text', (_event, text) => {
+  // 'done' is sent once nothing more is waiting to be said: with two things
+  // said close together, the mic must not open between them.
+  let ttsPending = 0;
+  // 'speak-text' takes a string (spoken as it always was, up to 500 characters),
+  // { text, ref } — a command's reply, `ref` its id, timed for the Speed tab —
+  // or { text, rate } from an exam: any length, read in pieces, at that speed.
+  ipcMain.handle('speak-text', (_event, request) => {
+    const isObject = !!request && typeof request === 'object';
+    const isExam = isObject && typeof request.rate === 'string';
+    const text = isObject ? request.text : request;
     if (!text || typeof text !== 'string') return false;
+    const ref = isObject && typeof request.ref === 'string' ? request.ref.slice(0, 64) : null;
+    const rate = isExam && /^[+-]\d{1,2}%$/.test(request.rate || '') ? request.rate : '+0%';
+    const pieces = isExam ? speechPieces(text.slice(0, 20000)) : [text.slice(0, 500)];
     const generation = ttsGeneration;
-    const turn = ttsQueue.then(() => (generation === ttsGeneration ? speakNow(text.slice(0, 500)) : false));
+    ttsPending++;
+    const turn = ttsQueue
+      .then(() => (generation === ttsGeneration ? speakNow(pieces, rate, generation, reportFirstSound(ref, Date.now())) : false))
+      .finally(() => {
+        ttsPending--;
+        if (ttsPending === 0) sendTtsState('done'); // never leave the overlay's mic muted
+      });
     ttsQueue = turn.catch(() => false);
     return turn;
   });
@@ -696,6 +774,7 @@ function setupOverlayIPC() {
   // ── Stop any in-progress TTS playback (voice "stop"/"cancel" interrupt — Gap 4) ──
   ipcMain.handle('stop-tts', async () => {
     ttsGeneration++;
+    ttsHost.stop(); // silence at once; the next reply starts it again
     if (currentTTSProcess) {
       // Killing the PowerShell playback child stops the audio immediately.
       try { currentTTSProcess.kill(); } catch {}
@@ -863,6 +942,11 @@ function setupOverlayIPC() {
       mainWindow.show();
       mainWindow.focus();
     }
+  });
+
+  // A web answer's Google search, from the voice bar: Google search links only
+  ipcMain.on('open-link', (_event, url) => {
+    if (typeof url === 'string' && /^https:\/\/www\.google\.com\/search\?q=[^\s]*$/.test(url)) shell.openExternal(url);
   });
 }
 
@@ -1037,6 +1121,8 @@ process.on('unhandledRejection', (err) => {
 app.whenReady().then(async () => {
   // Load the AbleSpeak logo
   loadAppIcon();
+  // Load the voice now, so the first reply doesn't wait for it
+  ttsHost.warm();
 
   // Start the Express server first
   await startServer();
@@ -1127,6 +1213,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   // Shutdown wake detector
   if (wakeDetector) wakeDetector.destroy();
+  ttsHost.stop();
 });
 
 app.on('before-quit', () => {
