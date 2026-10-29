@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — Voice &amp; words</title>
+<!--
+  Voice & words — how AbleSpeak listens to this person, and the words it knows.
+  Ports to dashboard/src/pages/SpeechProfile.jsx, whose body is
+  dashboard/src/components/StudentSpeech.jsx.
+
+  The page was called "Speech Profile" in the older screens. Documentation.md
+  (13 Oct 2026) names it "Voice & words", because a student should be able to
+  read the menu and know what the page does.
+
+  How well AbleSpeak hears them comes first, and is never phrased as a score of
+  the person: "Understood" and "Set aside as noise" describe what the software
+  did, not how well they spoke.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,GRAD@8..144,100..1000,-200..150&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-refined.css">
+<script src="shell.js" defer></script>
+</head>
+<body data-route="/speech">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <div data-shell="sidebar"></div>
+
+  <div class="as-main-col">
+    <div data-shell="topbar"></div>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <div class="as-row as-row--wrap">
+              <div>
+                <h1 class="as-title" id="page-title">Voice &amp; words</h1>
+                <p class="as-muted as-mt-1">
+                  How AbleSpeak listens to you, and the words it knows.
+                </p>
+              </div>
+              <span class="as-spacer"></span>
+              <!-- Only with the admin pages unlocked can another person be chosen -->
+              <div>
+                <label class="as-field-label" for="whose">Whose settings</label>
+                <select class="as-field" id="whose" style="min-width:220px">
+                  <option selected>Amina Kamau (you)</option>
+                  <option>Brian Otieno</option>
+                  <option>Faith Wanjiru</option>
+                </select>
+              </div>
+            </div>
+          </header>
+
+          <!-- ── How well AbleSpeak hears you ── -->
+          <section aria-labelledby="hearing-heading">
+            <h2 id="hearing-heading" class="as-section" style="margin-bottom:16px">How well AbleSpeak hears you</h2>
+            <dl class="as-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+              <div class="as-stat">
+                <dt>Understood</dt>
+                <dd>
+                  <span class="as-number">94%</span>
+                  <span class="as-stat-note">186 of 198 in the last 7 days</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Worked first time</dt>
+                <dd>
+                  <span class="as-number">78%</span>
+                  <span class="as-stat-note">32 of 41 tasks</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Tried again</dt>
+                <dd>
+                  <span class="as-number">9</span>
+                  <span class="as-stat-note">Said a second time</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Set aside as noise</dt>
+                <dd>
+                  <span class="as-number">23</span>
+                  <span class="as-stat-note as-warn">Try the Quiet voice profile</span>
+                </dd>
+              </div>
+            </dl>
+            <p class="as-notice as-warn-edge as-mt-3">
+              <strong>23 clips were set aside as background noise this week.</strong>
+              When that number is high, a soft speaker may be going unheard at the
+              standard setting. Try <em>Quiet voice</em> below and watch the number for a day.
+            </p>
+          </section>
+
+          <!-- ── Listening ── -->
+          <section class="as-card as-p-5" aria-labelledby="listening-heading">
+            <h2 id="listening-heading" class="as-section">Listening</h2>
+            <div class="as-grid as-grid--3 as-mt-3">
+              <div>
+                <label class="as-field-label" for="sensitivity">Listening profile</label>
+                <select class="as-field" id="sensitivity">
+                  <option selected>Standard</option>
+                  <option>Quiet voice — for a soft speaker</option>
+                  <option>Noisy room — ignores other voices</option>
+                </select>
+                <p class="as-muted as-mt-1">Standard suits most people. Change one thing at a time.</p>
+              </div>
+              <div>
+                <label class="as-field-label" for="pause">The pause that ends a command</label>
+                <div class="as-row">
+                  <input type="range" id="pause" min="0.4" max="3" step="0.1" value="1.2">
+                  <span class="as-body as-tabular" style="min-width:48px">1.2 s</span>
+                </div>
+                <p class="as-muted as-mt-1">Longer for someone who speaks slowly, so they are not cut off.</p>
+              </div>
+              <div>
+                <span class="as-field-label" id="wake-label">Say “AbleSpeak” first</span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false" aria-labelledby="wake-label">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+                <p class="as-muted as-mt-1">
+                  For a busy room: AbleSpeak only acts when you start with its name,
+                  and ignores other people, TV and music.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <div class="as-grid as-grid--2" style="align-items:start">
+
+            <!-- ── Your own words ── -->
+            <section class="as-card as-p-5" aria-labelledby="words-heading">
+              <h2 id="words-heading" class="as-section">Your own words</h2>
+              <p class="as-muted as-mt-1">
+                Names, subjects and places, so they are spelled right when you say them.
+              </p>
+              <form class="as-row as-mt-3" style="gap:8px">
+                <label class="as-sr" for="new-word">A word to add</label>
+                <input class="as-field" id="new-word" placeholder="Mitochondria" style="flex:1 1 auto">
+                <button type="submit" class="as-btn as-quiet">Add</button>
+              </form>
+              <ul class="as-list as-mt-3">
+                <li>
+                  <span class="as-list-main as-body">Mitochondria</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main as-body">Kiswahili</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main as-body">Nyeri</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main as-body">Mrs Achieng</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+              </ul>
+            </section>
+
+            <!-- ── Shortcuts ──
+                 Ones AbleSpeak learned from a correction said twice are marked,
+                 so a teacher can see what the student taught it. -->
+            <section class="as-card as-p-5" aria-labelledby="shortcuts-heading">
+              <h2 id="shortcuts-heading" class="as-section">Shortcuts</h2>
+              <p class="as-muted as-mt-1">
+                Your words for something AbleSpeak already does.
+              </p>
+              <form class="as-row as-row--wrap as-mt-3" style="gap:8px">
+                <label class="as-sr" for="alias-from">When you say</label>
+                <input class="as-field" id="alias-from" placeholder="my music" style="flex:1 1 140px">
+                <span class="as-muted" aria-hidden="true">→</span>
+                <label class="as-sr" for="alias-to">Do this</label>
+                <input class="as-field" id="alias-to" placeholder="open Spotify" style="flex:1 1 140px">
+                <button type="submit" class="as-btn as-quiet">Add</button>
+              </form>
+              <ul class="as-list as-mt-3">
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body">“my music” → open Spotify</span>
+                  </span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body">“my homework folder” → open Documents\School</span>
+                    <span class="as-status as-ok" style="display:flex;margin-top:2px">
+                      <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">auto_awesome</span>
+                      Learned from your correction
+                    </span>
+                  </span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body">“the science page” → open Wikipedia photosynthesis</span>
+                    <span class="as-status as-ok" style="display:flex;margin-top:2px">
+                      <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">auto_awesome</span>
+                      Learned from your correction
+                    </span>
+                  </span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+              </ul>
+            </section>
+
+          </div>
+
+          <!-- ── Routines ── -->
+          <section class="as-card as-p-5" aria-labelledby="routines-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="routines-heading" class="as-section">Routines</h2>
+              <span class="as-spacer"></span>
+              <button type="button" class="as-small-quiet">
+                <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">add</span>
+                New routine
+              </button>
+            </div>
+            <p class="as-muted as-mt-1">
+              A named list of steps, done in order when you say its name.
+            </p>
+            <ul class="as-list as-mt-3">
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong">“Start my homework”</span>
+                  <span class="as-muted" style="display:block">
+                    Open Chrome · Go to Google Classroom · Open Word · New document
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Edit</button>
+                <button type="button" class="as-row-action">Remove</button>
+              </li>
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong">“Pack up”</span>
+                  <span class="as-muted" style="display:block">Save · Close the window · Pause music</span>
+                </span>
+                <button type="button" class="as-row-action">Edit</button>
+                <button type="button" class="as-row-action">Remove</button>
+              </li>
+            </ul>
+          </section>
+
+          <!-- ── Carry your settings ──
+               A file for now; syncing to the account is next (Documentation.md,
+               "What AbleSpeak cannot do yet"). -->
+          <section class="as-card as-p-5" aria-labelledby="portable-heading">
+            <h2 id="portable-heading" class="as-section">Carry your settings to another computer</h2>
+            <p class="as-muted as-mt-1">
+              Saves your listening settings, your words, shortcuts and routines as
+              one file. Your commands and progress stay on this computer.
+            </p>
+            <div class="as-row as-row--wrap as-mt-3">
+              <button type="button" class="as-btn as-quiet">
+                <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">download</span>
+                Save to a file
+              </button>
+              <button type="button" class="as-btn as-quiet">
+                <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">upload</span>
+                Load from a file
+              </button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

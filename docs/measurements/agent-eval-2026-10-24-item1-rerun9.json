@@ -1,0 +1,309 @@
+{
+  "date": "2026-10-24 01:37",
+  "label": "item1-rerun9",
+  "model": "gemini-2.5-flash",
+  "tasks": 2,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 4,
+      "median": 4,
+      "max": 4
+    },
+    "medianSeconds": {
+      "min": 54,
+      "median": 54,
+      "max": 54
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:37:31.211Z",
+      "tasks": 2,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 2,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 4,
+      "medianSeconds": 54,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "The task doesn't look finished: The file 'ablespeak-eval.txt' is not open; instead, the 'ablespeak' folder is open in File Explorer. I did 4 of 4 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer' and many File Explorer specific controls appeared, indicating that File Explorer was successfully opened."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Documents - File Explorer' and the screen now shows the contents of the Documents folder, which matches the expected outcome."
+            },
+            {
+              "do": "Open ablespeak-eval.txt",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "The step intended to open 'ablespeak-eval.txt' in its default application, but the screen changed from 'Documents - File Explorer' to 'Home - File Explorer', indicating that the file was not opened."
+            },
+            {
+              "do": "Switch to File Explorer",
+              "tool": "focus_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer is now the active application, even though it's not showing 'Documents'."
+            },
+            {
+              "do": "Open ablespeak-eval.txt",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+            },
+            {
+              "do": "Open ablespeak",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The window title changed to 'ablespeak - File Explorer' and 'ablespeak' is now selected, indicating the folder was opened."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 54393,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"ablespeak - File Explorer\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: That field cannot be changed. I did 4 of 6 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'notepad-check.txt - Notepad', indicating that Notepad was opened, even though it opened a specific file instead of an empty document."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The document's value changed to 'hello there' as expected, even though no visible change was reported."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The window title changed to 'Save as', indicating the 'Save As' dialog opened successfully."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed from 'Save As' to 'Documents - File Explorer', indicating that the 'Documents' folder was opened."
+            },
+            {
+              "do": "Type \"eval-saved.txt\"",
+              "tool": "system_type_text",
+              "ok": false,
+              "why": "The step intended to type into a 'Save As' dialog, but the typing occurred in 'Documents - File Explorer' and no visible change happened on screen."
+            },
+            {
+              "do": "Switch to Notepad",
+              "tool": "focus_application",
+              "ok": false,
+              "why": "The step intended to switch to a 'Save As' dialog in Notepad, but the screen shows the main Notepad window, not a dialog."
+            },
+            {
+              "do": "Type \"eval-saved.txt\"",
+              "tool": "uia_act",
+              "ok": false,
+              "why": "That field cannot be changed"
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 48812,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:37:31.211Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 2,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 4,
+  "medianSeconds": 54,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "The task doesn't look finished: The file 'ablespeak-eval.txt' is not open; instead, the 'ablespeak' folder is open in File Explorer. I did 4 of 4 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer' and many File Explorer specific controls appeared, indicating that File Explorer was successfully opened."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Documents - File Explorer' and the screen now shows the contents of the Documents folder, which matches the expected outcome."
+        },
+        {
+          "do": "Open ablespeak-eval.txt",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "The step intended to open 'ablespeak-eval.txt' in its default application, but the screen changed from 'Documents - File Explorer' to 'Home - File Explorer', indicating that the file was not opened."
+        },
+        {
+          "do": "Switch to File Explorer",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer is now the active application, even though it's not showing 'Documents'."
+        },
+        {
+          "do": "Open ablespeak-eval.txt",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+        },
+        {
+          "do": "Open ablespeak",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The window title changed to 'ablespeak - File Explorer' and 'ablespeak' is now selected, indicating the folder was opened."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 54393,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"ablespeak - File Explorer\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: That field cannot be changed. I did 4 of 6 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'notepad-check.txt - Notepad', indicating that Notepad was opened, even though it opened a specific file instead of an empty document."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The document's value changed to 'hello there' as expected, even though no visible change was reported."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The window title changed to 'Save as', indicating the 'Save As' dialog opened successfully."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed from 'Save As' to 'Documents - File Explorer', indicating that the 'Documents' folder was opened."
+        },
+        {
+          "do": "Type \"eval-saved.txt\"",
+          "tool": "system_type_text",
+          "ok": false,
+          "why": "The step intended to type into a 'Save As' dialog, but the typing occurred in 'Documents - File Explorer' and no visible change happened on screen."
+        },
+        {
+          "do": "Switch to Notepad",
+          "tool": "focus_application",
+          "ok": false,
+          "why": "The step intended to switch to a 'Save As' dialog in Notepad, but the screen shows the main Notepad window, not a dialog."
+        },
+        {
+          "do": "Type \"eval-saved.txt\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "That field cannot be changed"
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 48812,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

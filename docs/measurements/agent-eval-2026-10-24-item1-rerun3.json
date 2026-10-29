@@ -1,0 +1,411 @@
+{
+  "date": "2026-10-24 01:01",
+  "label": "item1-rerun3",
+  "model": "gemini-2.5-flash",
+  "tasks": 3,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 6,
+      "median": 6,
+      "max": 6
+    },
+    "medianSeconds": {
+      "min": 33,
+      "median": 33,
+      "max": 33
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:01:17.418Z",
+      "tasks": 3,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 3,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 6,
+      "medianSeconds": 33,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "I couldn't finish: Cannot read properties of undefined (reading 'findDesktopControl'). I did 4 of 5 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Documents - File Explorer', which matches the expected result of opening Documents."
+            },
+            {
+              "do": "Open ablespeak-eval.txt",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The screen changed to show new list items and the scrollbar value changed, indicating a successful scroll down."
+            },
+            {
+              "do": "Open \"ablespeak-eval.txt\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The scrollbar value changed from 99 to 99, indicating that the scroll action was performed, and the list items visible on screen changed."
+            },
+            {
+              "do": "Open \"ablespeak-eval.txt\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 38004,
+          "checks": [
+            {
+              "kind": "window",
+              "app": "notepad",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "I couldn't find an open window for \"notepad\"."
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "explorer-open-pdf",
+          "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+          "status": "failed",
+          "said": "I couldn't finish: Cannot read properties of undefined (reading 'findDesktopControl'). I did 3 of 4 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The tool successfully opened File Explorer, and the screen now shows 'Home - File Explorer', indicating the application is open."
+            },
+            {
+              "do": "Open \"ablespeak-eval.pdf\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "The step was to open a PDF, but the tool only clicked on the 'Documents' folder, changing the File Explorer window to show its contents instead of opening the PDF in Adobe Acrobat Reader."
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'Items View' list scrolled down, as evidenced by the appearance of new list items and the change in the scrollbar's value."
+            },
+            {
+              "do": "Open \"ablespeak-eval.pdf\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The scrollbar value changed from 0 to 99, indicating that the 'Items View' list was scrolled down."
+            },
+            {
+              "do": "Open \"ablespeak-eval\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 32918,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"Documents - File Explorer\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The window title changed to 'notepad-check.txt - Notepad', but the screen content shows File Explorer controls, not Notepad's menu bar and text editor.. I did 2 of 7 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to '*notepad-check.txt - Notepad', indicating Notepad was opened successfully."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The text editor now contains 'hello there', which was the expected result of the typing action."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'Save As' window did not appear, and nothing visible changed on the screen."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open 'Documents' within the 'Save as' dialog, but instead, it opened 'Documents - File Explorer' as a separate window."
+            },
+            {
+              "do": "Switch to Notepad",
+              "tool": "focus_application",
+              "ok": false,
+              "why": "The window title changed to 'notepad-check.txt - Notepad', but the screen content shows File Explorer controls, not Notepad's menu bar and text editor."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 22891,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:01:17.418Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 3,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 6,
+  "medianSeconds": 33,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "I couldn't finish: Cannot read properties of undefined (reading 'findDesktopControl'). I did 4 of 5 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Documents - File Explorer', which matches the expected result of opening Documents."
+        },
+        {
+          "do": "Open ablespeak-eval.txt",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The screen changed to show new list items and the scrollbar value changed, indicating a successful scroll down."
+        },
+        {
+          "do": "Open \"ablespeak-eval.txt\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The scrollbar value changed from 99 to 99, indicating that the scroll action was performed, and the list items visible on screen changed."
+        },
+        {
+          "do": "Open \"ablespeak-eval.txt\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 38004,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "notepad",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "I couldn't find an open window for \"notepad\"."
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "explorer-open-pdf",
+      "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+      "status": "failed",
+      "said": "I couldn't finish: Cannot read properties of undefined (reading 'findDesktopControl'). I did 3 of 4 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The tool successfully opened File Explorer, and the screen now shows 'Home - File Explorer', indicating the application is open."
+        },
+        {
+          "do": "Open \"ablespeak-eval.pdf\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "The step was to open a PDF, but the tool only clicked on the 'Documents' folder, changing the File Explorer window to show its contents instead of opening the PDF in Adobe Acrobat Reader."
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Items View' list scrolled down, as evidenced by the appearance of new list items and the change in the scrollbar's value."
+        },
+        {
+          "do": "Open \"ablespeak-eval.pdf\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The scrollbar value changed from 0 to 99, indicating that the 'Items View' list was scrolled down."
+        },
+        {
+          "do": "Open \"ablespeak-eval\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "Cannot read properties of undefined (reading 'findDesktopControl')"
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 32918,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"Documents - File Explorer\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The window title changed to 'notepad-check.txt - Notepad', but the screen content shows File Explorer controls, not Notepad's menu bar and text editor.. I did 2 of 7 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*notepad-check.txt - Notepad', indicating Notepad was opened successfully."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor now contains 'hello there', which was the expected result of the typing action."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'Save As' window did not appear, and nothing visible changed on the screen."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open 'Documents' within the 'Save as' dialog, but instead, it opened 'Documents - File Explorer' as a separate window."
+        },
+        {
+          "do": "Switch to Notepad",
+          "tool": "focus_application",
+          "ok": false,
+          "why": "The window title changed to 'notepad-check.txt - Notepad', but the screen content shows File Explorer controls, not Notepad's menu bar and text editor."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 22891,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

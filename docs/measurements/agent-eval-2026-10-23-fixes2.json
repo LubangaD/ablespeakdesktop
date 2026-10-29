@@ -1,0 +1,975 @@
+{
+  "date": "2026-10-23 23:30",
+  "tasks": 20,
+  "completed": 13,
+  "completionRate": 0.65,
+  "completedAndSaid": 12,
+  "completedAndSaidRate": 0.6,
+  "replanned": 16,
+  "recovered": 9,
+  "recoveryRate": 0.5625,
+  "medianSeconds": 20,
+  "results": [
+    {
+      "id": "notepad-type",
+      "instruction": "Open Notepad and type My name is Amina",
+      "status": "done",
+      "said": "I opened Notepad and typed \"My name is Amina\".",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'notepad-check.txt - Notepad', indicating Notepad was opened, even though it opened a specific file instead of an untitled document."
+        },
+        {
+          "do": "Type \"My name is Amina\"",
+          "tool": "system_type_text",
+          "ok": false,
+          "why": "The text 'My name is Amina' was typed, but it was inserted at the beginning of existing text instead of replacing it, which was implied by the expected result 'Document: \"My name is Amina\"'."
+        },
+        {
+          "do": "Press \"Clear formatting (Ctrl+Space)\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step intended to clear formatting and empty the document, but the document's value remained unchanged."
+        },
+        {
+          "do": "Type \"My name is Amina\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor's value changed to 'My name is Amina', matching the expected result."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 24150,
+      "checks": [
+        {
+          "kind": "text",
+          "app": "notepad",
+          "includes": [
+            "My name is Amina"
+          ],
+          "ok": true,
+          "detail": "text found"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "notepad-two-lines",
+      "instruction": "Open Notepad, type Line one, then start a new line and type Line two",
+      "status": "done",
+      "said": "I opened Notepad and typed \"Line one\" and \"Line two\" on separate lines.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*notepad-check.txt - Notepad', indicating that Notepad was opened."
+        },
+        {
+          "do": "Type \"Line one\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor's value changed to 'Line one', matching the expected result of typing 'Line one'."
+        },
+        {
+          "do": "Press \"Enter\"",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The document value changed from 'Line one' to '\\rLine one', indicating that a new line was added, which is the expected behavior of pressing Enter in a text editor."
+        },
+        {
+          "do": "Type \"Line two\"",
+          "tool": "system_type_text",
+          "ok": false,
+          "why": "The text 'Line two' was typed, but it was inserted at the beginning of the existing text instead of on a new line, resulting in 'Line twoLine one' instead of 'Line one\\nLine two'."
+        },
+        {
+          "do": "Press \"End\"",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The cursor moved from column 9 to column 17, indicating it moved to the end of the line."
+        },
+        {
+          "do": "Press \"Enter\"",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The text editor's value changed to include a new line character, and the cursor position updated to reflect being on a new line, indicating the Enter key press was successful."
+        },
+        {
+          "do": "Type \"Line two\"",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'Line two' was successfully typed into the document, as shown by the changed document value and the tool's result."
+        },
+        {
+          "do": "Type \"Line one\nLine two\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor's value changed to 'Line one\\nLine two', matching the expected result."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 33290,
+      "checks": [
+        {
+          "kind": "text",
+          "app": "notepad",
+          "includes": [
+            "Line one",
+            "Line two"
+          ],
+          "ok": true,
+          "detail": "text found"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "notepad-replace",
+      "instruction": "Open Notepad, type cat, then select all and type dog",
+      "status": "done",
+      "said": "I opened Notepad and typed \"cat\", then typed \"dog\". I was unable to select all.",
+      "steps": [
+        {
+          "do": "Open the Notepad app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*notepad-check.txt - Notepad' and the screen now shows Notepad controls, indicating the app is open and ready for input."
+        },
+        {
+          "do": "Type \"cat\"",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'cat' was successfully typed into the Notepad document, changing the document's value from 'Line one\\rLine two' to 'Line one\\rLine twocat'."
+        },
+        {
+          "do": "Press Control+A",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The step intended to select the text 'cat', but the screen shows '20 of 20 characters' which indicates all text is selected, not just 'cat'."
+        },
+        {
+          "do": "Type \"dog\"",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'dog' was successfully typed into the document, and the document's value is now 'dog'."
+        }
+      ],
+      "replans": 1,
+      "confirmations": 0,
+      "ms": 18570,
+      "checks": [
+        {
+          "kind": "text",
+          "app": "notepad",
+          "includes": [
+            "dog"
+          ],
+          "excludes": [
+            "cat"
+          ],
+          "ok": true,
+          "detail": "text found"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "calculator-add",
+      "instruction": "Open Calculator and work out 12 plus 30",
+      "status": "done",
+      "said": "I opened Calculator and pressed 12 plus 3. I had trouble pressing the zero button, but I was able to press the equals button.",
+      "steps": [
+        {
+          "do": "Open the Calculator app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The Calculator app is open, as indicated by the window title changing to 'Calculator' and the appearance of numerous Calculator-specific controls."
+        },
+        {
+          "do": "Press the 1 button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text 'Display is 1' appeared, indicating that '1' is now in the calculator's display."
+        },
+        {
+          "do": "Press the 2 button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The calculator's display changed from '1' to '12', which matches the expected outcome of pressing the '2' button after '1' was already displayed."
+        },
+        {
+          "do": "Press the plus button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The screen now shows 'Expression is 12 + ', which matches the expected result of '12 + appears in the calculator's display'."
+        },
+        {
+          "do": "Press the 3 button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The display changed from '12' to '3', and the expression now shows '12 + ' which indicates the '3' button was pressed and registered correctly."
+        },
+        {
+          "do": "Press the 0 button",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The display shows '30' instead of '12 + 30'."
+        },
+        {
+          "do": "Press the 0 button",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step expected the display to show '30', but it shows '300', indicating an extra '0' was pressed or already present."
+        },
+        {
+          "do": "Press the Backspace button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text 'Display is 30' appeared on the screen, which was the expected result after pressing Backspace."
+        },
+        {
+          "do": "Press the Equals button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text 'Display is 42' appeared on the screen, which matches the expected result."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 31718,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "calculator",
+          "nameIncludes": "42",
+          "ok": true,
+          "detail": "found Text \"Display is 42\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "calculator-multiply",
+      "instruction": "Open Calculator and multiply 7 by 6",
+      "status": "done",
+      "said": "I opened Calculator and multiplied 7 by 6. The answer is 42.",
+      "steps": [
+        {
+          "do": "Open the Calculator app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Calculator' and many Calculator-specific controls appeared, indicating the app is open."
+        },
+        {
+          "do": "Press the 7 button",
+          "tool": "click_desktop_element",
+          "ok": true,
+          "why": "The calculator display changed from '0' to '7', which was the purpose of pressing the '7' button."
+        },
+        {
+          "do": "Press the multiply button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The screen now displays 'Expression is 7 × ', indicating that 7 is displayed and the multiply operation is selected."
+        },
+        {
+          "do": "Press the 6 button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text 'Display is 6' appeared, indicating that 6 is now displayed in the calculator, which was the purpose of the step."
+        },
+        {
+          "do": "Press the equals button",
+          "tool": "click_desktop_element",
+          "ok": true,
+          "why": "The screen now displays 'Display is 42', which matches the expected result of '42 is displayed in the calculator'."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 18013,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "calculator",
+          "nameIncludes": "42",
+          "ok": true,
+          "detail": "found Text \"Display is 42\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "calculator-scientific",
+      "instruction": "Open Calculator and then switch it to the scientific calculator",
+      "status": "done",
+      "said": "I opened Calculator and switched it to the scientific view.",
+      "steps": [
+        {
+          "do": "Open the Calculator app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The Calculator app is now open and visible, as indicated by the window title changing to 'Calculator' and the appearance of Calculator-specific controls."
+        },
+        {
+          "do": "Press the \"Navigation\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The navigation menu appeared on screen, and the 'Open Navigation' button is gone, indicating the menu is now open."
+        },
+        {
+          "do": "Press the \"Scientific Calculator\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The navigation pane closed and the screen now displays scientific calculator functions like trigonometry, functions, and exponents, indicating it is in scientific mode."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 17284,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "calculator",
+          "nameIncludes": "Scientific",
+          "ok": true,
+          "detail": "found Button \"Scientific notation\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "explorer-downloads",
+      "instruction": "Open File Explorer and go to the Downloads folder",
+      "status": "done",
+      "said": "I opened File Explorer and navigated to the Downloads folder.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+        },
+        {
+          "do": "Open \"Downloads\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The window title changed to 'Downloads - File Explorer' and the 'Downloads' TreeItem is now selected and focused, indicating the folder was opened."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 14163,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "file explorer",
+          "titleIncludes": "Downloads",
+          "ok": true,
+          "detail": "window \"Downloads - File Explorer\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "explorer-documents",
+      "instruction": "Open File Explorer and open the Documents folder",
+      "status": "done",
+      "said": "I opened the Documents folder.",
+      "steps": [
+        {
+          "do": "Open the \"Documents\" folder",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The window title changed to 'Documents - File Explorer' and the 'Documents' TreeItem is now selected and focused, indicating the folder was opened."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 10270,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "file explorer",
+          "titleIncludes": "Documents",
+          "ok": true,
+          "detail": "window \"Documents - File Explorer\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "explorer-search",
+      "instruction": "Open File Explorer, go to Documents and search for pdf",
+      "status": "done",
+      "said": "I opened File Explorer to Documents and searched for “pdf.”",
+      "steps": [
+        {
+          "do": "Switch to the \"Documents - File Explorer\" window",
+          "tool": null,
+          "ok": true,
+          "why": "the screen already showed it"
+        },
+        {
+          "do": "Type \"pdf\" into the search box",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step intended to display search results for 'pdf', but the screen shows no change and no search results are visible."
+        },
+        {
+          "do": "Type \"pdf\" into the \"Search box\" text input",
+          "tool": null,
+          "ok": true,
+          "why": "the screen already showed it"
+        }
+      ],
+      "replans": 1,
+      "confirmations": 0,
+      "ms": 16040,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "file explorer",
+          "titleIncludes": "pdf",
+          "ok": true,
+          "detail": "window \"pdf - Search Results in Documents - File Explorer\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "settings-display",
+      "instruction": "Open Settings and go to the Display page",
+      "status": "done",
+      "said": "I opened Settings and navigated to the Display page.",
+      "steps": [
+        {
+          "do": "Open the Settings app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Settings' and the Settings app controls appeared, indicating the app is open."
+        },
+        {
+          "do": "Open the Display page",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step was to open the Display page, but the screen shows the System page."
+        },
+        {
+          "do": "Press the \"System\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The screen now shows the 'System' page, with 'System' as the window title and 'Desktop preview' visible, indicating the Display section."
+        },
+        {
+          "do": "Open the \"Display\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The screen now shows controls related to 'Brightness & colour' and 'Display', indicating the 'Display' page is open."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 21120,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "settings",
+          "nameIncludes": "Brightness",
+          "ok": true,
+          "detail": "found Group \"Brightness & colour\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "settings-sound",
+      "instruction": "Open Settings and then open the Sound settings",
+      "status": "failed",
+      "said": "I couldn't finish: The step was to type 'Sound' into the search box, but the screen only shows that the search box gained focus, not that 'Sound' was typed or that search results appeared.. I did 1 of 3 steps.",
+      "steps": [
+        {
+          "do": "Open the Settings app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Settings', indicating the Settings app is open."
+        },
+        {
+          "do": "Open the Sound settings",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step intended to open the Sound settings page, but the screen shows the System settings page is open instead."
+        },
+        {
+          "do": "Scroll down",
+          "tool": "desktop_scroll",
+          "ok": false,
+          "why": "The 'Sound' button is not visible on the screen after scrolling down."
+        },
+        {
+          "do": "Type \"Sound\" into the \"Search box, Try something like \"My mouse pointer is too small\"\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step was to type 'Sound' into the search box, but the screen only shows that the search box gained focus, not that 'Sound' was typed or that search results appeared."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 15523,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "settings",
+          "nameIncludes": "Volume",
+          "ok": false,
+          "detail": "no control mentioning \"Volume\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "settings-bluetooth",
+      "instruction": "Open Settings and go to Bluetooth and devices",
+      "status": "done",
+      "said": "I opened Settings and went to Bluetooth and devices.",
+      "steps": [
+        {
+          "do": "Open the Settings app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Settings' and the Settings app controls appeared, indicating the app is open."
+        },
+        {
+          "do": "Open \"Bluetooth & devices\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step intended to open the 'Bluetooth & devices' page, but the screen only shows that the 'Bluetooth & devices' list item was selected, not opened."
+        },
+        {
+          "do": "Press the \"Bluetooth & devices\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The screen now shows the 'Bluetooth & devices' page, which was the purpose of the step."
+        }
+      ],
+      "replans": 1,
+      "confirmations": 0,
+      "ms": 15415,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "settings",
+          "nameIncludes": "Bluetooth",
+          "ok": true,
+          "detail": "found ListItem \"Bluetooth & devices\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "edge-search",
+      "instruction": "Open Edge and search for Nairobi weather",
+      "status": "done",
+      "said": "I opened Edge and searched for Nairobi weather.",
+      "steps": [
+        {
+          "do": "Open the Edge app",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The Edge browser is open and showing a web page, which fulfills the step's purpose of opening the Edge app."
+        },
+        {
+          "do": "Type \"Nairobi weather\" into the search bar",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "COMException: Error HRESULT E_FAIL has been returned from a call to a COM component."
+        },
+        {
+          "do": "Type \"Nairobi weather\" into the \"Address and search bar\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Address and search bar' now has the value 'Nairobi weather' and is focused, matching the expected outcome."
+        },
+        {
+          "do": "Press the Enter key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The screen shows the 'AbleSpeak Funding Manager' document, not search results for 'Nairobi weather' in Edge."
+        },
+        {
+          "do": "Press the \"Search\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The window title and the 'Address and search bar' both show 'Nairobi weather - Search', indicating that the search was performed and the results are displayed."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 19465,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "msedge",
+          "titleIncludes": "Nairobi weather",
+          "ok": true,
+          "detail": "window \"Nairobi weather - Search and 7 more pages - Personal - Microsoft​ Edge\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "edge-maps",
+      "instruction": "Open Edge, go to Google Maps and look up Kisumu",
+      "status": "failed",
+      "said": "I couldn't finish: The screen shows search results for 'Nairobi weather' instead of 'Google Maps', indicating the search was not performed correctly.. I did 1 of 5 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Type \"Google Maps\" into the \"Address and search bar\" edit field",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step successfully typed 'Google Maps' into the address bar, but the search results for 'Google Maps' are not displayed; the screen still shows 'Nairobi weather - Search'."
+        },
+        {
+          "do": "Press the \"Search\" button.",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step intended to display search results for 'Google Maps', but the screen still shows 'Nairobi weather' and the search bar is collapsed, indicating no new search results were displayed."
+        },
+        {
+          "do": "Type \"Google Maps\" into the \"Address and search bar\" edit field",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Address and search bar' edit field now has the value 'Google Maps', as expected."
+        },
+        {
+          "do": "Press the \"Enter\" key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The screen shows search results for 'Nairobi weather' instead of 'Google Maps', indicating the search was not performed correctly."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 19850,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "msedge",
+          "titleIncludes": "Kisumu",
+          "ok": false,
+          "detail": "window \"Google Maps - Search and 7 more pages - Personal - Microsoft​ Edge\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "chrome-wikipedia",
+      "instruction": "Open Chrome and go to Wikipedia",
+      "status": "failed",
+      "said": "I couldn't finish: The address bar value changed to 'wikipedia.org', but the screen still shows the 'JackFruit Foundation' page, not the Wikipedia homepage.. I did 1 of 2 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open the Chrome app",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The window title changed from Microsoft Edge to Google Chrome, and the screen now displays elements consistent with the Chrome browser being open."
+        },
+        {
+          "do": "Open the website wikipedia.org",
+          "tool": "open_url",
+          "ok": false,
+          "why": "The screen still shows 'JackFruit Foundation' and the address bar shows 'foundation.jackfruitnetwork.co', not wikipedia.org."
+        },
+        {
+          "do": "Type \"wikipedia.org\" into the \"Address and search bar\" edit field",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The tool only focused on the address bar, but did not type 'wikipedia.org' into it. The address bar still shows 'foundation.jackfruitnetwork.co'."
+        },
+        {
+          "do": "Type \"wikipedia.org\" into the \"Address and search bar\" edit field",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The address bar value changed to 'wikipedia.org', but the screen still shows the 'JackFruit Foundation' page, not the Wikipedia homepage."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 22451,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "chrome",
+          "titleIncludes": "Wikipedia",
+          "ok": false,
+          "detail": "window \"JackFruit Foundation - Transforming Education in Africa - Google Chrome\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "chrome-youtube-search",
+      "instruction": "Open YouTube in Chrome and search for photosynthesis",
+      "status": "failed",
+      "said": "I couldn't finish: The step intended to navigate to youtube.com, but the screen still shows 'about:blank' in the address bar and the previous page content.. I did 0 of 3 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Type \"youtube.com\" into the \"Address and search bar\" edit field",
+          "tool": "open_url",
+          "ok": false,
+          "why": "The screen still shows 'JackFruit Foundation' and the address bar value is 'about:blank', not 'youtube.com'."
+        },
+        {
+          "do": "Open the \"YouTube\" hyperlink",
+          "tool": "click_element",
+          "ok": false,
+          "why": "Element not found: YouTube"
+        },
+        {
+          "do": "Type \"youtube.com\" into the \"Address and search bar\" edit",
+          "tool": "type_text",
+          "ok": false,
+          "why": "The step intended to navigate to youtube.com, but the screen still shows 'about:blank' in the address bar and the previous page content."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 37203,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "chrome",
+          "titleIncludes": "photosynthesis",
+          "ok": false,
+          "detail": "window \"JackFruit Foundation - Transforming Education in Africa - Google Chrome\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "chrome-new-tab",
+      "instruction": "Open a new tab in Chrome and go to bbc.com",
+      "status": "failed",
+      "said": "I couldn't finish: The screen content shows only one tab, and the window title still reflects the original page, indicating no new tab was opened.. I did 0 of 2 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open a new tab in Chrome",
+          "tool": "focus_application",
+          "ok": false,
+          "why": "The step was to open a new tab, but the screen content shows only one tab and no new tab page."
+        },
+        {
+          "do": "Type \"bbc.com\" into the \"Address and search bar\" edit field",
+          "tool": "type_text",
+          "ok": false,
+          "why": "The tool attempted to type into a YouTube search bar, not the browser's address bar, and the screen shows no change in the address bar's value."
+        },
+        {
+          "do": "Open a new tab",
+          "tool": "create_tab",
+          "ok": false,
+          "why": "The screen content shows only one tab, and the window title still reflects the original page, indicating no new tab was opened."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 27305,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "chrome",
+          "titleIncludes": "BBC",
+          "ok": false,
+          "detail": "window \"JackFruit Foundation - Transforming Education in Africa - Google Chrome\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "word-type",
+      "instruction": "Open Word, start a blank document and type Science homework",
+      "status": "done",
+      "said": "I opened Word and typed \"Science homework\" into a new document.",
+      "steps": [
+        {
+          "do": "Open the Word app.",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The Word app opened, and the screen now shows the Word interface with a new document, which is the home screen for the app."
+        },
+        {
+          "do": "Press the \"Blank document\" button.",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "I couldn't find \"Blank document\" in Document1 - Word."
+        },
+        {
+          "do": "Type \"Science homework\"",
+          "tool": "system_type_text",
+          "ok": false,
+          "why": "The tool reported success, but the text 'Science homework' does not appear in the document's content, and no new text was added."
+        },
+        {
+          "do": "Press the 'File Tab' button.",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'File Tab' button was pressed, and the screen now displays the 'File' menu with options like 'New', 'Open', 'Save', etc., as expected."
+        },
+        {
+          "do": "Press the 'New' button.",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'New' button was pressed, and the screen now displays the 'New' document screen with 'Blank document' as an option, as expected."
+        },
+        {
+          "do": "Press the 'Blank document' button.",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "the action worked"
+        },
+        {
+          "do": "Type 'Science homework'.",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'Science homework' now appears in the document, which was the purpose of the step."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 35851,
+      "checks": [
+        {
+          "kind": "text",
+          "app": "word",
+          "includes": [
+            "Science homework"
+          ],
+          "ok": false,
+          "detail": "missing Science homework"
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "word-title-bold",
+      "instruction": "Open Word, start a blank document, type Title and make it bold",
+      "status": "failed",
+      "said": "I couldn't finish: The 'Bold' button was toggled off, but the expected result was for it to be toggled on.. I did 4 of 5 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open the Word app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Document1 - Word' and the screen now shows Word app controls, indicating the app is open."
+        },
+        {
+          "do": "Open the Blank document template",
+          "tool": null,
+          "ok": true,
+          "why": "the screen already showed it"
+        },
+        {
+          "do": "Type \"Title\"",
+          "tool": "system_type_text",
+          "ok": false,
+          "why": "The tool reported success, but the document content did not change to 'Title' as expected. Instead, the document still contains its previous content."
+        },
+        {
+          "do": "Type \"Title\"",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The document content now ends with 'Title', which matches the expected result of typing 'Title'."
+        },
+        {
+          "do": "Press the \"Bold\" button",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Bold' button was successfully toggled from 'off' to 'on', as confirmed by the screen changes and the current screen state."
+        },
+        {
+          "do": "Press the \"Bold\" button",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The 'Bold' button was toggled off, but the expected result was for it to be toggled on."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 31176,
+      "checks": [
+        {
+          "kind": "text",
+          "app": "word",
+          "includes": [
+            "Title"
+          ],
+          "ok": false,
+          "detail": "missing Title"
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-close",
+      "instruction": "Open Notepad, type draft note, and then close Notepad",
+      "status": "failed",
+      "said": "I couldn't finish: Notepad isn't open. Say \"open Notepad\" to start it.. I did 3 of 5 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open the Notepad app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to a Notepad title, and the screen now shows Notepad controls, indicating the app is open."
+        },
+        {
+          "do": "Type \"draft note\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor's value changed from 'dog' to 'draft note', and the screen now shows 'draft note' in the document, matching the expected result."
+        },
+        {
+          "do": "Press the \"Close\" button",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step intended to close the current document and open a dialog box asking to save changes, but instead, the Notepad application closed and Google Chrome opened."
+        },
+        {
+          "do": "Open the Notepad app",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The Notepad app was opened, and the window title changed to 'notepad-check.txt - Notepad', which is a Notepad window."
+        },
+        {
+          "do": "Press the \"Close\" button",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The Notepad window closed and a Chrome window appeared instead of a dialog box asking to save changes in Notepad."
+        },
+        {
+          "do": "Switch to the Notepad app",
+          "tool": "focus_application",
+          "ok": false,
+          "why": "Notepad isn't open. Say \"open Notepad\" to start it."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 18132,
+      "checks": [
+        {
+          "kind": "gone",
+          "app": "notepad",
+          "ok": true,
+          "detail": "closed"
+        }
+      ],
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,582 @@
+/*
+ * AbleSpeak Tier 2 — the dashboard's look, as one file.
+ *
+ * Every class here mirrors one export in `dashboard/src/lib/ui.js`, so a
+ * screen in this folder ports into the app by swapping the class for the
+ * constant: `.as-title` is TITLE, `.as-card` is CARD, `.as-primary` is
+ * PRIMARY. The mapping is listed in README.md.
+ *
+ * The six older screens in ../stitch/ were generated one at a time and drifted
+ * apart (navy #050D19/#102038, Space Grotesk, Inter). The app left that palette
+ * behind: it is grey-blue now, in Roboto Flex, and every page reads its look
+ * from lib/ui.js. These files follow the app.
+ *
+ * Values are copied from: dashboard/src/lib/ui.js (type, surfaces, controls,
+ * status, tables), dashboard/src/index.css (focus ring, scrollbars, select
+ * chevron, reduced motion) and dashboard/src/App.jsx (sidebar and top bar).
+ */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tokens
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surfaces. One blue behind every section; cards and wells sit on top. */
+  --as-page: #0d1627;        /* PAGE   — the page behind everything */
+  --as-card: #141c28;        /* CARD   — a section's panel */
+  --as-well: #18202d;        /* WELL   — a quiet area inside a card */
+  --as-raised: #222a37;      /* hover, the selected row, the active nav item */
+  --as-field: #0f1724;       /* FIELD  — anything you type into */
+  --as-sidebar: rgba(20, 28, 40, 0.95);
+  --as-topbar: rgba(20, 28, 40, 0.8);
+
+  /* Lines */
+  --as-line: rgba(255, 255, 255, 0.06);        /* CARD / WELL / DIVIDER */
+  --as-line-strong: rgba(255, 255, 255, 0.08); /* QUIET button */
+  --as-line-field: rgba(255, 255, 255, 0.1);   /* FIELD */
+
+  /* Text */
+  --as-ink: #dae3f4;         /* BODY, TITLE, NUMBER */
+  --as-ink-quiet: #c9b8a5;   /* LABEL, MUTED — the warm quiet grey */
+  --as-ink-faint: #8b95a7;   /* placeholders, nav group headings */
+  --as-ink-warm: #d7c3ae;    /* top-bar chips */
+
+  /* The one accent: amber. Never two accents on a page. */
+  --as-amber: #f5a623;
+  --as-amber-bright: #ffb955;
+  --as-amber-light: #ffc880;
+  --as-on-amber: #3d2600;
+  --as-on-amber-avatar: #452b00;
+
+  /* Status. Always a dot or an icon as well as the colour, never colour alone. */
+  --as-ok: #68d9c3;
+  --as-warn: #ffc880;
+  --as-bad: #ffb4ab;
+  --as-idle: #4a5466;
+  --as-green: #54ebaf;       /* the connected pulse in the sidebar */
+  --as-teal-on: #24a28e;     /* the overlay switch, on */
+
+  /* Shape */
+  --as-r-sm: 6px;
+  --as-r: 8px;
+  --as-r-lg: 12px;
+  --as-r-xl: 16px;
+
+  /* Frame */
+  --as-sidebar-w: 250px;
+  --as-topbar-h: 64px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Base — dashboard/src/index.css
+   ────────────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  margin: 0;
+  background: var(--as-page);
+  color: var(--as-ink);
+  color-scheme: dark;
+  font-family: 'Roboto Flex', Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+h1, h2, h3, h4 { font-family: 'Roboto Flex', Roboto, system-ui, sans-serif; margin: 0; }
+p, ul, ol, dl, dd, figure { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+
+/* A fieldset defaults to `min-width: min-content`, which stops it shrinking and
+   bursts any flex row inside it out of its column. Always reset it. */
+fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+legend { padding: 0; }
+
+/* One focus ring for every control: 3px amber, never removed. */
+:focus-visible {
+  outline: 3px solid var(--as-amber) !important;
+  outline-offset: 2px !important;
+}
+
+/* Hidden from sight, still read aloud. */
+.as-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0;
+  margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+.as-mono { font-family: 'Roboto Mono', ui-monospace, monospace; }
+.as-tabular { font-variant-numeric: tabular-nums; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1d2e47; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #2a3f61; }
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  display: inline-block; vertical-align: middle; line-height: 1;
+  flex-shrink: 0; user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Type — lib/ui.js
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* TITLE — one per page, and the only thing that says what the page is. */
+.as-title {
+  font-size: 26px; line-height: 32px; font-weight: 600;
+  letter-spacing: -0.01em; color: var(--as-ink);
+}
+
+/* SECTION — the heading on a card. */
+.as-section { font-size: 16px; line-height: 24px; font-weight: 600; color: var(--as-ink); }
+
+/* LABEL / MUTED — small quiet text. The same value; two names, two meanings. */
+.as-label, .as-muted { font-size: 13px; line-height: 20px; color: var(--as-ink-quiet); }
+
+/* BODY — ordinary text. */
+.as-body { font-size: 14px; line-height: 20px; color: var(--as-ink); }
+
+/* NUMBER — numbers are the only large text on a page. */
+.as-number {
+  font-size: 28px; line-height: 36px; font-weight: 600;
+  letter-spacing: -0.01em; color: var(--as-ink); font-variant-numeric: tabular-nums;
+}
+
+.as-strong { font-weight: 600; }
+.as-faint { color: var(--as-ink-faint); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Surfaces — lib/ui.js
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* PAGE */
+.as-page {
+  min-height: 100%; width: 100%;
+  background: var(--as-page); color: var(--as-ink);
+  padding: 28px 32px 40px;
+}
+.as-page--narrow > .as-stack { max-width: 1100px; }
+
+/* CARD */
+.as-card {
+  background: var(--as-card);
+  border: 1px solid var(--as-line);
+  border-radius: var(--as-r-xl);
+}
+
+/* WELL */
+.as-well {
+  background: var(--as-well);
+  border: 1px solid var(--as-line);
+  border-radius: var(--as-r-lg);
+}
+
+.as-divider { border-color: var(--as-line); }
+
+/* Layout helpers */
+.as-stack { display: flex; flex-direction: column; gap: 24px; }
+.as-stack--sm { gap: 16px; }
+.as-stack--xs { gap: 8px; }
+.as-row { display: flex; align-items: center; gap: 12px; }
+.as-row--wrap { flex-wrap: wrap; }
+.as-spacer { flex: 1 1 auto; }
+.as-grid { display: grid; gap: 16px; }
+.as-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.as-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.as-grid--6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.as-p-5 { padding: 20px; }
+.as-p-4 { padding: 16px; }
+.as-mt-1 { margin-top: 4px; }
+.as-mt-3 { margin-top: 12px; }
+.as-mt-5 { margin-top: 20px; }
+
+/* The page's own header: title, then one quiet line saying what it is for. */
+.as-page-head .as-title { margin-bottom: 4px; }
+.as-page-head p { max-width: 760px; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Controls — lib/ui.js
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* BUTTON — every button is at least 44px tall, for an unsteady hand. */
+.as-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 16px; border-radius: var(--as-r);
+  font: inherit; font-size: 14px; font-weight: 500;
+  border: 1px solid transparent; background: none; color: var(--as-ink);
+  cursor: pointer; text-decoration: none;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.as-btn:disabled, .as-btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+
+/* PRIMARY — one per page: the thing this page is for. */
+.as-primary { background: var(--as-amber); color: var(--as-on-amber); font-weight: 600; }
+.as-primary:hover:not(:disabled) { background: var(--as-amber-bright); }
+
+/* QUIET */
+.as-quiet { background: var(--as-well); color: var(--as-ink); border-color: var(--as-line-strong); }
+.as-quiet:hover:not(:disabled) { background: var(--as-raised); }
+
+/* DANGER — never the only warning; the words say it too. */
+.as-danger {
+  background: rgba(255, 180, 171, 0.1); color: var(--as-bad);
+  border-color: rgba(255, 180, 171, 0.3);
+}
+.as-danger:hover:not(:disabled) { background: rgba(255, 180, 171, 0.15); }
+
+/* SMALL_QUIET */
+.as-small-quiet {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 0 12px; border-radius: var(--as-r);
+  font: inherit; font-size: 13px; font-weight: 500;
+  background: var(--as-well); color: var(--as-ink);
+  border: 1px solid var(--as-line-strong); cursor: pointer;
+  transition: background-color 0.15s;
+}
+.as-small-quiet:hover:not(:disabled) { background: var(--as-raised); }
+.as-small-quiet:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ROW_ACTION — a small action at the end of a list row. */
+.as-row-action {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 36px; padding: 0 10px; border-radius: var(--as-r-sm);
+  font: inherit; font-size: 13px; font-weight: 500;
+  background: none; border: 0; color: var(--as-ink);
+  cursor: pointer; flex-shrink: 0; text-decoration: none;
+  transition: background-color 0.15s;
+}
+.as-row-action:hover:not(:disabled) { background: var(--as-raised); }
+.as-row-action:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* FIELD */
+.as-field {
+  width: 100%; min-height: 44px; padding: 10px 12px;
+  border-radius: var(--as-r); background: var(--as-field);
+  border: 1px solid var(--as-line-field); color: var(--as-ink);
+  font: inherit; font-size: 14px;
+}
+.as-field::placeholder { color: var(--as-ink-faint); }
+.as-field:focus { outline: none; border-color: var(--as-amber); }
+textarea.as-field { min-height: 96px; resize: vertical; line-height: 20px; }
+
+select.as-field {
+  appearance: none; padding-right: 48px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%238b95a7' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 16px center; background-size: 20px;
+}
+
+/* A label above a field. */
+.as-field-label {
+  display: block; font-size: 13px; line-height: 20px;
+  color: var(--as-ink-quiet); margin-bottom: 6px;
+}
+
+input[type='range'] { accent-color: var(--as-amber); width: 100%; }
+
+/* A switch: the word beside it says which way it is, never the colour alone. */
+.as-switch {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 44px; padding: 0 12px; border-radius: var(--as-r);
+  background: var(--as-well); border: 0; cursor: pointer; font: inherit;
+  transition: background-color 0.15s;
+}
+.as-switch:hover:not(:disabled) { background: var(--as-raised); }
+.as-switch-track {
+  width: 36px; height: 20px; border-radius: 9999px; padding: 2px;
+  display: flex; align-items: center; background: #2d3543; justify-content: flex-start;
+}
+.as-switch-knob { width: 16px; height: 16px; border-radius: 9999px; background: var(--as-ink-warm); }
+.as-switch[aria-checked='true'] .as-switch-track { background: var(--as-teal-on); justify-content: flex-end; }
+.as-switch[aria-checked='true'] .as-switch-knob { background: #00382f; }
+
+/* A chip you can pick, as on the Developer Hub and Voice & words. */
+.as-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 0 12px; border-radius: 9999px;
+  font: inherit; font-size: 13px; font-weight: 500;
+  background: var(--as-well); color: var(--as-ink-quiet);
+  border: 1px solid var(--as-line-strong); cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.as-chip:hover { background: var(--as-raised); color: var(--as-ink); }
+.as-chip[aria-pressed='true'], .as-chip.is-on {
+  background: var(--as-raised); color: var(--as-ink);
+  border-color: var(--as-amber); font-weight: 600;
+}
+
+/* Tabs, as the Developer Hub draws them. */
+.as-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--as-line); }
+.as-tab {
+  min-height: 44px; padding: 0 16px; background: none; border: 0;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  font: inherit; font-size: 14px; font-weight: 500;
+  color: var(--as-ink-quiet); cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.as-tab:hover { color: var(--as-ink); }
+.as-tab[aria-selected='true'] { color: var(--as-ink); font-weight: 600; border-bottom-color: var(--as-amber); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Status — a dot and a word, in sentence case. Never a shouting badge.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 20px; }
+.as-dot { width: 8px; height: 8px; border-radius: 9999px; flex-shrink: 0; }
+.as-dot--lg { width: 10px; height: 10px; }
+
+.as-ok   { color: var(--as-ok); }
+.as-warn { color: var(--as-warn); }
+.as-bad  { color: var(--as-bad); }
+.as-idle { color: var(--as-ink-quiet); }
+
+.as-dot.as-ok   { background: var(--as-ok); }
+.as-dot.as-warn { background: var(--as-warn); }
+.as-dot.as-bad  { background: var(--as-bad); }
+.as-dot.as-idle { background: var(--as-idle); }
+
+/* A quiet strip with a coloured left edge, for something worth knowing. */
+.as-notice {
+  border-left: 3px solid var(--as-idle); border-radius: var(--as-r-sm);
+  background: var(--as-well); padding: 12px 16px;
+  font-size: 13px; line-height: 20px; color: var(--as-ink-quiet);
+}
+.as-notice.as-warn-edge { border-left-color: var(--as-warn); }
+.as-notice.as-bad-edge  { border-left-color: var(--as-bad); }
+.as-notice.as-ok-edge   { border-left-color: var(--as-ok); }
+.as-notice strong { color: var(--as-ink); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   A number on a card — Home, My progress, Users
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-stat { background: var(--as-card); border: 1px solid var(--as-line); border-radius: var(--as-r-xl); padding: 16px 20px; }
+.as-stat dt { font-size: 13px; line-height: 20px; color: var(--as-ink-quiet); }
+.as-stat dd { margin: 2px 0 0; }
+.as-stat .as-number { display: block; }
+.as-stat-note { font-size: 12px; line-height: 16px; color: var(--as-ink-quiet); margin-top: 2px; }
+.as-stat-note.as-warn { color: var(--as-warn); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tables — lib/ui.js
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-table { width: 100%; border-collapse: collapse; }
+.as-table th {
+  font-weight: 500; padding: 10px 12px; font-size: 12px; line-height: 16px;
+  color: var(--as-ink-quiet); text-align: left; white-space: nowrap;
+}
+.as-table td { padding: 12px; font-size: 14px; line-height: 20px; color: var(--as-ink); vertical-align: top; }
+.as-table thead tr { border-bottom: 1px solid var(--as-line); }
+.as-table tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
+.as-table tbody tr:last-child { border-bottom: 0; }
+.as-table tbody tr.is-picked { background: var(--as-raised); }
+.as-table .as-right { text-align: right; }
+
+/* A list where each row is an item, as on Exams and Voice & words. */
+.as-list > li { padding: 16px 0; border-top: 1px solid var(--as-line); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.as-list > li:first-child { border-top: 0; }
+.as-list-main { min-width: 220px; flex: 1 1 auto; }
+
+/* A pair of values, as on Settings and the Developer Hub. */
+.as-rows { display: block; }
+.as-rows > div {
+  display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: space-between;
+  padding: 12px 0; border-top: 1px solid var(--as-line);
+}
+.as-rows > div:first-child { border-top: 0; }
+.as-rows dt { font-size: 13px; line-height: 20px; color: var(--as-ink-quiet); }
+.as-rows dd { margin: 0; font-size: 14px; line-height: 20px; color: var(--as-ink); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The frame: sidebar and top bar — App.jsx
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-shell { height: 100%; display: flex; overflow: hidden; background: var(--as-page); }
+.as-main-col { flex: 1 1 auto; display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; background: var(--as-page); }
+.as-main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+/* Skip link — the first thing a keyboard reaches. */
+.as-skip { position: absolute; left: -9999px; z-index: 50; }
+.as-skip:focus {
+  left: 12px; top: 12px; position: fixed;
+  padding: 12px 16px; border-radius: var(--as-r-lg);
+  background: var(--as-amber); color: var(--as-on-amber); font-weight: 700;
+}
+
+/* ── Sidebar ── */
+.as-sidebar {
+  width: var(--as-sidebar-w); flex-shrink: 0; height: 100%;
+  background: var(--as-sidebar); z-index: 20;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 16px; box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
+}
+.as-brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 8px; }
+.as-brand img, .as-brand .as-logo {
+  width: 40px; height: 40px; border-radius: 9999px; flex-shrink: 0;
+  background: var(--as-amber-light); color: var(--as-on-amber-avatar);
+  display: flex; align-items: center; justify-content: center;
+}
+.as-brand-name { font-size: 18px; line-height: 28px; font-weight: 600; color: var(--as-ink); letter-spacing: -0.01em; }
+
+.as-nav { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.as-nav-link {
+  min-height: 44px; padding: 6px 12px; border-radius: var(--as-r);
+  display: flex; align-items: center; gap: 12px;
+  font-size: 14px; line-height: 20px; font-weight: 500;
+  color: var(--as-ink-quiet); text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+.as-nav-link:hover { background: var(--as-well); color: var(--as-ink); }
+.as-nav-link .material-symbols-outlined { font-size: 20px; }
+.as-nav-label { flex: 1 1 auto; }
+.as-nav-link[aria-current='page'] {
+  background: var(--as-raised); color: var(--as-ink); font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--as-amber);
+}
+.as-nav-link[aria-current='page'] .material-symbols-outlined:first-child { color: var(--as-amber-light); }
+.as-nav-lock { font-size: 16px !important; color: var(--as-ink-faint); }
+
+/* A heading in the menu: the tier, and whether it is open or which PIN opens it. */
+.as-nav-group {
+  padding: 16px 12px 4px; display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; line-height: 16px; color: var(--as-ink-faint);
+}
+.as-nav-group .as-nav-group-name { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+
+.as-sidebar-foot { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
+.as-conn {
+  min-height: 48px; padding: 6px 12px; border-radius: var(--as-r);
+  background: var(--as-well); display: flex; align-items: center; justify-content: space-between;
+}
+.as-label-sm { font-size: 12px; line-height: 16px; letter-spacing: 0.04em; font-weight: 700; }
+.as-label-md { font-size: 14px; line-height: 18px; letter-spacing: 0.02em; font-weight: 600; }
+
+.as-pulse { position: relative; display: flex; width: 8px; height: 8px; }
+.as-pulse i {
+  position: absolute; display: inline-flex; width: 100%; height: 100%;
+  border-radius: 9999px; background: var(--as-green); opacity: 0.75;
+  animation: as-ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.as-pulse b { position: relative; display: inline-flex; width: 8px; height: 8px; border-radius: 9999px; background: var(--as-green); }
+@keyframes as-ping { 75%, 100% { transform: scale(2); opacity: 0; } }
+
+.as-account-link {
+  min-height: 40px; padding: 0 12px; border-radius: var(--as-r);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500; color: var(--as-ink);
+  background: var(--as-well); border: 1px solid var(--as-line);
+  text-decoration: none; transition: background-color 0.15s;
+}
+.as-account-link:hover { background: var(--as-raised); }
+.as-account-link .material-symbols-outlined { font-size: 18px; color: var(--as-amber-light); }
+.as-account-link .as-account-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.as-whois { display: flex; align-items: center; gap: 12px; padding: 6px; }
+.as-avatar {
+  width: 32px; height: 32px; border-radius: 9999px; flex-shrink: 0;
+  background: var(--as-amber-light); color: var(--as-on-amber-avatar);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
+}
+.as-whois-text { display: flex; flex-direction: column; min-width: 0; }
+.as-whois-text .as-label-md { color: var(--as-ink); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-whois-sub { font-size: 12px; line-height: 16px; color: var(--as-ink-quiet); }
+.as-whois-sub .as-role { color: var(--as-amber-light); }
+
+/* ── Top bar ── */
+.as-topbar {
+  height: var(--as-topbar-h); flex-shrink: 0;
+  background: var(--as-topbar); z-index: 10;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
+}
+.as-topbar-inner {
+  height: var(--as-topbar-h); width: 100%; padding: 0 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.as-topbar-left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.as-topbar-right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+
+.as-session {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 12px; border-radius: var(--as-r);
+  background: var(--as-well); text-decoration: none; min-width: 0;
+  transition: background-color 0.15s;
+}
+.as-session:hover { background: var(--as-raised); }
+.as-session .material-symbols-outlined { font-size: 20px; color: var(--as-amber-light); }
+.as-session-name { color: var(--as-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-session-state { font-size: 12px; line-height: 16px; white-space: nowrap; color: var(--as-ok); }
+.as-session-state.is-none { color: var(--as-ink-quiet); }
+
+.as-hearing {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: var(--as-r-sm);
+  background: var(--as-raised); color: var(--as-ink-warm); white-space: nowrap;
+}
+.as-hearing .material-symbols-outlined { font-size: 16px; color: var(--as-ok); }
+
+.as-voice-notice {
+  padding: 4px 12px; border-radius: var(--as-r-sm);
+  background: rgba(245, 166, 35, 0.2); color: var(--as-amber-light); white-space: nowrap;
+}
+
+/* Below 1280px the listening setting and the computer's name step aside. */
+@media (max-width: 1279px) {
+  .as-hide-lg { display: none !important; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The voice bar, as the dashboard shows its state (never a live microphone)
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-voicebar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 20px; border-radius: var(--as-r-xl);
+  background: var(--as-well); border: 1px solid var(--as-line);
+}
+.as-mic {
+  width: 56px; height: 56px; border-radius: 9999px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--as-amber); color: var(--as-on-amber); border: 0; cursor: pointer;
+}
+.as-mic .material-symbols-outlined { font-size: 28px; }
+.as-mic.is-off { background: var(--as-raised); color: var(--as-ink-quiet); }
+
+.as-wave { display: flex; align-items: center; gap: 3px; height: 20px; }
+.as-wave i { width: 3px; border-radius: 9999px; background: var(--as-ok); height: 6px; animation: as-soundwave 1.1s ease-in-out infinite; }
+.as-wave i:nth-child(2) { animation-duration: 0.8s; animation-delay: 0.15s; }
+.as-wave i:nth-child(3) { animation-duration: 1.3s; animation-delay: 0.3s; }
+.as-wave i:nth-child(4) { animation-duration: 0.9s; animation-delay: 0.1s; }
+.as-wave i:nth-child(5) { animation-duration: 1.2s; animation-delay: 0.4s; }
+@keyframes as-soundwave { 0%, 100% { height: 6px; } 50% { height: 20px; } }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   A bar chart drawn in CSS — My progress, Users
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-bars { display: flex; align-items: flex-end; gap: 6px; height: 160px; padding-top: 8px; }
+.as-bars > div { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; min-width: 0; }
+.as-bar-ok { background: var(--as-ok); border-radius: 3px 3px 0 0; }
+.as-bar-bad { background: var(--as-bad); border-radius: 3px 3px 0 0; }
+.as-bars-axis { display: flex; gap: 6px; margin-top: 8px; }
+.as-bars-axis > span { flex: 1 1 0; text-align: center; font-size: 11px; line-height: 16px; color: var(--as-ink-faint); }
+
+.as-legend { display: flex; flex-wrap: wrap; gap: 16px; }
+.as-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--as-ink-quiet); }
+.as-legend i { width: 10px; height: 10px; border-radius: 3px; }
+
+/* Private values are blurred before a screenshot is committed. */
+.as-hide-private [data-private] { filter: blur(5px); }

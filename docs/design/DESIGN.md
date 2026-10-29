@@ -277,7 +277,21 @@ The first rule is now: **a student sees as little as possible.** It outranks "ke
 - **The overlay** (see below) is simpler: bigger text, no keyboard hint, one button, and every resting state says what to say next.
 
 ### The screens are the spec
-Each dashboard section is its Stitch HTML file in `docs/design/stitch/`, ported class for class: `home.html`, `students.html`, `speech-profile.html`, `test-console.html`, `developer-hub.html` and `settings.html`. Where those files and this document disagree, the files win. The six files were generated separately, so they differ from each other in places; the app keeps each file's own look inside its page.
+
+**Superseded on 2026-10-13 by `docs/design/ui/` — see its [README](ui/README.md).**
+The ten screens there are the spec now. The paragraph below describes the six
+Stitch files and is kept because it explains how the app got its present shape.
+
+What changed: the app had already left the Stitch palette behind. Every page in
+`dashboard/src/pages/` reads its look from `src/lib/ui.js` — grey-blue
+(`#0d1627` / `#141c28` / `#18202d`), warm quiet text (`#c9b8a5`), Roboto Flex and
+Roboto Mono — and not one of them still holds a navy value. The Stitch files,
+not the app, were the stale artefact, and four routes (`/exams`, `/exam`,
+`/progress`, `/sign-in`) had no design file at all. `docs/design/ui/` follows the
+app, covers all ten, and draws the frame once in `shell.js` so the six files'
+drift cannot recur. `docs/design/stitch/` is kept for history.
+
+*(Historical, to 2026-10-13.)* Each dashboard section is its Stitch HTML file in `docs/design/stitch/`, ported class for class: `home.html`, `students.html`, `speech-profile.html`, `test-console.html`, `developer-hub.html` and `settings.html`. Where those files and this document disagree, the files win. The six files were generated separately, so they differ from each other in places; the app keeps each file's own look inside its page.
 - **Colours per screen.** Each page uses the hex values its own file uses, written as Tailwind arbitrary values (`bg-[#102038]`). Every page sits on the same blue background, `#0D1627` (chosen by the user on 2026-09-22 in place of the screens' `#050D19` and Home's `#060e1b`). Five screens use the navy palette under Colors for everything else (sidebar `#0A1628`, cards `#102038`). Home uses the grey Material-style palette in its own file, the colour list at the top of this document, for its frame and cards: cards `#141c28`, wells `#18202d`, raised `#222a37`, amber `#f5a623` / `#ffc880`, teal `#68d9c3`, green `#54ebaf`, coral `#ffb4ab`. A navy Home was tried on 2026-09-22 and the user preferred the grey one.
 - **Type and icons as each file has them.** Space Grotesk, Inter and JetBrains Mono, at the sizes and weights each file uses. Icons are the file's own inline SVGs, or Material Symbols where the file uses that font.
 - **Settings card borders are light grey (`#e5e7eb`).** The Stitch file asks for `border-white/12`, which its Tailwind build can't draw, so the screen shows Tailwind's default light border; the app draws what the screen shows.

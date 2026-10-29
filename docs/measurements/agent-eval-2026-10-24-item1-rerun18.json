@@ -1,0 +1,149 @@
+{
+  "date": "2026-10-24 02:12",
+  "label": "item1-rerun18",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 1,
+      "median": 1,
+      "max": 1
+    },
+    "completedAndSaid": {
+      "min": 1,
+      "median": 1,
+      "max": 1
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "medianSeconds": {
+      "min": 27,
+      "median": 27,
+      "max": 27
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T23:12:40.640Z",
+      "tasks": 1,
+      "completed": 1,
+      "completionRate": 1,
+      "completedAndSaid": 1,
+      "completedAndSaidRate": 1,
+      "falseDone": 0,
+      "replanned": 0,
+      "recovered": 0,
+      "recoveryRate": null,
+      "replans": 0,
+      "medianSeconds": 27,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "done",
+          "said": "I opened Notepad, typed \"hello there\", and saved the document as eval-saved.txt in Documents.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Untitled - Notepad' and a text editor document appeared, indicating Notepad is open and ready for typing."
+            },
+            {
+              "do": "Type hello there",
+              "tool": "system_type_text",
+              "ok": true,
+              "why": "The text 'hello there' is now visible in the Notepad document, as confirmed by the 'Text in the document now' and 'Changed' sections."
+            },
+            {
+              "do": "Save the document as eval-saved.txt in Documents",
+              "tool": "save_document_as",
+              "ok": true,
+              "why": "The document was saved with the correct name, and Notepad is still open with the content 'hello there', as indicated by the window title and the document content."
+            }
+          ],
+          "replans": 0,
+          "confirmations": 0,
+          "ms": 26515,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": true,
+              "detail": "eval-saved.txt saved"
+            }
+          ],
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T23:12:40.640Z",
+  "completed": 1,
+  "completionRate": 1,
+  "completedAndSaid": 1,
+  "completedAndSaidRate": 1,
+  "falseDone": 0,
+  "replanned": 0,
+  "recovered": 0,
+  "recoveryRate": null,
+  "replans": 0,
+  "medianSeconds": 27,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "done",
+      "said": "I opened Notepad, typed \"hello there\", and saved the document as eval-saved.txt in Documents.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Untitled - Notepad' and a text editor document appeared, indicating Notepad is open and ready for typing."
+        },
+        {
+          "do": "Type hello there",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'hello there' is now visible in the Notepad document, as confirmed by the 'Text in the document now' and 'Changed' sections."
+        },
+        {
+          "do": "Save the document as eval-saved.txt in Documents",
+          "tool": "save_document_as",
+          "ok": true,
+          "why": "The document was saved with the correct name, and Notepad is still open with the content 'hello there', as indicated by the window title and the document content."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 26515,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": true,
+          "detail": "eval-saved.txt saved"
+        }
+      ],
+      "passed": true
+    }
+  ]
+}

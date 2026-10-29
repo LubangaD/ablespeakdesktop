@@ -1,0 +1,209 @@
+{
+  "date": "2026-10-24 01:58",
+  "label": "item1-rerun14",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "medianSeconds": {
+      "min": 49,
+      "median": 49,
+      "max": 49
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:58:10.942Z",
+      "tasks": 1,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 1,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 2,
+      "medianSeconds": 49,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "The task doesn't look finished: The file was not saved as eval-saved.txt in Documents. I did 7 of 7 steps.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to '*ablespeak-eval.txt - Notepad', indicating that Notepad was opened."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The tool successfully typed 'hello there' into the text editor, and the screen now shows 'hello there' in the document."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The window title changed to 'Save as' and the 'File name:' edit box is now in focus, which matches the expected outcome of pressing Ctrl+Shift+S."
+            },
+            {
+              "do": "Type \"%USERPROFILE%\\Documents\\eval-saved.txt\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The tool successfully typed the specified text into the 'File name:' field, and the screen now shows the updated file name."
+            },
+            {
+              "do": "Press Enter",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The window title changed to 'ablespeak-eval.txt - Notepad' and a confirmation dialog appeared, but the expected window title was 'eval-saved.txt - Notepad'."
+            },
+            {
+              "do": "Press Tab",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The focus moved to the 'Yes' button as expected, indicating the Tab key press was successful."
+            },
+            {
+              "do": "Press Enter",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The window title changed to 'ablespeak-eval.txt - Notepad', which matches the expected result, indicating the file was saved and opened."
+            },
+            {
+              "do": "Press Ctrl+S",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The step was to save the document. The screen now shows 'ablespeak-eval.txt. Unmodified.' which indicates the document was saved and is no longer modified."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 48777,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:58:10.942Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 1,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 2,
+  "medianSeconds": 49,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "The task doesn't look finished: The file was not saved as eval-saved.txt in Documents. I did 7 of 7 steps.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*ablespeak-eval.txt - Notepad', indicating that Notepad was opened."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The tool successfully typed 'hello there' into the text editor, and the screen now shows 'hello there' in the document."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The window title changed to 'Save as' and the 'File name:' edit box is now in focus, which matches the expected outcome of pressing Ctrl+Shift+S."
+        },
+        {
+          "do": "Type \"%USERPROFILE%\\Documents\\eval-saved.txt\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The tool successfully typed the specified text into the 'File name:' field, and the screen now shows the updated file name."
+        },
+        {
+          "do": "Press Enter",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The window title changed to 'ablespeak-eval.txt - Notepad' and a confirmation dialog appeared, but the expected window title was 'eval-saved.txt - Notepad'."
+        },
+        {
+          "do": "Press Tab",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The focus moved to the 'Yes' button as expected, indicating the Tab key press was successful."
+        },
+        {
+          "do": "Press Enter",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The window title changed to 'ablespeak-eval.txt - Notepad', which matches the expected result, indicating the file was saved and opened."
+        },
+        {
+          "do": "Press Ctrl+S",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The step was to save the document. The screen now shows 'ablespeak-eval.txt. Unmodified.' which indicates the document was saved and is no longer modified."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 48777,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

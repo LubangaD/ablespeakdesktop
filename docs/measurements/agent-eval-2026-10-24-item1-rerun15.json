@@ -1,0 +1,149 @@
+{
+  "date": "2026-10-24 02:04",
+  "label": "item1-rerun15",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 1,
+      "median": 1,
+      "max": 1
+    },
+    "medianSeconds": {
+      "min": 21,
+      "median": 21,
+      "max": 21
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T23:04:18.537Z",
+      "tasks": 1,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 1,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 1,
+      "medianSeconds": 21,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "stopped",
+          "said": "Okay, I stopped the task. I did 2 of 3 steps.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'ablespeak-eval.txt - Notepad' and the screen now shows Notepad controls, indicating Notepad is open."
+            },
+            {
+              "do": "Type hello there",
+              "tool": "system_type_text",
+              "ok": true,
+              "why": "The text 'hello there' was typed into the Notepad document, as confirmed by the 'Changed' section and the current document value."
+            },
+            {
+              "do": "Save the document as eval-saved.txt in Documents",
+              "tool": "save_document_as",
+              "ok": false,
+              "why": "A file called eval-saved.txt already exists there, so I didn't replace it. Say \"replace it\" if you want to."
+            }
+          ],
+          "replans": 1,
+          "confirmations": 0,
+          "ms": 20611,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T23:04:18.537Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 1,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 1,
+  "medianSeconds": 21,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "stopped",
+      "said": "Okay, I stopped the task. I did 2 of 3 steps.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'ablespeak-eval.txt - Notepad' and the screen now shows Notepad controls, indicating Notepad is open."
+        },
+        {
+          "do": "Type hello there",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'hello there' was typed into the Notepad document, as confirmed by the 'Changed' section and the current document value."
+        },
+        {
+          "do": "Save the document as eval-saved.txt in Documents",
+          "tool": "save_document_as",
+          "ok": false,
+          "why": "A file called eval-saved.txt already exists there, so I didn't replace it. Say \"replace it\" if you want to."
+        }
+      ],
+      "replans": 1,
+      "confirmations": 0,
+      "ms": 20611,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

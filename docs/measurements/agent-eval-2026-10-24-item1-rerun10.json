@@ -1,0 +1,273 @@
+{
+  "date": "2026-10-24 01:44",
+  "label": "item1-rerun10",
+  "model": "gemini-2.5-flash",
+  "tasks": 2,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 4,
+      "median": 4,
+      "max": 4
+    },
+    "medianSeconds": {
+      "min": 72,
+      "median": 72,
+      "max": 72
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:44:16.418Z",
+      "tasks": 2,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 2,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 4,
+      "medianSeconds": 72,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "I couldn't finish: The step was to search for a local file in File Explorer, but the tool used was 'search_web', which performs a web search. The screen also shows no change, indicating the file was not found or display. I did 2 of 4 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer' and many File Explorer specific controls appeared, indicating File Explorer is open."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Documents - File Explorer' and the screen now shows the contents of the Documents folder, which matches the expected outcome."
+            },
+            {
+              "do": "Open ablespeak-eval.txt",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "The step intended to open the file, but the screen shows no change and the file is not open in any application."
+            },
+            {
+              "do": "Scroll down",
+              "tool": "desktop_scroll",
+              "ok": false,
+              "why": "The screen did not change after the scroll down action, and the scrollbar value remained at 0, indicating no scroll occurred."
+            },
+            {
+              "do": "Search for \"ablespeak-eval.txt\"",
+              "tool": "search_web",
+              "ok": false,
+              "why": "The step was to search for a local file in File Explorer, but the tool used was 'search_web', which performs a web search. The screen also shows no change, indicating the file was not found or display"
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 72437,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"Documents - File Explorer\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: I couldn't bring \"notepad-check.txt - Notepad\" to the front.. I did 2 of 7 steps.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to '*notepad-check.txt - Notepad', indicating that Notepad was opened."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The tool successfully typed 'hello there' into the text editor, and the screen now shows 'hello there' as the value of the Document 'Text editor'."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "I couldn't bring \"notepad-check.txt - Notepad\" to the front."
+            },
+            {
+              "do": "Press Ctrl+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "I couldn't bring \"notepad-check.txt - Notepad\" to the front."
+            },
+            {
+              "do": "Press Ctrl+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "I couldn't bring \"notepad-check.txt - Notepad\" to the front."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 22117,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:44:16.418Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 2,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 4,
+  "medianSeconds": 72,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "I couldn't finish: The step was to search for a local file in File Explorer, but the tool used was 'search_web', which performs a web search. The screen also shows no change, indicating the file was not found or display. I did 2 of 4 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer' and many File Explorer specific controls appeared, indicating File Explorer is open."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Documents - File Explorer' and the screen now shows the contents of the Documents folder, which matches the expected outcome."
+        },
+        {
+          "do": "Open ablespeak-eval.txt",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "The step intended to open the file, but the screen shows no change and the file is not open in any application."
+        },
+        {
+          "do": "Scroll down",
+          "tool": "desktop_scroll",
+          "ok": false,
+          "why": "The screen did not change after the scroll down action, and the scrollbar value remained at 0, indicating no scroll occurred."
+        },
+        {
+          "do": "Search for \"ablespeak-eval.txt\"",
+          "tool": "search_web",
+          "ok": false,
+          "why": "The step was to search for a local file in File Explorer, but the tool used was 'search_web', which performs a web search. The screen also shows no change, indicating the file was not found or display"
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 72437,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"Documents - File Explorer\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: I couldn't bring \"notepad-check.txt - Notepad\" to the front.. I did 2 of 7 steps.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*notepad-check.txt - Notepad', indicating that Notepad was opened."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The tool successfully typed 'hello there' into the text editor, and the screen now shows 'hello there' as the value of the Document 'Text editor'."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "I couldn't bring \"notepad-check.txt - Notepad\" to the front."
+        },
+        {
+          "do": "Press Ctrl+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "I couldn't bring \"notepad-check.txt - Notepad\" to the front."
+        },
+        {
+          "do": "Press Ctrl+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "I couldn't bring \"notepad-check.txt - Notepad\" to the front."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 22117,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

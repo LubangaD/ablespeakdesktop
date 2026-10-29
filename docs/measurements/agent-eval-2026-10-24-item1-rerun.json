@@ -1,0 +1,467 @@
+{
+  "date": "2026-10-24 00:46",
+  "label": "item1-rerun",
+  "model": "gemini-2.5-flash",
+  "tasks": 5,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 10,
+      "median": 10,
+      "max": 10
+    },
+    "medianSeconds": {
+      "min": 25,
+      "median": 25,
+      "max": 25
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T21:46:28.793Z",
+      "tasks": 5,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 5,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 10,
+      "medianSeconds": 25,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "I couldn't finish: The Start menu did not appear, and nothing visible changed on the screen.. I did 0 of 5 steps.",
+          "steps": [
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not appear, and nothing visible changed on the screen."
+            },
+            {
+              "do": "press Windows key+E",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The step intended to open File Explorer, but the screen remained unchanged, showing the Antigravity IDE window."
+            },
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not appear, and nothing visible changed on the screen."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 28172,
+          "checks": [
+            {
+              "kind": "window",
+              "app": "notepad",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "I couldn't find an open window for \"notepad\"."
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "explorer-open-pdf",
+          "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+          "status": "failed",
+          "said": "I couldn't finish: The Start menu did not open, and nothing visible changed on the screen.. I did 0 of 5 steps.",
+          "steps": [
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not open, and no visible change occurred on the screen."
+            },
+            {
+              "do": "press Ctrl+E",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The File Explorer window did not open, and nothing visible changed on the screen."
+            },
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not open, and nothing visible changed on the screen."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 26477,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"ablespeak - Antigravity IDE - Google/artemis repository\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: Pressing the Windows key should open the Start menu, but the screen did not change, and the Start menu is not visible in the controls list.. I did 0 of 6 steps.",
+          "steps": [
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not appear, and nothing visible changed on the screen."
+            },
+            {
+              "do": "press Ctrl+Space",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The step intended for a search box to appear, but the screen did not change and no search box is visible in the new screen state."
+            },
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "Pressing the Windows key should open the Start menu, but the screen did not change, and the Start menu is not visible in the controls list."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 25184,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "spotify-search",
+          "instruction": "Open Spotify and search for Sauti Sol",
+          "status": "failed",
+          "said": "I couldn't finish: The Start menu did not open, and nothing visible changed on the screen.. I did 0 of 5 steps.",
+          "steps": [
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not open, and no visible change occurred on the screen."
+            },
+            {
+              "do": "press Ctrl+Esc",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not open, and nothing visible changed on the screen."
+            },
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not open, and nothing visible changed on the screen."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 25024,
+          "checks": [
+            {
+              "kind": "control",
+              "app": "spotify",
+              "nameIncludes": "Sauti Sol",
+              "notType": [
+                "Edit",
+                "ComboBox"
+              ],
+              "ok": false,
+              "detail": "\"Spotify Premium\" is minimized. Bring it to the front first."
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "start-menu-calculator",
+          "instruction": "Open the Start menu, search for Calculator and open it",
+          "status": "failed",
+          "said": "I couldn't finish: The Start menu did not open, and nothing visible changed on the screen after pressing the Windows key.. I did 0 of 3 steps.",
+          "steps": [
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not appear, and nothing visible changed on the screen."
+            },
+            {
+              "do": "press Ctrl+Esc",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not appear, and nothing visible changed on the screen."
+            },
+            {
+              "do": "press the Windows key",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Start menu did not open, and nothing visible changed on the screen after pressing the Windows key."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 24149,
+          "checks": [
+            {
+              "kind": "window",
+              "app": "calculator",
+              "titleIncludes": "Calculator",
+              "ok": false,
+              "detail": "I couldn't find an open window for \"calculator\"."
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T21:46:28.793Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 5,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 10,
+  "medianSeconds": 25,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "I couldn't finish: The Start menu did not appear, and nothing visible changed on the screen.. I did 0 of 5 steps.",
+      "steps": [
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not appear, and nothing visible changed on the screen."
+        },
+        {
+          "do": "press Windows key+E",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The step intended to open File Explorer, but the screen remained unchanged, showing the Antigravity IDE window."
+        },
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not appear, and nothing visible changed on the screen."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 28172,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "notepad",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "I couldn't find an open window for \"notepad\"."
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "explorer-open-pdf",
+      "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+      "status": "failed",
+      "said": "I couldn't finish: The Start menu did not open, and nothing visible changed on the screen.. I did 0 of 5 steps.",
+      "steps": [
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not open, and no visible change occurred on the screen."
+        },
+        {
+          "do": "press Ctrl+E",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The File Explorer window did not open, and nothing visible changed on the screen."
+        },
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not open, and nothing visible changed on the screen."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 26477,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"ablespeak - Antigravity IDE - Google/artemis repository\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: Pressing the Windows key should open the Start menu, but the screen did not change, and the Start menu is not visible in the controls list.. I did 0 of 6 steps.",
+      "steps": [
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not appear, and nothing visible changed on the screen."
+        },
+        {
+          "do": "press Ctrl+Space",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The step intended for a search box to appear, but the screen did not change and no search box is visible in the new screen state."
+        },
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "Pressing the Windows key should open the Start menu, but the screen did not change, and the Start menu is not visible in the controls list."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 25184,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "spotify-search",
+      "instruction": "Open Spotify and search for Sauti Sol",
+      "status": "failed",
+      "said": "I couldn't finish: The Start menu did not open, and nothing visible changed on the screen.. I did 0 of 5 steps.",
+      "steps": [
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not open, and no visible change occurred on the screen."
+        },
+        {
+          "do": "press Ctrl+Esc",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not open, and nothing visible changed on the screen."
+        },
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not open, and nothing visible changed on the screen."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 25024,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "spotify",
+          "nameIncludes": "Sauti Sol",
+          "notType": [
+            "Edit",
+            "ComboBox"
+          ],
+          "ok": false,
+          "detail": "\"Spotify Premium\" is minimized. Bring it to the front first."
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "start-menu-calculator",
+      "instruction": "Open the Start menu, search for Calculator and open it",
+      "status": "failed",
+      "said": "I couldn't finish: The Start menu did not open, and nothing visible changed on the screen after pressing the Windows key.. I did 0 of 3 steps.",
+      "steps": [
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not appear, and nothing visible changed on the screen."
+        },
+        {
+          "do": "press Ctrl+Esc",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not appear, and nothing visible changed on the screen."
+        },
+        {
+          "do": "press the Windows key",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Start menu did not open, and nothing visible changed on the screen after pressing the Windows key."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 24149,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "calculator",
+          "titleIncludes": "Calculator",
+          "ok": false,
+          "detail": "I couldn't find an open window for \"calculator\"."
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

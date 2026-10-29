@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — Settings</title>
+<!--
+  Settings — the keys, the model, the PINs, and what kind of computer this is.
+  Ports to dashboard/src/pages/Settings.jsx.
+
+  This page is the reason the admin PIN exists. Every other page shows what
+  AbleSpeak did; this one changes what it can do, and it holds API keys that
+  cost money. It cannot be reached by voice, and the server checks the PIN on
+  the routes behind it — not only on the page.
+
+  So the design is deliberately plain and slow:
+
+  · A key is never shown. Once saved, only how it ends and when it was saved.
+    There is no "reveal": a student may be sitting beside the teacher.
+  · Removing a key asks first, and the focus lands on "Keep it", so a stray
+    press cannot wipe the key that makes speech work at all.
+  · The provider in use is stated before the alternatives, so a teacher cannot
+    switch away from a working setup by mistake.
+  · The first admin PIN can only be set from the tray icon. That is said here
+    rather than offered here, because a student could otherwise reach this page
+    by voice and set a PIN of their own.
+
+  The older screen asked for `border-white/12`, which its Tailwind build could
+  not draw, so the app ended up with Tailwind's default light grey border.
+  This file uses the real card border, rgba(255,255,255,0.06), like every other
+  screen — see README.md, "What changed from the stitch screens".
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..700&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-ui.css">
+<script src="shell.js" defer></script>
+</head>
+<body data-route="/settings">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <div data-shell="sidebar"></div>
+
+  <div class="as-main-col">
+    <div data-shell="topbar"></div>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <div class="as-page as-page--narrow">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Settings</h1>
+            <p class="as-muted as-mt-1">
+              Keys and the language model AbleSpeak uses on this computer.
+            </p>
+          </header>
+
+          <!-- ── Shared computer ──
+               First, because it changes how every other page behaves. -->
+          <section class="as-stack as-stack--sm" aria-labelledby="shared-heading">
+            <h2 id="shared-heading" class="as-section">This computer</h2>
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Several people use this computer</p>
+                  <p class="as-muted as-mt-1">
+                    When on, nobody’s profile opens by itself from the Windows account,
+                    and the last person’s session never carries over to the next.
+                    For a lab or a shared classroom machine.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false" aria-label="Several people use this computer">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── The two PINs ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="pins-heading">
+            <h2 id="pins-heading" class="as-section">Who can open what</h2>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Admin PIN</p>
+                  <p class="as-muted as-mt-1">
+                    Opens Test console, Developer Hub and Settings. An unlock lasts
+                    15 minutes. Five wrong tries pause unlocking for five minutes.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-ok"><span class="as-dot as-ok"></span>Set</span>
+                <button type="button" class="as-btn as-quiet">Change the PIN</button>
+              </div>
+
+              <!-- Stated, not offered: this is what stops a student making
+                   themselves admin by voice. -->
+              <p class="as-notice as-mt-5">
+                The <strong>first</strong> admin PIN can only be set from the tray icon
+                (<strong>Set admin PIN…</strong>), within 10 minutes of choosing it there.
+                It cannot be set from this page.
+              </p>
+            </div>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Helper PIN</p>
+                  <p class="as-muted as-mt-1">
+                    Opens Users and Exams, and nothing else — no keys, no logs, no
+                    Developer Hub. For a teacher or aide who only manages people and
+                    their progress. Optional, and it cannot be the same as the admin PIN.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-idle"><span class="as-dot as-idle"></span>Not set</span>
+              </div>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 180px">
+                  <label class="as-field-label" for="helper-pin">A new helper PIN (4–8 digits)</label>
+                  <input class="as-field as-tabular" id="helper-pin" type="password" inputmode="numeric"
+                         autocomplete="new-password" placeholder="••••">
+                </div>
+                <button type="submit" class="as-btn as-primary" style="align-self:flex-end">Set the helper PIN</button>
+              </form>
+            </div>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Admin pages without a PIN, on this Windows account</p>
+                  <p class="as-muted as-mt-1">
+                    Lets this one Windows account open every page with no PIN. Refused on
+                    shared computers and guest accounts.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false"
+                        aria-label="Admin pages without a PIN on this Windows account">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+              </div>
+              <p class="as-muted as-mt-3" data-private>This Windows account: LAB-03\teacher</p>
+            </div>
+          </section>
+
+          <!-- ── API keys ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="keys-heading">
+            <h2 id="keys-heading" class="as-section">API keys</h2>
+            <p class="as-muted">
+              Saved on this computer only, and never shown again once saved.
+              Speech is always turned into text by Google Gemini, so a Gemini key is required.
+            </p>
+
+            <!-- A saved key: how it ends, and when. Never a reveal button. -->
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 280px">
+                  <p class="as-body as-strong">Google Gemini</p>
+                  <p class="as-muted as-mt-1">Speech recognition, and the AI if chosen below</p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-ok"><span class="as-dot as-ok"></span>Saved · ends&nbsp;<span class="as-mono" data-private>…4f2a</span></span>
+              </div>
+              <dl class="as-rows as-mt-3">
+                <div><dt>Saved</dt><dd>2 Sep 2026</dd></div>
+                <div><dt>Read from</dt><dd class="as-mono" data-private>server\.env</dd></div>
+              </dl>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 260px">
+                  <label class="as-field-label" for="gemini-key">Replace it with a new key</label>
+                  <input class="as-field as-mono" id="gemini-key" type="password" autocomplete="off"
+                         placeholder="AIza…">
+                </div>
+                <button type="submit" class="as-btn as-quiet" style="align-self:flex-end">Save key</button>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-btn as-danger" style="align-self:flex-end">Remove</button>
+              </form>
+              <!-- Asking first, with focus on the safe answer -->
+              <div class="as-notice as-bad-edge as-mt-3" role="alertdialog" aria-label="Remove the Gemini key?">
+                <p><strong>Remove the Gemini key?</strong></p>
+                <p class="as-mt-1">
+                  Speech recognition will stop working until another is saved —
+                  AbleSpeak will not hear anyone on this computer.
+                </p>
+                <div class="as-row as-row--wrap as-mt-3">
+                  <button type="button" class="as-btn as-quiet">Keep it</button>
+                  <button type="button" class="as-btn as-danger">Yes, remove it</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- An empty key card -->
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 280px">
+                  <p class="as-body as-strong">OpenAI</p>
+                  <p class="as-muted as-mt-1">Optional — only for the AI, never for speech</p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-idle"><span class="as-dot as-idle"></span>No key</span>
+              </div>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 260px">
+                  <label class="as-field-label" for="openai-key">OpenAI key</label>
+                  <input class="as-field as-mono" id="openai-key" type="password" autocomplete="off"
+                         placeholder="sk-…">
+                </div>
+                <button type="submit" class="as-btn as-quiet" style="align-self:flex-end">Save key</button>
+              </form>
+            </div>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 280px">
+                  <p class="as-body as-strong">Anthropic</p>
+                  <p class="as-muted as-mt-1">Optional — only for the AI, never for speech</p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-idle"><span class="as-dot as-idle"></span>No key</span>
+              </div>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 260px">
+                  <label class="as-field-label" for="anthropic-key">Anthropic key</label>
+                  <input class="as-field as-mono" id="anthropic-key" type="password" autocomplete="off"
+                         placeholder="sk-ant-…">
+                </div>
+                <button type="submit" class="as-btn as-quiet" style="align-self:flex-end">Save key</button>
+              </form>
+            </div>
+          </section>
+
+          <!-- ── Language model ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="language-model-heading">
+            <h2 id="language-model-heading" class="as-section">Language model</h2>
+
+            <!-- What is in use, before any alternative -->
+            <div class="as-card as-p-5">
+              <h3 class="as-section" style="font-size:14px">Current provider</h3>
+              <dl class="as-rows as-mt-3">
+                <div><dt>Provider</dt><dd>Google Gemini</dd></div>
+                <div><dt>Model</dt><dd class="as-mono">gemini-2.5-flash</dd></div>
+                <div><dt>Temperature</dt><dd class="as-tabular">0.2</dd></div>
+                <div><dt>Conversation history</dt><dd class="as-tabular">8 turns</dd></div>
+                <div>
+                  <dt>Reachable</dt>
+                  <dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>Answering normally</span></dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="as-grid as-grid--2" style="align-items:start">
+
+              <!-- In use first -->
+              <div class="as-card as-p-5" style="border-color:rgba(245,166,35,0.4)">
+                <div class="as-row as-row--wrap">
+                  <p class="as-body as-strong">Google Gemini</p>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-ok"><span class="as-dot as-ok"></span>In use</span>
+                </div>
+                <div class="as-mt-3">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <label class="as-sr" for="gemini-model">Gemini model</label>
+                    <select class="as-field" id="gemini-model" style="flex:1 1 180px">
+                      <option selected>gemini-2.5-flash</option>
+                      <option>gemini-2.5-pro</option>
+                      <option>gemini-2.0-flash</option>
+                    </select>
+                    <button type="button" class="as-small-quiet" title="Refresh model list">
+                      <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">refresh</span>
+                      Refresh
+                    </button>
+                  </div>
+                  <p class="as-muted as-mt-3">Read live from the provider.</p>
+                </div>
+              </div>
+
+              <!-- Then the ones ready to switch to -->
+              <div class="as-card as-p-5">
+                <div class="as-row as-row--wrap">
+                  <p class="as-body as-strong">OpenAI</p>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>No key</span>
+                </div>
+                <p class="as-muted as-mt-3">Save an OpenAI key above to switch to it.</p>
+                <button type="button" class="as-btn as-quiet as-mt-3" disabled aria-disabled="true">Switch</button>
+              </div>
+
+              <div class="as-card as-p-5">
+                <div class="as-row as-row--wrap">
+                  <p class="as-body as-strong">Anthropic</p>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>No key</span>
+                </div>
+                <p class="as-muted as-mt-3">Save an Anthropic key above to switch to it.</p>
+                <button type="button" class="as-btn as-quiet as-mt-3" disabled aria-disabled="true">Switch</button>
+              </div>
+
+            </div>
+
+            <p class="as-notice">
+              Switching the provider changes only how harder commands are worked out.
+              Speech is always turned into text by Google Gemini.
+              Switching by voice is refused — it needs the PIN.
+            </p>
+          </section>
+
+          <!-- ── The gateway ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="gateway-heading">
+            <h2 id="gateway-heading" class="as-section">AbleSpeak gateway</h2>
+            <div class="as-card" style="padding:8px 20px">
+              <dl class="as-rows">
+                <div><dt>Agent version</dt><dd class="as-mono" style="font-size:13px">2.4.1</dd></div>
+                <div><dt>Mode</dt><dd>Standalone AI agent</dd></div>
+                <div><dt>Active prompt</dt><dd class="as-mono" style="font-size:13px">command-mode</dd></div>
+                <div>
+                  <dt>Extension clients</dt>
+                  <dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>1</span></dd>
+                </div>
+                <div>
+                  <dt>Dashboard clients</dt>
+                  <dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>1</span></dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

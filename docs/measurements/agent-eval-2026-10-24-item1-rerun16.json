@@ -1,0 +1,173 @@
+{
+  "date": "2026-10-24 02:07",
+  "label": "item1-rerun16",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "medianSeconds": {
+      "min": 57,
+      "median": 57,
+      "max": 57
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T23:07:03.814Z",
+      "tasks": 1,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 1,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 2,
+      "medianSeconds": 57,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The 'Save As' window did not appear; instead, a 'Keep unsaved changes?' pop-up appeared.. I did 2 of 4 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "Notepad opened, and the window title changed to indicate Notepad is the active application, even though a pop-up appeared."
+            },
+            {
+              "do": "Type hello there",
+              "tool": "system_type_text",
+              "ok": true,
+              "why": "The document's value now includes 'hello there', matching the expected outcome of typing the text."
+            },
+            {
+              "do": "Save the document as eval-saved.txt in Documents",
+              "tool": "save_document_as",
+              "ok": false,
+              "why": "I couldn't open the Save As dialog in *ablespeak-eval.txt - Notepad."
+            },
+            {
+              "do": "Press Escape",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The step was to press Escape, which should have closed the 'Keep unsaved changes?' pop-up, but the pop-up is still present on the screen."
+            },
+            {
+              "do": "Press Ctrl+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'Save As' window did not appear; instead, a 'Keep unsaved changes?' pop-up appeared."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 57205,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T23:07:03.814Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 1,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 2,
+  "medianSeconds": 57,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The 'Save As' window did not appear; instead, a 'Keep unsaved changes?' pop-up appeared.. I did 2 of 4 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "Notepad opened, and the window title changed to indicate Notepad is the active application, even though a pop-up appeared."
+        },
+        {
+          "do": "Type hello there",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The document's value now includes 'hello there', matching the expected outcome of typing the text."
+        },
+        {
+          "do": "Save the document as eval-saved.txt in Documents",
+          "tool": "save_document_as",
+          "ok": false,
+          "why": "I couldn't open the Save As dialog in *ablespeak-eval.txt - Notepad."
+        },
+        {
+          "do": "Press Escape",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The step was to press Escape, which should have closed the 'Keep unsaved changes?' pop-up, but the pop-up is still present on the screen."
+        },
+        {
+          "do": "Press Ctrl+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'Save As' window did not appear; instead, a 'Keep unsaved changes?' pop-up appeared."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 57205,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}
