@@ -46,7 +46,7 @@ export default function AdminGate({ need = 'admin', children }) {
 
   return (
     <>
-      <div className="flex items-center justify-between gap-4 px-8 py-1.5 bg-[#141c28] border-b border-white/[0.06]">
+      <div className="flex items-center justify-between gap-4 px-8 py-1.5 bg-[var(--card)] border-b border-white/[0.06]">
         <span className={`${MUTED} flex items-center gap-2 min-w-0`}>
           <LockIcon className="text-[16px]" />
           <span>
@@ -69,7 +69,7 @@ export default function AdminGate({ need = 'admin', children }) {
 }
 
 function LockIcon({ className = '' }) {
-  return <span className={`material-symbols-outlined text-[#c9b8a5] ${className}`} aria-hidden="true">lock</span>;
+  return <span className={`material-symbols-outlined text-[var(--ink-quiet)] ${className}`} aria-hidden="true">lock</span>;
 }
 
 /**
@@ -79,15 +79,15 @@ function LockIcon({ className = '' }) {
  */
 function SetupFromTray({ onRetry }) {
   return (
-    <div className="min-h-full w-full bg-[#0D1627] flex items-center justify-center p-8">
+    <div className="min-h-full w-full bg-[var(--page)] flex items-center justify-center p-8">
       <div className={`${CARD} w-full max-w-md p-6 flex flex-col gap-4`}>
         <LockIcon className="text-[24px]" />
         <div className="flex flex-col gap-1">
           <h1 className={TITLE}>These pages are for teachers</h1>
           <p className={`${MUTED} text-[14px]`}>
             Developer Hub and Settings need an admin PIN, and none is set yet. To set one, right-click the
-            AbleSpeak icon near the clock (click the small arrow <span className="font-mono text-[13px] text-[#dae3f4]">^</span> if you
-            can't see it) and choose <span className="text-[#dae3f4] font-medium">Set admin PIN…</span>
+            AbleSpeak icon near the clock (click the small arrow <span className="font-mono text-[13px] text-[var(--ink)]">^</span> if you
+            can't see it) and choose <span className="text-[var(--ink)] font-medium">Set admin PIN…</span>
           </p>
         </div>
         <button type="button" onClick={onRetry} className={`${QUIET} self-start`}>
@@ -129,7 +129,7 @@ function PinForm({ firstTime = false, needsAdmin = false }) {
   const field = `${FIELD} focus:ring-0 text-[16px]`;
 
   return (
-    <div className="min-h-full w-full bg-[#0D1627] flex items-center justify-center p-8">
+    <div className="min-h-full w-full bg-[var(--page)] flex items-center justify-center p-8">
       <form onSubmit={submit} className={`${CARD} w-full max-w-sm p-6 flex flex-col gap-5`}>
         <div className="flex flex-col gap-1">
           <LockIcon className="text-[24px] mb-2" />
@@ -138,7 +138,7 @@ function PinForm({ firstTime = false, needsAdmin = false }) {
             {firstTime
               ? 'Developer Hub and Settings hold the AI keys and setup. Choose a PIN of 4 to 8 digits so only teachers can open them.'
               : needsAdmin
-                ? <>The helper PIN opens only the <Link to="/students" className="underline text-[#dae3f4]">Users page</Link>. Enter the admin PIN to open this one.</>
+                ? <>The helper PIN opens only the <Link to="/students" className="underline text-[var(--ink)]">Users page</Link>. Enter the admin PIN to open this one.</>
                 : 'Enter the admin PIN, or the helper PIN for the Users page.'}
           </p>
         </div>
@@ -180,7 +180,7 @@ function PinForm({ firstTime = false, needsAdmin = false }) {
 
         {firstTime && (
           <p className={MUTED}>
-            Forgot it later? Remove the <span className="font-mono text-[12px] text-[#dae3f4]">ADMIN_PIN_HASH</span> line from AbleSpeak's .env file and restart AbleSpeak.
+            Forgot it later? Remove the <span className="font-mono text-[12px] text-[var(--ink)]">ADMIN_PIN_HASH</span> line from AbleSpeak's .env file and restart AbleSpeak.
           </p>
         )}
       </form>

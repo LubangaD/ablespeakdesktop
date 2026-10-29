@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak Tier 2 — the ten screens</title>
+<!-- A contact sheet: every screen, who can open it, and what it ports to. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..700&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-ui.css">
+<style>
+  /* The only page here that scrolls as a document rather than inside a frame. */
+  html, body { overflow: auto; }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 40px 32px 64px; }
+  .screen-card {
+    display: flex; gap: 16px; align-items: flex-start;
+    padding: 16px 20px; text-decoration: none;
+    background: var(--as-card); border: 1px solid var(--as-line);
+    border-radius: var(--as-r-xl); transition: border-color .15s, background-color .15s;
+  }
+  .screen-card:hover { border-color: rgba(245,166,35,.5); background: var(--as-raised); }
+  .screen-num {
+    flex-shrink: 0; width: 40px; height: 40px; border-radius: var(--as-r);
+    background: var(--as-well); color: var(--as-amber-light);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .tier {
+    font-size: 11px; line-height: 16px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 9999px; white-space: nowrap;
+  }
+  .tier-user   { background: rgba(104,217,195,.15); color: var(--as-ok); }
+  .tier-helper { background: rgba(255,200,128,.15); color: var(--as-warn); }
+  .tier-admin  { background: rgba(255,180,171,.15); color: var(--as-bad); }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <header style="margin-bottom:32px">
+    <div class="as-row" style="gap:12px">
+      <span aria-hidden="true" style="width:48px;height:48px;border-radius:9999px;background:var(--as-amber-light);color:var(--as-on-amber-avatar);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span class="material-symbols-outlined" style="font-size:26px">record_voice_over</span>
+      </span>
+      <div>
+        <h1 class="as-title">AbleSpeak Tier 2 — the ten screens</h1>
+        <p class="as-muted">
+          The dashboard's UI, refreshed 13 October 2026. Open any screen below.
+        </p>
+      </div>
+    </div>
+  </header>
+
+  <p class="as-notice as-ok-edge" style="margin-bottom:24px">
+    These files follow the app as it is today: the grey-blue palette and Roboto Flex
+    from <strong>dashboard/src/lib/ui.js</strong>. They replace the six screens in
+    <span class="as-mono">../stitch/</span>, which are still on the earlier navy
+    palette the app no longer uses. See <strong>README.md</strong> for the
+    class-to-constant mapping and what changed.
+  </p>
+
+  <!-- ── User tier ── -->
+  <h2 class="as-section" style="margin:32px 0 12px">
+    Everyone <span class="tier tier-user">User</span>
+  </h2>
+  <div class="as-stack as-stack--sm">
+    <a class="screen-card" href="01-home.html">
+      <span class="screen-num">01</span>
+      <span>
+        <span class="as-body as-strong">Home</span>
+        <span class="as-muted" style="display:block">
+          What AbleSpeak is doing now: who is at the computer, what to say, six numbers,
+          recent commands, the student's screen, system status, listening settings.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/ → pages/Home.jsx</span>
+      </span>
+    </a>
+    <a class="screen-card" href="02-my-progress.html">
+      <span class="screen-num">02</span>
+      <span>
+        <span class="as-body as-strong">My progress</span>
+        <span class="as-muted" style="display:block">
+          The person's own commands per day, what they say most, their recent commands.
+          Only ever their own — the teacher's comparison lives on Users.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/progress → pages/MyProgress.jsx</span>
+      </span>
+    </a>
+    <a class="screen-card" href="03-voice-and-words.html">
+      <span class="screen-num">03</span>
+      <span>
+        <span class="as-body as-strong">Voice &amp; words</span>
+        <span class="as-muted" style="display:block">
+          How well AbleSpeak hears them, the listening profile and pause, their own
+          words, shortcuts, routines, and the settings as a portable file.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/speech → pages/SpeechProfile.jsx + components/StudentSpeech.jsx</span>
+      </span>
+    </a>
+    <a class="screen-card" href="04-sign-in.html">
+      <span class="screen-num">04</span>
+      <span>
+        <span class="as-body as-strong">Sign in</span>
+        <span class="as-muted" style="display:block">
+          An email code or Google — no password, because a code can be said aloud.
+          "Not now" is an equal choice, so nobody is locked out of their own computer.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/sign-in → pages/SignIn.jsx · no frame</span>
+      </span>
+    </a>
+  </div>
+
+  <!-- ── Helper tier ── -->
+  <h2 class="as-section" style="margin:32px 0 12px">
+    A helper or admin account, or the helper PIN <span class="tier tier-helper">Helper</span>
+  </h2>
+  <div class="as-stack as-stack--sm">
+    <a class="screen-card" href="05-users.html">
+      <span class="screen-num">05</span>
+      <span>
+        <span class="as-body as-strong">Users</span>
+        <span class="as-muted" style="display:block">
+          Who is at the computer, the class as a whole, each person, and the chosen
+          person's goals — with the aim line, the trend and when a decision is due.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/students → pages/Students.jsx</span>
+      </span>
+    </a>
+    <a class="screen-card" href="06-exams.html">
+      <span class="screen-num">06</span>
+      <span>
+        <span class="as-body as-strong">Exams</span>
+        <span class="as-muted" style="display:block">
+          Add a paper, check what will be read aloud, start it for a student, and
+          download the script and audit trail. Checking is a gate, not a warning.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/exams → pages/Exams.jsx · new</span>
+      </span>
+    </a>
+    <a class="screen-card" href="07-exam-screen.html">
+      <span class="screen-num">07</span>
+      <span>
+        <span class="as-body as-strong">Exam screen</span>
+        <span class="as-muted" style="display:block">
+          The sitting in large print, for a student with low vision and the invigilator
+          beside them. Everything scales from one number; all its states are in the file.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/exam → pages/ExamScreen.jsx · new</span>
+      </span>
+    </a>
+  </div>
+
+  <!-- ── Admin tier ── -->
+  <h2 class="as-section" style="margin:32px 0 12px">
+    An admin account, an admin Windows account, or the admin PIN <span class="tier tier-admin">Admin</span>
+  </h2>
+  <div class="as-stack as-stack--sm">
+    <a class="screen-card" href="08-test-console.html">
+      <span class="screen-num">08</span>
+      <span>
+        <span class="as-body as-strong">Test console</span>
+        <span class="as-muted" style="display:block">
+          Type a command and see what speaking it would do — the same code path, so the
+          result can be trusted. The transcript says how each command was handled.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/test → pages/TestConsole.jsx</span>
+      </span>
+    </a>
+    <a class="screen-card" href="09-developer-hub.html">
+      <span class="screen-num">09</span>
+      <span>
+        <span class="as-body as-strong">Developer Hub</span>
+        <span class="as-muted" style="display:block">
+          Four tabs: the tools the registry reports, what the AI is told, what it knows
+          about this computer, and the engine's log as it happens.
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/developer/:tab → pages/DeveloperHub.jsx · Tools · Prompt · Context · Logs</span>
+      </span>
+    </a>
+    <a class="screen-card" href="10-settings.html">
+      <span class="screen-num">10</span>
+      <span>
+        <span class="as-body as-strong">Settings</span>
+        <span class="as-muted" style="display:block">
+          Keys, the model, the two PINs, and whether this is a shared computer.
+          A key is never shown; removing one asks first, with focus on "Keep it".
+        </span>
+        <span class="as-muted as-mono" style="display:block;font-size:12px;margin-top:4px">/settings → pages/Settings.jsx</span>
+      </span>
+    </a>
+  </div>
+
+  <!-- Not a dashboard page, but part of the UI, so it is named here -->
+  <h2 class="as-section" style="margin:32px 0 12px">Not in this folder</h2>
+  <div class="as-card as-p-5">
+    <p class="as-body as-strong">The voice bar</p>
+    <p class="as-muted as-mt-1">
+      The part the student uses all day is not a dashboard page: it is
+      <span class="as-mono">server/overlay.html</span>, a transparent always-on-top
+      window. Its own rules are in <span class="as-mono">docs/design/DESIGN.md</span>
+      under "The student overlay" — text in rem and never under 16px, only the mic
+      button, no keyboard hint, and every resting state says what to say next.
+      Home and the Test console draw its <em>state</em>, never a live microphone.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

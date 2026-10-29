@@ -15,11 +15,14 @@ import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import { createRequire } from 'module';
+import { createAnalytics } from './analytics.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 
-import { initDatabase, closeDatabase } from './db.js';
+import { initDatabase, closeDatabase, getSpeedTurns, updateVoiceTurnSpeed, addSpeechServiceTime, getSpeechServiceTime, getDeviceState, setDeviceState, getSpeakerChecks, getStudent, getStudents, addStudent } from './db.js';
+import { speedMeter, speedReport } from './speed-meter.js';
 import { startDeviceSession, endDeviceSession, commandAttribution, getActiveStudent } from './student-session.js';
 import { userInfo } from 'os';
 
@@ -28,19 +31,27 @@ function windowsAccount() {
   if (process.env.ABLESPEAK_NO_WINDOWS_USER === '1') return null;
   try { return process.env.USERNAME || userInfo().username || null; } catch { return null; }
 }
-import { getProfile, learnAlias, LEARN_AFTER } from './student-profile.js';
+import { getProfile, learnAlias, LEARN_AFTER, listeningSettings } from './student-profile.js';
 import { recordCorrection } from './db.js';
 import { screenContextForAgent, getScreenModel } from './screen-model.js';
+import { mediaPlaying, listVisibleWindows, pickUserWindow } from './system-tools.js';
 import { AIEngine } from './ai-engine.js';
 import { ToolRegistry } from './tool-registry.js';
 import { WsProxy } from './ws-proxy.js';
+import { LocalAsr } from './local-asr.js';
+import { RemoteAsr } from './remote-asr.js';
 import { LogTailer } from './log-tailer.js';
 import { LibraryScanner } from './library-scanner.js';
 import { createApiRouter } from './routes/api.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createAdminGate } from './admin-pin.js';
+import { ExamSession } from './exam/exam-session.js';
+import { createExamRouter } from './exam/exam-routes.js';
+import { ExamFolder } from './exam/exam-folder.js';
 import { adminAccountStatus, setAdminAccount } from './admin-account.js';
 import { createAccount, createAccountRouter, createAuthCallbackRouter, createSecureStore } from './account.js';
+import { createVoiceModel, createVoiceProfiles } from './voice-profile.js';
+import { createVoiceProfileRouter } from './routes/voice-profile.js';
 
 /** After Google sign-in in the browser, bring the AbleSpeak window back to the front. */
 async function bringAppForward() {
@@ -97,8 +108,25 @@ const { student: activeStudent } = startDeviceSession({ windowsAccount: windowsA
 console.log(`[User] ${activeStudent ? `Signed in as ${activeStudent.name}` : 'No user signed in'}`);
 process.once('exit', () => {
   endDeviceSession();
+  saveSpeechServiceTime({ closing: true });
   closeDatabase(); // writes the file; the 2 s auto-save may not have run yet
 });
+
+// ── Speed and cost (speed-meter.js, Developer › Speed) ──
+const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// A reply's first sound came after its turn was saved
+speedMeter.onUpdate = ({ id, at, commandId, said, ...speed }) => { if (id != null) updateVoiceTurnSpeed(id, speed); };
+// The speech service is paid per second awake: kept per day. Closing, it is
+// let go now, and its scaledown after that is paid for too.
+function saveSpeechServiceTime({ closing = false } = {}) {
+  try {
+    if (closing) speedMeter.speechService('off');
+    addSpeechServiceTime(localDay(), speedMeter.takeAwakeMs() / 1000, speedMeter.gpu);
+  } catch (err) {
+    console.warn('[Speed] Saving the speech service time failed:', err.message);
+  }
+}
+setInterval(saveSpeechServiceTime, 60000).unref();
 
 // ── Express App ──
 const app = express();
@@ -145,13 +173,60 @@ function resolveWsToken() {
 }
 const wsToken = resolveWsToken();
 
+// ── Speech recognition on this computer (CDLI Whisper small, local-asr.js) ──
+// Starts with the server below; until it is ready, Gemini hears everything.
+const localAsr = new LocalAsr({ onChange: () => wsProxy.broadcastListeningSettings() });
+process.once('exit', () => localAsr.stop());
+
+// ── Real-time speech recognition on AbleSpeak's speech service (Modal, remote-asr.js) ──
+// Connects when the app starts, which wakes the service, so the first phrases
+// are heard in real time; until it is ready the engines above hear them.
+const remoteAsr = new RemoteAsr({
+  url: process.env.ABLESPEAK_ASR_URL,
+  token: process.env.ABLESPEAK_ASR_TOKEN,
+  onChange: state => {
+    speedMeter.speechService(state, remoteAsr.gpu); // its awake time is what it costs
+    wsProxy.broadcastListeningSettings();
+  },
+  onPartial: (utt, text) => wsProxy._showPartial(utt, text),
+});
+process.once('exit', () => remoteAsr.stop());
+
 // ── WebSocket Hub (standalone — no Voqal) ──
+// ── Usage analytics (Google Analytics 4, analytics.js) ──
+// Only for an account whose person agreed in their profile; the account is
+// signed in further down, and is only asked when an event happens.
+const installId = () => {
+  let id = getDeviceState('analytics_client_id');
+  if (!id) { id = randomUUID(); setDeviceState('analytics_client_id', id); }
+  return id;
+};
+const analytics = createAnalytics({
+  identity: () => account.identity(),
+  clientId: installId,
+  appVersion: createRequire(import.meta.url)('../package.json').version,
+});
+
+// ── "Only my voice" (voice-profile.js): each person's voiceprint, made and kept
+// on this computer, encrypted like the sign-in; every command gets a score (measuring only) ──
+const voiceProfiles = await createVoiceProfiles({
+  store: createSecureStore(join(dirname(DB_PATH), 'voiceprints.bin'), { what: 'voice profiles' }),
+  model: createVoiceModel(),
+}).load();
+if (voiceProfiles.count()) console.log(`[Voice lock] ${voiceProfiles.count()} voice${voiceProfiles.count() === 1 ? '' : 's'} set up (measuring only)`);
+
 const wsProxy = new WsProxy({
-  server, aiEngine, wsToken,
+  server, aiEngine, wsToken, localAsr, remoteAsr, analytics,
+  voiceProfile: voiceProfiles,
   attribution: commandAttribution,
   activeStudent: () => getActiveStudent().student,
   profile: () => getProfile(commandAttribution().student_id),
   readScreen: screenContextForAgent,
+  // While music or a video plays, only phrases with the name are acted on
+  mediaState: () => mediaPlaying(),
+  // "Click X": the window in front and its controls, to click by exact name without the AI
+  frontWindow: async () => pickUserWindow(await listVisibleWindows()),
+  windowControls: front => getScreenModel({ target: front, maxElements: 400 }),
   // Stage 4: the same correction twice becomes the student's shortcut.
   onCorrection: (heard, meant) => {
     const { student_id } = commandAttribution();
@@ -160,13 +235,26 @@ const wsProxy = new WsProxy({
     const count = recordCorrection({ student_id, heard: normal(heard), meant: normal(meant) });
     return { count, learned: count >= LEARN_AFTER && learnAlias(student_id, normal(heard), normal(meant)) };
   },
-  readScreenModel: async () => {
-    const model = await getScreenModel({ fresh: true, maxElements: 150 });
+  readScreenModel: async ({ fresh = true } = {}) => {
+    const model = await getScreenModel({ fresh, maxElements: 150 });
     return model.status === 'success' ? model : null;
   },
 });
 aiEngine.wsHub = wsProxy; // Back-reference
+wsProxy._checkMedia(); // loads Windows' media controls now, not on the first phrase
 console.log('[WsHub] Initialized (standalone mode)');
+
+// ── Exams: one sitting at a time; while it runs, the AI and every tool are off ──
+const examSession = new ExamSession({ broadcast: message => wsProxy._broadcastDashboard(message) });
+wsProxy.examSession = examSession;
+aiEngine.examLock = () => examSession.active;
+toolRegistry.examLock = () => examSession.active;
+// Papers saved into Documents\AbleSpeak Exams are read by themselves and listed on the Exams page
+const examFolder = new ExamFolder({
+  onChange: change => wsProxy._broadcastDashboard({
+    type: 'exam_folder', event: change.type, fileName: change.fileName, examId: change.examId || null, timestamp: new Date().toISOString(),
+  }),
+}).start();
 
 // ── Broadcast console output to dashboard Logs page ──
 const _origLog = console.log.bind(console);
@@ -228,8 +316,9 @@ const account = createAccount({
   callbackUrl: `http://127.0.0.1:${PORT}/auth/callback`,
   openUrl: openInBrowser,
 });
-// Renew the saved sign-in now; this also picks up a role set in Supabase
-account.refresh().catch(() => {});
+// Renew the saved sign-in now; this also picks up a role set in Supabase,
+// and the profile's analytics choice; then AbleSpeak opening is counted (if agreed)
+account.refresh().catch(() => {}).then(() => analytics.track('app_open'));
 
 // On the admin's own Windows account, or when an account with the admin role
 // (set in Supabase) is signed in, every page is open without a PIN
@@ -244,7 +333,23 @@ app.use(['/api/settings', '/api/ai/switch', '/api/ai/providers', '/api/tools', '
   adminGate.requireAdmin);
 app.get(['/api/logs', '/api/logs/recent'], adminGate.requireAdmin);
 
+// ── Exams: teachers upload papers, start sittings, download scripts ──
+app.use('/api/exams', createExamRouter({ examSession, examFolder, requireHelper: adminGate.requireHelper }));
+
 // ── API Routes ──
+// ── "My voice" on the Voice & words page: set up, redo or delete a voiceprint ──
+app.use('/api/voice-profile', createVoiceProfileRouter({
+  profiles: voiceProfiles,
+  activeStudent: () => getActiveStudent().student,
+  getStudent, getStudents, addStudent,
+  requestRole: req => adminGate.requestRole(req),
+  speakerChecks: id => getSpeakerChecks(id),
+  // The phrases are recorded the way the voice bar hears commands
+  captureFor: id => ({ autoGain: listeningSettings(getProfile(id)).autoGain !== false }),
+  // The voice bar sends each clip's WAV once someone is set up (the check needs it)
+  onChange: () => wsProxy.broadcastListeningSettings?.(),
+}));
+
 app.use('/api', createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomePath: VOQAL_HOME, aiEngine }));
 
 // GET /api/ws-token — lets the Chrome extension bootstrap the WS token (EXT-2)
@@ -269,6 +374,25 @@ app.use('/api/settings', createSettingsRouter({ aiEngine }));
 
 // GET /api/ai/status — current LLM provider and model
 app.get('/api/ai/status', (req, res) => res.json(aiEngine.getStatus()));
+
+// GET /api/speed — each voice command's stage timings, and what today cost
+// (Developer › Speed). What was said is in it, so it is for admins only.
+app.get('/api/speed', adminGate.requireAdmin, (req, res) => {
+  try {
+    const today = localDay();
+    res.json(speedReport({
+      rows: getSpeedTurns({ limit: 500 }),
+      today,
+      service: {
+        state: remoteAsr.configured ? remoteAsr.state : 'unconfigured',
+        gpu: speedMeter.gpu || remoteAsr.gpu,
+        awakeMs: getSpeechServiceTime(today).awake_s * 1000 + speedMeter.untakenAwakeMs(),
+      },
+    }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/ai/providers — all available providers
 app.get('/api/ai/providers', (req, res) => res.json(aiEngine.getAvailableProviders()));
@@ -464,6 +588,11 @@ server.listen(PORT, () => {
   // Pre-start the PowerShell worker (UI Automation assemblies take seconds
   // to load — do it now, not during the user's first voice command)
   import('./system-tools.js').then(m => m.warmupSystemTools()).catch(() => {});
+
+  // Load the speech model now, so the first command is heard on this computer
+  localAsr.start().catch(err => console.warn('[LocalASR] Could not start:', err.message));
+  // Wake the speech service now, so it is ready when the person first speaks
+  remoteAsr.start();
 
   // Validate the configured model against the provider's LIVE model list.
   // If it was retired (e.g. gemini-2.0-flash), auto-pick a replacement.

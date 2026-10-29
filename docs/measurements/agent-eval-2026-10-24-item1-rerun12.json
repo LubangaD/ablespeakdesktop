@@ -1,0 +1,209 @@
+{
+  "date": "2026-10-24 01:52",
+  "label": "item1-rerun12",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "medianSeconds": {
+      "min": 56,
+      "median": 56,
+      "max": 56
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:52:00.777Z",
+      "tasks": 1,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 1,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 2,
+      "medianSeconds": 56,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The step was supposed to show the Notepad window with 'hello there' in the Edit field, but instead, a 'Save As' dialog appeared asking to replace an existing file.. I did 5 of 6 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to '*ablespeak-eval.txt - Notepad', indicating that Notepad was opened, even though it opened a specific file instead of an empty 'Untitled' document."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The tool successfully typed 'hello there' into the text editor, and the screen now shows 'hello there' as the document's value."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The window title changed to 'Save as' and the focus is on the 'File name:' edit field, indicating the 'Save As' dialog appeared as expected."
+            },
+            {
+              "do": "Type \"eval-saved.txt\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'File name:' field was successfully updated to 'eval-saved.txt' as intended by the step."
+            },
+            {
+              "do": "Press Alt+N",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The screen did not change, and the expected 'Save As' window with the specified file name and save button is not present."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "uia_act",
+              "ok": false,
+              "why": "The 'Documents' folder was selected, but it was not opened, and the file name 'eval-saved.txt' was not in the 'File name' field."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'Documents' TreeItem is now focused and selected, indicating the step to open 'Documents' was successful."
+            },
+            {
+              "do": "Press Alt+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The step was supposed to show the Notepad window with 'hello there' in the Edit field, but instead, a 'Save As' dialog appeared asking to replace an existing file."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 55798,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:52:00.777Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 1,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 2,
+  "medianSeconds": 56,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The step was supposed to show the Notepad window with 'hello there' in the Edit field, but instead, a 'Save As' dialog appeared asking to replace an existing file.. I did 5 of 6 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*ablespeak-eval.txt - Notepad', indicating that Notepad was opened, even though it opened a specific file instead of an empty 'Untitled' document."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The tool successfully typed 'hello there' into the text editor, and the screen now shows 'hello there' as the document's value."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The window title changed to 'Save as' and the focus is on the 'File name:' edit field, indicating the 'Save As' dialog appeared as expected."
+        },
+        {
+          "do": "Type \"eval-saved.txt\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'File name:' field was successfully updated to 'eval-saved.txt' as intended by the step."
+        },
+        {
+          "do": "Press Alt+N",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The screen did not change, and the expected 'Save As' window with the specified file name and save button is not present."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The 'Documents' folder was selected, but it was not opened, and the file name 'eval-saved.txt' was not in the 'File name' field."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Documents' TreeItem is now focused and selected, indicating the step to open 'Documents' was successful."
+        },
+        {
+          "do": "Press Alt+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The step was supposed to show the Notepad window with 'hello there' in the Edit field, but instead, a 'Save As' dialog appeared asking to replace an existing file."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 55798,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

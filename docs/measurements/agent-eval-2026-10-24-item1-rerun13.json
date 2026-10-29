@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-24 01:54",
+  "label": "item1-rerun13",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "medianSeconds": {
+      "min": 33,
+      "median": 33,
+      "max": 33
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:54:55.795Z",
+      "tasks": 1,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 1,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 2,
+      "medianSeconds": 33,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The window changed to '*ablespeak-eval.txt - Notepad' instead of 'Confirm Save As' and the expected text and buttons were not present.. I did 4 of 6 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to '*ablespeak-eval.txt - Notepad' and the screen now shows Notepad controls, indicating Notepad is open."
+            },
+            {
+              "do": "Type hello there",
+              "tool": null,
+              "ok": true,
+              "why": "the screen already showed it"
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The window title changed from the document name to 'Save as', indicating the Save As dialog box is open."
+            },
+            {
+              "do": "Type C:\\Users\\ablespeak\\Documents\\eval-saved.txt",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'File name' text box now contains the expected text 'C:\\Users\\ablespeak\\Documents\\eval-saved.txt', as confirmed by the 'Changed' section and the 'Text in the document now' section."
+            },
+            {
+              "do": "Press Enter",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Notepad window is open, but it's showing a 'file already exists' prompt instead of the expected 'hello there' text and 'eval-saved.txt' title."
+            },
+            {
+              "do": "Press Enter",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Notepad window did not open with the specified text and title bar. Instead, the 'Confirm Save As' dialog changed to 'Save as'."
+            },
+            {
+              "do": "Press Enter",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The window changed to '*ablespeak-eval.txt - Notepad' instead of 'Confirm Save As' and the expected text and buttons were not present."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 32984,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:54:55.795Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 1,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 2,
+  "medianSeconds": 33,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The window changed to '*ablespeak-eval.txt - Notepad' instead of 'Confirm Save As' and the expected text and buttons were not present.. I did 4 of 6 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*ablespeak-eval.txt - Notepad' and the screen now shows Notepad controls, indicating Notepad is open."
+        },
+        {
+          "do": "Type hello there",
+          "tool": null,
+          "ok": true,
+          "why": "the screen already showed it"
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The window title changed from the document name to 'Save as', indicating the Save As dialog box is open."
+        },
+        {
+          "do": "Type C:\\Users\\ablespeak\\Documents\\eval-saved.txt",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'File name' text box now contains the expected text 'C:\\Users\\ablespeak\\Documents\\eval-saved.txt', as confirmed by the 'Changed' section and the 'Text in the document now' section."
+        },
+        {
+          "do": "Press Enter",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Notepad window is open, but it's showing a 'file already exists' prompt instead of the expected 'hello there' text and 'eval-saved.txt' title."
+        },
+        {
+          "do": "Press Enter",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Notepad window did not open with the specified text and title bar. Instead, the 'Confirm Save As' dialog changed to 'Save as'."
+        },
+        {
+          "do": "Press Enter",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The window changed to '*ablespeak-eval.txt - Notepad' instead of 'Confirm Save As' and the expected text and buttons were not present."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 32984,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

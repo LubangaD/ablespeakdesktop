@@ -73,8 +73,80 @@ test('stopping dictation, in several words', () => {
   }
 });
 
+test('"open Word", "launch Spotify" open the app at once, without the AI', () => {
+  for (const [said, app] of [['open word', 'word'], ['launch spotify', 'spotify'], ['start the calculator', 'calculator'],
+    ['open my word document', 'word document'], ['open excel app', 'excel'], ['run vs code', 'vs code']]) {
+    const r = matchFastCommand(said);
+    assert.equal(r?.tool, 'open_application', said);
+    assert.equal(r.args.app_name, app, said);
+    assert.equal(r.silent, false, `${said} is said aloud, as before`);
+  }
+});
+
+test('"open" with anything AbleSpeak cannot open by name still goes to the AI', () => {
+  for (const said of ['open my email', 'open the file menu', 'open the first link', 'open youtube', 'open settings']) {
+    const r = matchFastCommand(said);
+    assert.notEqual(r?.tool, 'open_application', said);
+  }
+  assert.equal(matchFastCommand('start dictation')?.tool, 'dictation_mode', 'dictation still starts');
+});
+
+test('the person\'s folders open by name, without the AI (24 Oct 2026)', () => {
+  for (const said of ['open the downloads folder', 'open documents', 'open my pictures']) {
+    assert.equal(matchFastCommand(said)?.tool, 'open_application', said);
+  }
+});
+
 test('ordinary typing and writing requests are not dictation', () => {
   for (const said of ['type hello', 'write an email to John', 'open Word', 'I was able to write it']) {
     assert.ok(!startsDictation(said), said);
   }
+});
+
+test('speech recognition spellings: number words, joined words, quotes and hyphens', () => {
+  assert.deepEqual(matchFastCommand('Scroll down three.').args, { direction: 'down', amount: '1200' }, 'three scrolls of 400 px');
+  assert.deepEqual(matchFastCommand('Pagedown').args, { direction: 'down', amount: '800' });
+  assert.equal(matchFastCommand('newtab').tool, 'create_tab');
+  assert.deepEqual(matchFastCommand('Press "escape"').args, { key: 'Escape' });
+  assert.deepEqual(matchFastCommand('press-escape').args, { key: 'Escape' });
+});
+
+test('spoken numbers: compound words, scroll counts and a volume level', async () => {
+  const { spokenNumber } = await import('./fast-commands.js');
+  assert.equal(spokenNumber('twenty five'), 25);
+  assert.equal(spokenNumber('twenty-five'), 25);
+  assert.equal(spokenNumber('a hundred'), 100);
+  assert.equal(spokenNumber('seventeen'), 17);
+  assert.equal(spokenNumber('one direction'), null);
+  assert.equal(spokenNumber('twenty twenty'), null);
+  assert.deepEqual(matchFastCommand('scroll down twenty five').args, { direction: 'down', amount: '8000' }, 'capped at 20 scrolls');
+  assert.equal(matchFastCommand('scroll down a lot'), null);
+  assert.deepEqual(matchFastCommand('Set the volume to fifty.').args, { action: 'set', value: 50 });
+  assert.deepEqual(matchFastCommand('volume 30 percent').args, { action: 'set', value: 30 });
+  assert.deepEqual(matchFastCommand('volume up').args, { action: 'up' });
+  assert.equal(matchFastCommand('search for one direction').args.query, 'one direction');
+});
+
+test('"skip the ad" presses YouTube\'s own Skip; plain "skip" is still the next song', () => {
+  for (const said of ['Skip the ad', 'Click skip the ad.', 'skip ads', 'click skip', 'close this ad'])
+    assert.deepEqual(matchFastCommand(said)?.args, { action: 'skip_ad' }, said);
+  assert.equal(matchFastCommand('skip').tool, 'system_media_control');
+});
+
+test('"minimise this tab" minimises the window in front', () => {
+  assert.deepEqual(matchFastCommand('Minimise this tab').args, { action: 'minimize' });
+});
+
+test('"scroll down again" is one more scroll', () => {
+  assert.deepEqual(matchFastCommand('Scroll down again,'), { tool: 'scroll', args: { direction: 'down' }, silent: true });
+  assert.deepEqual(matchFastCommand('scroll up a bit more').args, { direction: 'up' });
+  assert.equal(matchFastCommand('scroll down again and again'), null);
+});
+
+test('play and pause are sent as said, so "play" never pauses a song that is playing', () => {
+  assert.deepEqual(matchFastCommand('Play the current song on Spotify.').args, { action: 'play', app_name: 'spotify' });
+  assert.deepEqual(matchFastCommand('pause spotify').args, { action: 'pause', app_name: 'spotify' });
+  assert.deepEqual(matchFastCommand('resume the media player').args, { action: 'play' });
+  assert.deepEqual(matchFastCommand('stop playback').args, { action: 'pause' });
+  assert.equal(matchFastCommand('play new religion on spotify'), null, 'a song by name goes to the AI');
 });

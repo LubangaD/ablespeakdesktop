@@ -1,6 +1,7 @@
 import initSqlJs from 'sql.js';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { dirname } from 'path';
+import { createHash } from 'crypto';
 
 /**
  * AbleSpeak SQLite Database Layer (using sql.js — pure JS, no native deps)
@@ -141,6 +142,14 @@ function migrate() {
     ms INTEGER
   )`);
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_voice_turns_student ON voice_turns(student_id, created_at)`); } catch {}
+  // Each turn's stage timings and cost, as JSON (speed-meter.js speedOfTurn)
+  try { db.run(`ALTER TABLE voice_turns ADD COLUMN speed TEXT`); } catch { /* already there */ }
+  // How long the speech service (Modal) was awake each day: it is paid per second awake
+  db.run(`CREATE TABLE IF NOT EXISTS speech_service_days (
+    day TEXT PRIMARY KEY,
+    awake_s REAL NOT NULL DEFAULT 0,
+    gpu TEXT
+  )`);
 
   // ── "No, I meant …" pairs, from which shortcuts are learned (Stage 4) ──
   db.run(`CREATE TABLE IF NOT EXISTS correction_pairs (
@@ -167,6 +176,51 @@ function migrate() {
     student_id INTEGER
   )`);
   try { db.run(`CREATE INDEX IF NOT EXISTS idx_resolution_app ON resolution_log(app)`); } catch {}
+
+  // ── Exams (exam/): a paper a teacher uploaded, each student's sitting of
+  // it, and that sitting's audit trail. settings_json: { timeLimitMin,
+  // readBack, punctuation }. state_json: ExamRunner.snapshot(). Each event's
+  // hash covers the one before it, so a changed or removed row shows.
+  db.run(`CREATE TABLE IF NOT EXISTS exams (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    file_name TEXT,
+    paper_json TEXT NOT NULL,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS exam_attempts (
+    id TEXT PRIMARY KEY,
+    exam_id TEXT NOT NULL,
+    student_id INTEGER,
+    student_name TEXT,
+    status TEXT NOT NULL DEFAULT 'in_progress',
+    state_json TEXT NOT NULL DEFAULT '{}',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    paper_json TEXT
+  )`);
+  // Papers picked up from the exam folder (exam/exam-folder.js): the file they
+  // came from, its content hash, and what the teacher should check
+  for (const column of ['source_path TEXT', 'source_hash TEXT', 'warnings_json TEXT']) {
+    try { db.run(`ALTER TABLE exams ADD COLUMN ${column}`); } catch { /* already there */ }
+  }
+  // The paper as it was when the sitting started (added 13 Oct 2026)
+  try { db.run(`ALTER TABLE exam_attempts ADD COLUMN paper_json TEXT`); } catch { /* already there */ }
+  db.run(`CREATE TABLE IF NOT EXISTS exam_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    item TEXT,
+    heard TEXT,
+    written TEXT,
+    said TEXT,
+    detail TEXT,
+    hash TEXT NOT NULL
+  )`);
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_exam_events_attempt ON exam_events(attempt_id, id)`); } catch {}
 
   if (!getDeviceState('prefix_attribution_migrated')) {
     // Once: commands saved under the old prefix scheme get their student.
@@ -430,6 +484,10 @@ export function deleteStudent(id) {
   run('DELETE FROM correction_pairs WHERE student_id = ?', [id]);
   run('DELETE FROM resolution_log WHERE student_id = ?', [id]);
   run('DELETE FROM student_profiles WHERE student_id = ?', [id]);
+  for (const attempt of query('SELECT id FROM exam_attempts WHERE student_id = ?', [id])) {
+    run('DELETE FROM exam_events WHERE attempt_id = ?', [attempt.id]);
+  }
+  run('DELETE FROM exam_attempts WHERE student_id = ?', [id]);
   run('DELETE FROM students WHERE id = ?', [id]);
 
   // device_state entries that point at this student: the active-user choice,
@@ -624,11 +682,55 @@ export function recordCorrection({ student_id, heard, meant }) {
 
 // ── Voice turns (Stage 1 recognition readout) ──
 
-export function logVoiceTurn({ student_id = null, session_id = null, outcome, transcript = null, command_id = null, audio_kb = null, ms = null }) {
+/** → the new row's id */
+export function logVoiceTurn({ student_id = null, session_id = null, outcome, transcript = null, command_id = null, audio_kb = null, ms = null, speed = null }) {
   run(
-    'INSERT INTO voice_turns (student_id, session_id, outcome, transcript, command_id, audio_kb, ms) VALUES (?,?,?,?,?,?,?)',
-    [student_id, session_id, outcome, transcript == null ? null : String(transcript).slice(0, 500), command_id, audio_kb, ms]
+    'INSERT INTO voice_turns (student_id, session_id, outcome, transcript, command_id, audio_kb, ms, speed) VALUES (?,?,?,?,?,?,?,?)',
+    [student_id, session_id, outcome, transcript == null ? null : String(transcript).slice(0, 500), command_id, audio_kb, ms,
+      speed == null ? null : JSON.stringify(speed)]
   );
+  return queryOne('SELECT last_insert_rowid() AS id')?.id ?? null;
+}
+
+/** A turn's timings changed after it was saved (its reply's first sound came later). */
+export function updateVoiceTurnSpeed(id, speed) {
+  run('UPDATE voice_turns SET speed = ? WHERE id = ?', [JSON.stringify(speed), id]);
+}
+
+/** The latest timed turns since `since` (local datetime), newest first, `speed` parsed. */
+export function getSpeedTurns({ since = null, limit = 500 } = {}) {
+  const rows = since
+    ? query('SELECT id, created_at, outcome, transcript, speed FROM voice_turns WHERE speed IS NOT NULL AND created_at >= ? ORDER BY id DESC LIMIT ?', [since, limit])
+    : query('SELECT id, created_at, outcome, transcript, speed FROM voice_turns WHERE speed IS NOT NULL ORDER BY id DESC LIMIT ?', [limit]);
+  return rows.map(row => {
+    try { return { ...row, speed: JSON.parse(row.speed) }; } catch { return { ...row, speed: null }; }
+  });
+}
+
+/**
+ * A user's latest voice checks ("only my voice", voice-profile.js), newest
+ * first: each turn's `speed.speaker` ({ score, scores, match, snrDb, … }).
+ */
+export function getSpeakerChecks(studentId, { limit = 100 } = {}) {
+  const rows = query(
+    `SELECT speed FROM voice_turns WHERE student_id = ? AND speed LIKE '%"speaker":{%' ORDER BY id DESC LIMIT ?`,
+    [studentId, limit]
+  );
+  return rows.map(row => {
+    try { return JSON.parse(row.speed).speaker || null; } catch { return null; }
+  }).filter(Boolean);
+}
+
+/** Add time the speech service was awake on `day` ("YYYY-MM-DD"). */
+export function addSpeechServiceTime(day, seconds, gpu = null) {
+  if (!(seconds > 0)) return;
+  run(`INSERT INTO speech_service_days (day, awake_s, gpu) VALUES (?, ?, ?)
+       ON CONFLICT(day) DO UPDATE SET awake_s = awake_s + excluded.awake_s, gpu = COALESCE(excluded.gpu, gpu)`,
+    [day, seconds, gpu]);
+}
+
+export function getSpeechServiceTime(day) {
+  return queryOne('SELECT awake_s, gpu FROM speech_service_days WHERE day = ?', [day]) || { awake_s: 0, gpu: null };
 }
 
 /**
@@ -749,6 +851,145 @@ export function getResolutionStats({ since = null } = {}) {
 // ── Commands for Probing ──
 
 /** Fetch all commands for a student on a specific date (YYYY-MM-DD). */
+/** The student's recent AI-handled commands, newest first: what learned commands are learned from. */
+export function getRecentAiCommands(studentId, limit = 500) {
+  return query(
+    `SELECT payload, result, outcome, created_at FROM commands WHERE type='voice' AND student_id IS ? ORDER BY created_at DESC LIMIT ?`,
+    [studentId ?? null, limit],
+  );
+}
+
 export function getCommandsForStudentDate(studentId, isoDate) {
   return query(`SELECT * FROM commands WHERE student_id=? AND date(created_at)=?`, [studentId, isoDate]);
+}
+
+// ── Exams ──
+
+/** Write the database to disk now, not at the next 2-second save: an answer must not be lost. */
+export function flushDatabase() {
+  saveToFile();
+}
+
+const parseJson = (text, fallback) => { try { return JSON.parse(text); } catch { return fallback; } };
+const examRow = r => r && ({
+  ...r,
+  paper: parseJson(r.paper_json, null),
+  settings: parseJson(r.settings_json, {}),
+  warnings: parseJson(r.warnings_json, []) || [],
+  paper_json: undefined, settings_json: undefined, warnings_json: undefined,
+});
+const attemptRow = r => r && ({ ...r, state: parseJson(r.state_json, {}), paper: parseJson(r.paper_json, null), state_json: undefined, paper_json: undefined });
+
+export function insertExam({ id, title, file_name = null, paper, settings = {}, warnings = [], source_path = null, source_hash = null }) {
+  run('INSERT INTO exams (id, title, file_name, paper_json, settings_json, warnings_json, source_path, source_hash) VALUES (?,?,?,?,?,?,?,?)',
+    [id, title, file_name, JSON.stringify(paper), JSON.stringify(settings), JSON.stringify(warnings), source_path, source_hash]);
+  return getExam(id);
+}
+
+export function updateExam(id, { title, paper, settings }) {
+  const current = getExam(id);
+  if (!current) return null;
+  run(`UPDATE exams SET title = ?, paper_json = ?, settings_json = ?, updated_at = datetime('now','localtime') WHERE id = ?`, [
+    title ?? current.title,
+    JSON.stringify(paper ?? current.paper),
+    JSON.stringify(settings ?? current.settings),
+    id,
+  ]);
+  return getExam(id);
+}
+
+export function getExam(id) {
+  return examRow(queryOne('SELECT * FROM exams WHERE id = ?', [id]));
+}
+
+/** Every exam, newest first, with how many sittings it has. */
+export function getExams() {
+  return query(`SELECT e.*, (SELECT COUNT(*) FROM exam_attempts a WHERE a.exam_id = e.id) AS attempts
+                FROM exams e ORDER BY e.created_at DESC`).map(examRow);
+}
+
+/** An exam and every sitting of it, with their audit trails. */
+export function deleteExam(id) {
+  for (const attempt of query('SELECT id FROM exam_attempts WHERE exam_id = ?', [id])) {
+    run('DELETE FROM exam_events WHERE attempt_id = ?', [attempt.id]);
+  }
+  run('DELETE FROM exam_attempts WHERE exam_id = ?', [id]);
+  run('DELETE FROM exams WHERE id = ?', [id]);
+}
+
+export function insertExamAttempt({ id, exam_id, student_id = null, student_name = null, started_at, paper = null }) {
+  run('INSERT INTO exam_attempts (id, exam_id, student_id, student_name, started_at, paper_json) VALUES (?,?,?,?,?,?)',
+    [id, exam_id, student_id, student_name, started_at, paper ? JSON.stringify(paper) : null]);
+  return getExamAttempt(id);
+}
+
+export function saveExamAttemptState(id, state, { status = null, finished_at = null } = {}) {
+  run(`UPDATE exam_attempts SET state_json = ?, status = COALESCE(?, status), finished_at = COALESCE(?, finished_at) WHERE id = ?`,
+    [JSON.stringify(state), status, finished_at, id]);
+}
+
+export function getExamAttempt(id) {
+  return attemptRow(queryOne('SELECT * FROM exam_attempts WHERE id = ?', [id]));
+}
+
+export function getExamAttempts({ examId = null } = {}) {
+  return query(`SELECT a.*, e.title AS exam_title FROM exam_attempts a LEFT JOIN exams e ON e.id = a.exam_id
+                ${examId ? 'WHERE a.exam_id = ?' : ''} ORDER BY a.started_at DESC`, examId ? [examId] : []).map(attemptRow);
+}
+
+const EVENT_FIELDS = ['attempt_id', 'at', 'kind', 'item', 'heard', 'written', 'said', 'detail'];
+const eventHash = (prev, e) => createHash('sha256').update(prev + JSON.stringify(EVENT_FIELDS.map(f => e[f] ?? null))).digest('hex');
+
+/** One line of an exam's audit trail; its hash covers the line before it. */
+export function insertExamEvent(event) {
+  const e = { at: new Date().toISOString(), ...event };
+  const prev = queryOne('SELECT hash FROM exam_events WHERE attempt_id = ? ORDER BY id DESC LIMIT 1', [e.attempt_id])?.hash || '';
+  const hash = eventHash(prev, e);
+  run(`INSERT INTO exam_events (attempt_id, at, kind, item, heard, written, said, detail, hash) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [...EVENT_FIELDS.map(f => e[f] ?? null), hash]);
+  return hash;
+}
+
+export function getExamEvents(attemptId) {
+  return query('SELECT * FROM exam_events WHERE attempt_id = ? ORDER BY id', [attemptId]);
+}
+
+/** How long an attempt's audit trail is, and its last hash: kept with the sitting when it ends. */
+export function examAuditHead(attemptId) {
+  const row = queryOne('SELECT COUNT(*) AS events, (SELECT hash FROM exam_events WHERE attempt_id = ? ORDER BY id DESC LIMIT 1) AS head FROM exam_events WHERE attempt_id = ?', [attemptId, attemptId]);
+  return { events: row?.events || 0, head: row?.head || null };
+}
+
+/**
+ * Whether an attempt's audit trail is as it was written: { ok, events, brokenAt }.
+ * A changed row breaks the chain; rows removed from the end no longer match
+ * the length and last hash kept with the finished sitting.
+ */
+export function verifyExamEvents(attemptId) {
+  const events = getExamEvents(attemptId);
+  let prev = '';
+  for (const e of events) {
+    if (eventHash(prev, e) !== e.hash) return { ok: false, events: events.length, brokenAt: e.id };
+    prev = e.hash;
+  }
+  const kept = getExamAttempt(attemptId)?.state?.audit;
+  if (kept && (kept.events !== events.length || kept.head !== (prev || null))) {
+    return { ok: false, events: events.length, brokenAt: 'end' };
+  }
+  return { ok: true, events: events.length, brokenAt: null };
+}
+
+/** The exam a file in the exam folder became, if it is still there. */
+export function getExamBySourcePath(sourcePath) {
+  return examRow(queryOne('SELECT * FROM exams WHERE source_path = ? ORDER BY created_at DESC LIMIT 1', [sourcePath]));
+}
+
+/**
+ * A paper re-read from its file, before any teacher has changed it or any
+ * student has sat it: the questions are replaced, and it is unchecked again.
+ */
+export function replaceExamFromFile(id, { title, paper, warnings = [], source_hash }) {
+  run('UPDATE exams SET title = ?, paper_json = ?, warnings_json = ?, source_hash = ? WHERE id = ?',
+    [title, JSON.stringify(paper), JSON.stringify(warnings), source_hash, id]);
+  return getExam(id);
 }

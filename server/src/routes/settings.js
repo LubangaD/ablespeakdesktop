@@ -25,6 +25,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { maskSecret, readEnvFile, removeEnvValue, setEnvValue, writeEnvFile } from '../env-file.js';
 import { isSharedComputer, setSharedComputer, isGuestAccountName, currentWindowsAccountName } from '../shared-computer.js';
+import { MEASUREMENT_ID_RE, API_SECRET_RE } from '../analytics.js';
 
 const SERVER_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -161,6 +162,38 @@ export function createSettingsRouter({ aiEngine, envPath = defaultEnvPath, verif
   }
 
   router.get('/keys', (req, res) => res.json(describe()));
+
+  // ── Google Analytics (analytics.js): where usage is counted, for accounts that agreed ──
+  const analyticsStatus = () => ({
+    measurementId: process.env.GA_MEASUREMENT_ID || null,
+    secretMasked: process.env.GA_API_SECRET ? maskSecret(process.env.GA_API_SECRET) : null,
+    configured: MEASUREMENT_ID_RE.test(process.env.GA_MEASUREMENT_ID || '') && API_SECRET_RE.test(process.env.GA_API_SECRET || ''),
+  });
+  router.get('/analytics', (req, res) => res.json(analyticsStatus()));
+  router.put('/analytics', (req, res) => {
+    const measurementId = String(req.body?.measurementId ?? '').trim().toUpperCase();
+    const apiSecret = String(req.body?.apiSecret ?? '').trim();
+    if (!MEASUREMENT_ID_RE.test(measurementId)) {
+      return res.status(400).json({ error: 'The Measurement ID starts with G-, like G-AB12CD34EF. Find it in Google Analytics › Admin › Data streams.' });
+    }
+    if (apiSecret ? !API_SECRET_RE.test(apiSecret) : !process.env.GA_API_SECRET) {
+      return res.status(400).json({ error: 'Paste the API secret too: Data streams › your stream › Measurement Protocol API secrets.' });
+    }
+    try {
+      persist({ GA_MEASUREMENT_ID: measurementId, ...(apiSecret ? { GA_API_SECRET: apiSecret } : {}) });
+    } catch (err) {
+      return res.status(500).json({ error: `Couldn't save to ${resolvePath()}: ${err.message}` });
+    }
+    res.json({ ok: true, message: 'Saved. Usage is counted from now on, for accounts that agreed.', ...analyticsStatus() });
+  });
+  router.delete('/analytics', (req, res) => {
+    try {
+      persist({ GA_MEASUREMENT_ID: null, GA_API_SECRET: null });
+    } catch (err) {
+      return res.status(500).json({ error: `Couldn't update ${resolvePath()}: ${err.message}` });
+    }
+    res.json({ ok: true, message: 'Removed. Nothing is sent to Google Analytics now.', ...analyticsStatus() });
+  });
 
   router.put('/keys/:provider', async (req, res) => {
     const entry = findProvider(req.params.provider);

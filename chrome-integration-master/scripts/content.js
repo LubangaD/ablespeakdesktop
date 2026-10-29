@@ -1,3 +1,7 @@
+// AbleSpeak wraps this file so it can be added to a tab a second time (the
+// service worker does that for tabs opened before the extension was installed
+// or reloaded); top-level const/let would otherwise clash with the first copy.
+(() => {
 const createIframe = () => {
     const iframe = document.createElement('iframe');
     iframe.src = chrome.runtime.getURL('sandbox.html');
@@ -252,59 +256,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                 console.log("Smart toggle: found", input ? `input[${input.type}] name=${input.name} value=${input.value}` : 'label only');
 
-                // Strategy 1: Inject a <script> into the page's MAIN WORLD.
-                // Content scripts run in an isolated world — page JS event handlers
-                // may not see events dispatched from the content script context.
-                // By injecting a script tag, we execute in the page's own JS context.
-                try {
-                    if (input && input.id) {
-                        const script = document.createElement('script');
-                        script.textContent = `(function(){
-                            var el = document.getElementById(${JSON.stringify(input.id)});
-                            if(el){ el.click(); }
-                        })();`;
-                        document.documentElement.appendChild(script);
-                        script.remove();
-                        console.log("Smart toggle: main-world click via #id");
-                        return true;
-                    }
-
-                    // Input has no ID — use a CSS selector
-                    if (input) {
-                        const name = input.getAttribute('name');
-                        const value = input.getAttribute('value');
-                        if (name && value) {
-                            const selector = `input[name=${JSON.stringify(name)}][value=${JSON.stringify(value)}]`;
-                            const script = document.createElement('script');
-                            script.textContent = `(function(){
-                                var el = document.querySelector(${JSON.stringify(selector)});
-                                if(el){ el.click(); }
-                            })();`;
-                            document.documentElement.appendChild(script);
-                            script.remove();
-                            console.log("Smart toggle: main-world click via selector", selector);
-                            return true;
-                        }
-                    }
-                } catch (e) {
-                    console.warn("Smart toggle: main-world injection failed:", e.message);
-                }
-
-                // Strategy 2: Native .click() on the label (triggers browser's
-                // built-in label→input association which IS a trusted pathway)
-                if (label) {
-                    label.click();
-                    console.log("Smart toggle: label.click() fallback");
-                    return true;
-                }
-
-                // Strategy 3: Direct .click() on the input (content script context)
+                // A real click on the input: it toggles it and fires the input and
+                // change events the page's own code listens for (DOM events reach
+                // the page from the content script). The old <script>-tag trick was
+                // blocked without any error on sites with a strict security
+                // policy, and then nothing toggled while success was reported.
                 if (input) {
                     input.click();
-                    console.log("Smart toggle: input.click() fallback");
+                    console.log("Smart toggle: clicked", input.type);
                     return true;
                 }
-
+                if (label) {
+                    label.click();
+                    console.log("Smart toggle: clicked the label");
+                    return true;
+                }
                 return false;
             }
 
@@ -411,37 +377,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 return true;
             }
 
-            // Activate a radio/checkbox input via main-world script injection
+            // Select a radio button or tick a checkbox the way a mouse click does
+            // (see smartToggleInput: the <script>-tag trick failed silently on
+            // strict sites). A radio button that is already selected stays so.
             function activateInputMainWorld(input) {
-                try {
-                    if (input.id) {
-                        const script = document.createElement('script');
-                        script.textContent = `(function(){
-                            var el = document.getElementById(${JSON.stringify(input.id)});
-                            if(el){ el.checked = true; el.dispatchEvent(new Event('change',{bubbles:true})); el.dispatchEvent(new Event('input',{bubbles:true})); }
-                        })();`;
-                        document.documentElement.appendChild(script);
-                        script.remove();
-                        return;
-                    }
-                    const name = input.getAttribute('name');
-                    const value = input.getAttribute('value');
-                    if (name && value) {
-                        const sel = `input[name=${JSON.stringify(name)}][value=${JSON.stringify(value)}]`;
-                        const script = document.createElement('script');
-                        script.textContent = `(function(){
-                            var el = document.querySelector(${JSON.stringify(sel)});
-                            if(el){ el.checked = true; el.dispatchEvent(new Event('change',{bubbles:true})); el.dispatchEvent(new Event('input',{bubbles:true})); }
-                        })();`;
-                        document.documentElement.appendChild(script);
-                        script.remove();
-                        return;
-                    }
-                } catch (e) { /* fall through */ }
-                // Fallback: content-script context
-                input.checked = true;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.dispatchEvent(new Event('input', { bubbles: true }));
+                if (input.type === 'radio' && input.checked) return;
+                input.click();
             }
 
             function getInputLabel(el) {
@@ -983,3 +924,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 });
+})();

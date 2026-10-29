@@ -14,11 +14,13 @@ import Prompt from './Prompt';
 import Tools from './Tools';
 import Context from './Context';
 import Logs from './Logs';
+import Speed from './Speed';
 
 const TABS = [
   { id: 'prompt', label: 'Prompt', icon: 'description', Page: Prompt },
   { id: 'tools', label: 'Tools', icon: 'build', Page: Tools },
   { id: 'context', label: 'Context', icon: 'account_tree', Page: Context },
+  { id: 'speed', label: 'Speed', icon: 'speed', Page: Speed },
   { id: 'logs', label: 'Logs', icon: 'receipt_long', Page: Logs },
 ];
 
@@ -31,12 +33,12 @@ function AiStatus() {
   return (
     <div role="status" className="flex items-center gap-2 min-h-[36px] text-[13px] leading-5 self-start">
       <span className={`w-2 h-2 rounded-full shrink-0 ${DOT[tone]}`} aria-hidden="true" />
-      <span className="text-[#c9b8a5]">AI engine:</span>
+      <span className="text-[var(--ink-quiet)]">AI engine:</span>
       <span className={INK[tone]}>{!ai ? 'Unavailable' : ready ? 'Ready' : 'No API key'}</span>
       {ai && (
         <>
-          <span className="text-[#4a5466]" aria-hidden="true">·</span>
-          <span className="text-[#dae3f4]">{ai.providerName || ai.provider}{ai.model ? ` · ${ai.model}` : ''}</span>
+          <span className="text-[var(--idle)]" aria-hidden="true">·</span>
+          <span className="text-[var(--ink)]">{ai.providerName || ai.provider}{ai.model ? ` · ${ai.model}` : ''}</span>
         </>
       )}
     </div>
@@ -50,7 +52,7 @@ function ToolCount() {
   const total = catalog.total ?? (catalog.categories || []).reduce((n, cat) => n + cat.tools.length, 0);
   return (
     <p className={`${MUTED} pr-1 shrink-0`}>
-      <span className="text-[#dae3f4] tabular-nums">{total}</span> tools available
+      <span className="text-[var(--ink)] tabular-nums">{total}</span> tools available
     </p>
   );
 }
@@ -105,15 +107,15 @@ export default function DeveloperHub() {
                 to={`/developer/${id}`}
                 className={({ isActive }) => `min-h-[44px] px-3 -mb-px border-b-2 text-[14px] flex items-center gap-2 shrink-0 transition-colors ${
                   isActive
-                    ? 'border-[#f5a623] text-[#ffc880] font-medium'
-                    : 'border-transparent text-[#c9b8a5] hover:text-[#dae3f4]'
+                    ? 'border-[var(--accent)] text-[var(--accent-soft)] font-medium'
+                    : 'border-transparent text-[var(--ink-quiet)] hover:text-[var(--ink)]'
                 }`}
               >
                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{icon}</span>
                 <span>{label}</span>
                 {id === 'logs' && logState.live && (
                   <span className="relative flex w-2 h-2" aria-hidden="true">
-                    {logState.fresh && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#68d9c3] opacity-75" />}
+                    {logState.fresh && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--ok)] opacity-75" />}
                     <span className={`relative inline-flex w-2 h-2 rounded-full ${DOT.ok}`} />
                   </span>
                 )}

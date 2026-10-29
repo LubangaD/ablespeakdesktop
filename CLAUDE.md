@@ -86,7 +86,7 @@ Checked against the code on 2026-09-24.
 | UIA resolution-rate log (`resolution_log`) | Built, no real data yet |
 | Task agent (plan → act → check → re-plan, max 2 re-plans) | Partial — no whole-task end-state; undo covers typing only |
 | Click-grounding A/B harness (Gemini vs MolmoWeb) | Built, never run |
-| Agent eval harness (`tools/agent-eval`) | Built, never run |
+| Agent eval harness (`tools/agent-eval`) | 2026-10-23, 4 runs of 20 tasks: finished and said so 7 → 12. 2026-10-24, 26 tasks with strict checks, run once: 17 of 26 (the 6 new tasks all passed; Chrome 0 of 3, Word 0 of 2) (`docs/measurements/agent-eval-2026-10-23-comparison.md`) |
 | Progress-monitoring (KPI) engine — 45 tests, ~13 API routes, 4 tables | Built + committed, no real data yet |
 | Teacher dashboard (goals, aim line, trend, decision flags) | Built |
 | Student / teacher / admin split — simplified overlay; Developer Hub + Settings behind an admin PIN checked server-side (`admin-pin.js`), not reachable by voice | Built (2026-09-24) |

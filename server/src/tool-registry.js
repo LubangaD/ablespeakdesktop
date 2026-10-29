@@ -8,7 +8,11 @@
 
 import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { classifyConsequential } from './safety.js';
+import { classifyConsequential, appDependentKey } from './safety.js';
+
+// How long the safety gate waits to learn the app in front (a window list
+// from PowerShell) before it asks about the key anyway.
+const FRONT_WINDOW_WAIT_MS = 1500;
 
 /** The student whose session a tool runs in, for the resolution log. */
 const studentOf = wsHub => (wsHub?._evaluating ? null : wsHub?._attribution?.().student_id ?? null);
@@ -301,11 +305,11 @@ const TOOLS = [
   // ── Media Controls ──
   {
     name: 'media_control',
-    description: 'Control video or audio playback on the page. Actions: play, pause, toggle, seek (set time), seek_by (skip forward/back), volume (0-100), mute, unmute, rate (playback speed).',
+    description: 'Control video or audio playback on the page. Actions: play, pause, toggle, seek (set time), seek_by (skip forward/back), volume (0-100), mute, unmute, rate (playback speed), skip_ad (press Skip on a YouTube ad — use this for "skip the ad", not click_element).',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['play', 'pause', 'toggle', 'seek', 'seek_by', 'volume', 'mute', 'unmute', 'rate'], description: 'The media action to perform.' },
+        action: { type: 'string', enum: ['play', 'pause', 'toggle', 'seek', 'seek_by', 'volume', 'mute', 'unmute', 'rate', 'skip_ad'], description: 'The media action to perform.' },
         value: { type: 'string', description: 'Value for seek (seconds), seek_by (+/- seconds), volume (0-100), or rate (e.g. "1.5").' },
         xpath: { type: 'string', description: 'XPath of specific media element. If omitted, targets first video/audio on page.' },
       },
@@ -314,6 +318,144 @@ const TOOLS = [
     selector: { requiresExtension: true },
     execute: async (args, wsHub) => {
       return wsHub.sendToolToExtension('media_control', args);
+    },
+  },
+
+  // ── YouTube (ideas from the Voqal library's youtube profile, Apache-2.0) ──
+  // Offered only while the active tab is on YouTube (selector.site). Videos are
+  // opened by their ID, from the list the page itself gives (the YouTube
+  // section of the context), not by clicking a place on the page.
+  {
+    name: 'youtube_open_video',
+    description: 'Open and play a YouTube video by its ID, from the videos listed in the YouTube section of the context ("play the one by Michael Jackson", "play Thriller").',
+    parameters: {
+      type: 'object',
+      properties: { video_id: { type: 'string', description: 'The video ID from the YouTube section.' } },
+      required: ['video_id'],
+    },
+    selector: { requiresExtension: true, site: 'youtube.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('youtube', { action: 'open', videoId: args.video_id }),
+  },
+  {
+    name: 'youtube_play_result',
+    description: 'Play the Nth video on the YouTube page, counting as the person sees them: search results, or "up next" on a video page ("play the second one").',
+    parameters: {
+      type: 'object',
+      properties: { number: { type: 'integer', description: '1 for the first video, 2 for the second, and so on.' } },
+      required: ['number'],
+    },
+    selector: { requiresExtension: true, site: 'youtube.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('youtube', { action: 'open_index', index: args.number }),
+  },
+  {
+    name: 'youtube_next_video',
+    description: 'Play the next video on YouTube (the playlist\'s next, or the first one up next).',
+    parameters: { type: 'object', properties: {} },
+    selector: { requiresExtension: true, site: 'youtube.com' },
+    execute: async (_args, wsHub) => wsHub.sendToolToExtension('youtube', { action: 'next' }),
+  },
+  {
+    name: 'youtube_previous_video',
+    description: 'Go back to the previous video on YouTube.',
+    parameters: { type: 'object', properties: {} },
+    selector: { requiresExtension: true, site: 'youtube.com' },
+    execute: async (_args, wsHub) => wsHub.sendToolToExtension('youtube', { action: 'previous' }),
+  },
+  {
+    // The Voqal library's youtube/tools/seek_video
+    name: 'youtube_seek',
+    description: 'Move through the YouTube video playing: `seconds` forward (negative: back), or `to` a time in seconds from the start (0 = the beginning).',
+    parameters: {
+      type: 'object',
+      properties: {
+        seconds: { type: 'number', description: 'How far to move: 30 = forward 30 s, -10 = back 10 s.' },
+        to: { type: 'number', description: 'A time in the video, in seconds from the start. Use this or seconds.' },
+      },
+    },
+    selector: { requiresExtension: true, site: 'youtube.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('youtube', args.to != null && args.to !== '' && Number.isFinite(Number(args.to))
+      ? { action: 'seek', to: Number(args.to) }
+      : { action: 'seek', by: Number(args.seconds) || 10 }),
+  },
+  {
+    name: 'youtube_skip_sponsor',
+    description: 'Skip the sponsor part of the YouTube video playing (the parts viewers marked on SponsorBlock: sponsor reads, self-promotion, subscribe reminders).',
+    parameters: { type: 'object', properties: {} },
+    selector: { requiresExtension: true, site: 'youtube.com' },
+    execute: async (_args, wsHub) => {
+      const state = await wsHub.sendToolToExtension('youtube', { action: 'state' });
+      if (state?.status !== 'success' || state.page !== 'watch' || !state.videoId) return { status: 'error', message: 'No YouTube video is playing.' };
+      const { sponsorSegments, segmentToSkip, nextSegment, CATEGORY_NAMES } = await import('./sponsorblock.js');
+      const segments = await sponsorSegments(state.videoId);
+      if (!segments.length) return { status: 'error', message: 'No one has marked a sponsor in this video.' };
+      const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      const skip = segmentToSkip(segments, state.currentTime);
+      if (!skip) {
+        const next = nextSegment(segments, state.currentTime);
+        return { status: 'success', message: next ? `There’s no sponsor right now. The next one is at ${clock(next.start)}.` : 'There are no more sponsors in this video.' };
+      }
+      const moved = await wsHub.sendToolToExtension('youtube', { action: 'seek', to: skip.end });
+      return moved?.status === 'success'
+        ? { status: 'success', message: `Skipped the ${CATEGORY_NAMES[skip.category] || 'sponsor'}.`, at: moved.at }
+        : moved;
+    },
+  },
+
+  // ── Gmail (after the Voqal library's gmail profile, Apache-2.0) ──
+  // Ids are the ones in the Gmail part of the AI's context. Nothing here sends.
+  {
+    name: 'gmail_open_email',
+    description: 'Open an email in Gmail by its id, and get its whole text (each message in the thread) to read out or summarise.',
+    parameters: { type: 'object', properties: { id: { type: 'string', description: 'The email\'s id from the Gmail list.' } }, required: ['id'] },
+    selector: { requiresExtension: true, site: 'mail.google.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('gmail', { action: 'open', id: args.id }),
+  },
+  {
+    name: 'gmail_back_to_inbox',
+    description: 'Go back from an open email to the Gmail inbox.',
+    parameters: { type: 'object', properties: {} },
+    selector: { requiresExtension: true, site: 'mail.google.com' },
+    execute: async (_args, wsHub) => wsHub.sendToolToExtension('gmail', { action: 'back' }),
+  },
+  {
+    name: 'gmail_select_emails',
+    description: 'Select (tick) these emails in the Gmail list by their ids; every other email is unticked. Do this before gmail_mark_selected or gmail_delete_selected.',
+    parameters: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' }, description: 'The ids of the emails to select.' } }, required: ['ids'] },
+    selector: { requiresExtension: true, site: 'mail.google.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('gmail', { action: 'select', ids: Array.isArray(args.ids) ? args.ids : [args.ids] }),
+  },
+  {
+    name: 'gmail_mark_selected',
+    description: 'Mark the selected emails (or the open email) as read or unread, or archive them.',
+    parameters: { type: 'object', properties: { as: { type: 'string', enum: ['read', 'unread', 'archive'] } }, required: ['as'] },
+    selector: { requiresExtension: true, site: 'mail.google.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('gmail', { action: 'mark', as: args.as }),
+  },
+  {
+    // "delete" in its name: the person is asked to confirm first (safety.js)
+    name: 'gmail_delete_selected',
+    description: 'Delete the selected emails (or the open email). The person is asked to confirm first.',
+    parameters: { type: 'object', properties: {} },
+    selector: { requiresExtension: true, site: 'mail.google.com' },
+    execute: async (_args, wsHub) => wsHub.sendToolToExtension('gmail', { action: 'mark', as: 'delete' }),
+  },
+  {
+    name: 'gmail_draft_reply',
+    description: 'Write a reply to the open email in Gmail\'s reply box, without sending it. Only when the person asks for a reply.',
+    parameters: { type: 'object', properties: { text: { type: 'string', description: 'The reply, as the person would write it.' } }, required: ['text'] },
+    selector: { requiresExtension: true, site: 'mail.google.com' },
+    execute: async (args, wsHub) => wsHub.sendToolToExtension('gmail', { action: 'draft_reply', text: String(args.text || '') }),
+  },
+
+  // ── Notepad (after the Voqal library's notepad profile, Apache-2.0) ──
+  {
+    name: 'set_document_text',
+    description: 'Replace all the text in the Notepad document in front with this text: for the edits the person asks for (add, change, remove, rewrite, fix). Write the whole new text, keeping every part they did not ask to change. "Undo that" puts the old text back.',
+    parameters: { type: 'object', properties: { text: { type: 'string', description: 'The whole new text of the document.' } }, required: ['text'] },
+    selector: { app: 'notepad' },
+    execute: async (args) => {
+      const { setDocumentText } = await import('./document-text.js');
+      return setDocumentText(args.text);
     },
   },
 
@@ -355,67 +497,49 @@ const TOOLS = [
   // ── Element Interaction (critical for voice commands) ──
   {
     name: 'click_element',
-    description: 'Click an element on the current page. Use the xpath from the visible interactive elements list, OR provide a label to search for. This is the PRIMARY way to interact with web pages.',
+    description: 'Click an element on the current page. Give the xpath from the visible interactive elements list AND the label (the words on the element), so the right element is still found if the xpath no longer matches. This is the PRIMARY way to interact with web pages.',
     parameters: {
       type: 'object',
       properties: {
         xpath: { type: 'string', description: 'The XPath of the element to click (from the viewport elements list).' },
-        label: { type: 'string', description: 'Text label of the element to click. Used as fallback if xpath is not provided.' },
+        label: { type: 'string', description: 'The words on the element, e.g. "Sign Up". Used to find it when the xpath is missing or no longer matches.' },
       },
     },
     selector: { requiresExtension: true },
     execute: async (args, wsHub) => {
-      let xpath = args.xpath;
-
-      // If label provided but no xpath, resolve label → xpath from viewport elements
-      if (!xpath && args.label) {
-        const elements = wsHub.browserContext?.pageContext?.viewportElements || [];
-        const lower = args.label.toLowerCase();
-        const match = elements.find(el =>
-          el.label && el.label.toLowerCase().includes(lower)
-        );
-        if (match) xpath = match.xpath;
+      if (!args.xpath && !clickWords(args.label).length) {
+        return { status: 'error', message: 'Element not found: no xpath or label given' };
       }
 
+      // The click runs in the page itself. ('javascript' runs in the
+      // extension's sandbox on a COPY of the page: an xpath never matched
+      // there, and a click on the copy did nothing.)
+      const reply = await wsHub.sendToolToExtension('execute_script', clickScript(args));
+      if (reply?.timedOut) return reply;
+      const done = reply?.value;
+
+      if (done?.status === 'success') {
+        // A link that opens a new tab is opened here instead: Chrome blocks
+        // a new tab that no real click asked for
+        if (done.href) {
+          await wsHub.sendToolToExtension('open_url', { url: done.href });
+          return { status: 'success', message: `Opening ${spokenPageName(done.href, done.label)}.`, url: done.href };
+        }
+        return { status: 'success', message: `Clicked ${done.label ? `“${done.label}”` : 'it'}.` };
+      }
+      if (done?.status === 'error') return done;
+
+      // The page does not allow scripts to be run this way (its security
+      // policy), or cannot be scripted at all. The extension's own click
+      // still works on the first kind; it needs an xpath and cannot report back.
+      const xpath = args.xpath || xpathForLabel(wsHub.browserContext?.pageContext?.viewportElements, args.label);
       if (!xpath) {
-        return { status: 'error', message: `Element not found: ${args.label || 'no xpath provided'}` };
+        return { status: 'error', message: `Element not found: ${args.label || args.xpath}` };
       }
-
-      // Smart click: dispatch mouse events, and for <a> elements extract the raw href
-      const code = `(function(){
-        var el = document.evaluate(${JSON.stringify(xpath)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        if (!el) return JSON.stringify({action:'click',error:'element not found'});
-        el.scrollIntoView({block:'center'});
-        ['mousedown','mouseup','click'].forEach(function(t){
-          el.dispatchEvent(new MouseEvent(t, {bubbles:true,cancelable:true,view:window}));
-        });
-        var a = el.closest('a[href]') || (el.tagName === 'A' && el.getAttribute('href') ? el : null);
-        if (a && a.getAttribute('href') && !a.getAttribute('href').startsWith('javascript:')) {
-          return JSON.stringify({action:'click',rawHref:a.getAttribute('href')});
-        }
-        return JSON.stringify({action:'click',clicked:true});
-      })()`;
-
-      const result = await wsHub.sendToolToExtension('javascript', code);
-
-      // If the click was on an <a> link, resolve the URL server-side and navigate
-      try {
-        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
-        if (parsed?.rawHref) {
-          let fullUrl = parsed.rawHref;
-          if (!fullUrl.startsWith('http')) {
-            // Resolve relative URL using the known page URL from browser context
-            const pageUrl = wsHub.browserContext?.pageContext?.url || '';
-            try { fullUrl = new URL(parsed.rawHref, pageUrl).href; } catch {}
-          }
-          if (fullUrl.startsWith('http')) {
-            await wsHub.sendToolToExtension('open_url', { url: fullUrl });
-            return { status: 'success', message: `Clicked and navigated to: ${fullUrl.substring(0, 80)}` };
-          }
-        }
-      } catch {}
-
-      return result;
+      console.log(`[Tools] click_element: page refused the script (${String(done ?? reply?.message ?? 'no reply').slice(0, 80)}) — using the extension's own click`);
+      const fallback = await wsHub.sendToolToExtension('javascript', `(${JSON.stringify({ action: 'click', xpath })})`);
+      if (fallback?.status === 'error') return fallback;
+      return { status: 'success', message: 'Clicked.' };
     },
   },
   {
@@ -653,6 +777,17 @@ const TOOLS = [
 
   // ── Conversational ──
   {
+    // From the Voqal library's default profile (voqal/tools/ignore, Apache-2.0)
+    name: 'ignore',
+    description: 'Ignore what was heard because it was not said to you: song lyrics, a video or TV playing, other people talking, a cough, or empty or garbled words. Nothing happens and nothing is said. Never use it for a real request, even an unclear one.',
+    parameters: {
+      type: 'object',
+      properties: { reason: { type: 'string', description: 'A few words on why, for the log (e.g. "song lyrics").' } },
+    },
+    selector: {},
+    execute: async (args) => ({ status: 'success', ignored: true, reason: String(args?.reason || '').slice(0, 80) }),
+  },
+  {
     name: 'answer_question',
     description: 'Respond to the user with spoken text. Use this when the user asks a question or when you want to provide information without performing a browser action.',
     parameters: {
@@ -668,6 +803,21 @@ const TOOLS = [
       return { status: 'success', text: args.text, spoken: true };
     },
   },
+  {
+    // Like Google's AI mode: a live Google search, answered out loud with its sources
+    name: 'web_answer',
+    description: 'Answer a question from a live Google search, out loud, with sources: people, places, organisations, news, weather, prices, scores, dates and other facts, or whenever the person asks to search, google or look up a question. Give the whole question, with names from the conversation filled in. No browser needed.',
+    parameters: {
+      type: 'object',
+      properties: { question: { type: 'string', description: 'The whole question, e.g. "Who is Derrick Lubanga?"' } },
+      required: ['question'],
+    },
+    selector: {},
+    execute: async (args) => {
+      const { webAnswer } = await import('./web-answer.js');
+      return webAnswer(args.question);
+    },
+  },
 
   // ── System / Desktop Control (no extension needed) ──
   {
@@ -676,7 +826,7 @@ const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['play_pause', 'next', 'previous', 'stop'], description: 'The media action to perform.' },
+        action: { type: 'string', enum: ['play', 'pause', 'play_pause', 'next', 'previous', 'stop'], description: 'The media action to perform. Use "play" or "pause" for what the person said; "play_pause" only toggles.' },
         app_name: { type: 'string', description: 'Target application, e.g. "spotify" or "vlc". STRONGLY RECOMMENDED whenever the user names the app. Omit only for generic commands like "pause the music".' },
       },
       required: ['action'],
@@ -861,7 +1011,32 @@ const TOOLS = [
       // read_text alone reads the document in front ("read this paragraph").
       if (!args.ref && !args.name && args.action !== 'read_text') return { status: 'error', message: "Give a ref from uia_query or the control's name." };
       const { actOnElement } = await import('./screen-model.js');
-      return actOnElement({ ...args, app: args.app_name, studentId: studentOf(wsHub) });
+      const result = await actOnElement({ ...args, app: args.app_name, studentId: studentOf(wsHub) });
+      // "Open <file>" by name in a folder window: the file itself, by its path
+      if (result.notFound && args.name && !args.ref && (!args.action || args.action === 'invoke')) {
+        const { openFileInFolderWindow } = await import('./system-tools.js');
+        const opened = await openFileInFolderWindow(args.name, args.app_name).catch(() => null);
+        if (opened) return opened;
+      }
+      return result;
+    },
+  },
+  {
+    name: 'save_document_as',
+    description: 'Save the document in the app in front under a new name, through the app\'s own Save As dialog: "save this as homework", "save it as notes in Documents". Opens the dialog, fills in the full path, presses Enter and checks the file is there. Never replaces an existing file unless replace is true, which needs the person to have said so.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The file name, e.g. "homework" or "notes.txt".' },
+        folder: { type: 'string', description: 'Documents, Downloads, Desktop, Pictures, Music, Videos, or a full path. Leave out to save where the dialog opens.' },
+        replace: { type: 'boolean', description: 'Replace a file of the same name. Only when the person said to.' },
+      },
+      required: ['name'],
+    },
+    selector: {},
+    execute: async (args) => {
+      const { saveDocumentAs } = await import('./system-tools.js');
+      return saveDocumentAs(args);
     },
   },
   {
@@ -939,7 +1114,13 @@ const TOOLS = [
       // By name: act through the control's accessibility action first.
       if (args.name && plainClick) {
         const result = await actOnElement({ app: args.app_name, name: args.name, studentId });
-        if (result.status === 'success' || result.notFound || result.code === 'MINIMIZED') return result;
+        if (result.notFound) {
+          // "Open <file>" in a folder window: the file itself, by its path
+          const { openFileInFolderWindow } = await import('./system-tools.js');
+          const opened = await openFileInFolderWindow(args.name, args.app_name).catch(() => null);
+          return opened || result;
+        }
+        if (result.status === 'success' || result.code === 'MINIMIZED') return result;
         // Found, but it would not take the action: click where it is.
         if (result.element?.rect && ['NOT_SUPPORTED', 'FAILED'].includes(result.code)) {
           const [x, y, w, h] = result.element.rect;
@@ -947,6 +1128,30 @@ const TOOLS = [
           return { ...clicked, message: `Clicked "${result.element.name}"` };
         }
         // The screen model could not read the window: use the older scan.
+      }
+
+      // A double-click by name (open a file or icon): find it through the
+      // screen model too. The older scan missed Explorer's files, so "open
+      // ablespeak-eval.txt" found nothing (agent eval, 24 Oct 2026). An item
+      // that can be opened through its own action (Explorer's files support
+      // invoke) is opened that way; otherwise it is double-clicked where it is.
+      if (args.name && args.double_click && (args.button || 'left') === 'left') {
+        // In a folder window, a file is opened by its path (Explorer hides extensions)
+        const { openFileInFolderWindow } = await import('./system-tools.js');
+        const opened = await openFileInFolderWindow(args.name, args.app_name).catch(() => null);
+        if (opened) return opened;
+        const { getScreenModel, findElement } = await import('./screen-model.js');
+        const model = await getScreenModel({ app: args.app_name, maxElements: 400, restore: true }).catch(() => null);
+        const found = model?.status === 'success' ? findElement(model, args.name, { type: args.type }) : null;
+        if (found?.actions?.includes('invoke')) {
+          const opened = await actOnElement({ app: args.app_name, ref: found.ref, action: 'invoke', studentId });
+          if (opened.status === 'success') return { ...opened, message: `Opened "${found.name}"` };
+        }
+        if (found?.rect) {
+          const [x, y, w, h] = found.rect;
+          const clicked = await mouseClick(x + w / 2, y + h / 2, 'left', true);
+          return { ...clicked, message: `Double-clicked "${found.name}"` };
+        }
       }
 
       // A bare screen position (usually read off the screenshot) is a pixel,
@@ -1186,6 +1391,116 @@ export function linkWords(label) {
   return String(label || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w && !FILLER.has(w));
 }
 
+/** The words that name an element: "the sign up button" → sign, up. */
+export function clickWords(label) {
+  const FILLER = new Set(['the', 'a', 'an', 'button', 'buttons', 'link', 'tab', 'icon', 'option', 'click', 'press', 'on', 'please']);
+  return String(label || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w && !FILLER.has(w));
+}
+
+/** The xpath of the element on screen that carries every word of the label. */
+export function xpathForLabel(elements, label) {
+  const words = clickWords(label);
+  if (!words.length) return null;
+  const match = (elements || []).find(el => {
+    const have = String(el.label || '').toLowerCase().split(/[^a-z0-9]+/);
+    return words.every(w => have.includes(w));
+  });
+  return match?.xpath || null;
+}
+
+/**
+ * The script click_element runs in the page. It finds the element by xpath,
+ * or by its words when the xpath is missing, matches nothing, or matches
+ * something that does not carry those words; then clicks it and says what it
+ * clicked. A link that opens a new tab is returned as `href` and not clicked.
+ */
+export function clickScript({ xpath, label } = {}) {
+  return `(function(){
+    var xpath = ${JSON.stringify(xpath || '')};
+    var words = ${JSON.stringify(clickWords(label))};
+    var norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };
+    var nameOf = function (el) {
+      return norm([el.getAttribute('aria-label'), el.innerText, el.value, el.getAttribute('title'), el.getAttribute('placeholder'), el.getAttribute('alt')].join(' '));
+    };
+    var carries = function (name) { var have = name.split(' '); return words.every(function (w) { return have.indexOf(w) !== -1; }); };
+    var shown = function (el) {
+      var r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return false;
+      var s = getComputedStyle(el);
+      return s.display !== 'none' && s.visibility !== 'hidden';
+    };
+    var byXPath = null;
+    if (xpath) {
+      try { byXPath = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) {}
+    }
+    var el = byXPath;
+    if (words.length && !(el && carries(nameOf(el)))) {
+      var best = null, bestScore = -Infinity, said = words.join(' ');
+      document.querySelectorAll('a[href], button, input:not([type="hidden"]), select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [onclick], [tabindex]:not([tabindex="-1"])').forEach(function (c) {
+        if (!shown(c)) return;
+        var name = nameOf(c);
+        if (!carries(name)) return;
+        var r = c.getBoundingClientRect();
+        var score = (name === said ? 50 : 0) + (r.bottom > 0 && r.top < innerHeight ? 20 : 0) - Math.min(name.length, 200) / 50;
+        if (score > bestScore) { bestScore = score; best = c; }
+      });
+      el = best || byXPath;
+    }
+    if (!el) return { status: 'error', message: 'Element not found on this page: ' + (words.join(' ') || xpath) };
+    var label = String(el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { status: 'error', message: '"' + label + '" is switched off on this page right now.' };
+    var a = el.closest('a[href]');
+    var href = a ? (a.getAttribute('href') || '') : '';
+    if (a && a.target === '_blank' && href && href.charAt(0) !== '#' && !/^javascript:/i.test(href)) {
+      return { status: 'success', href: a.href, label: label };
+    }
+    el.scrollIntoView({ block: 'center' });
+    if (typeof el.focus === 'function') { try { el.focus({ preventScroll: true }); } catch (e) {} }
+    ['mousedown', 'mouseup'].forEach(function (t) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+    });
+    if (typeof el.click === 'function') el.click();
+    else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return { status: 'success', clicked: true, label: label };
+  })()`;
+}
+
+// Tools the AI almost never needs (none was used in 288 AI commands up to
+// 17 Oct 2026), sent with a command only when its words ask for them. Each
+// tool sent makes every request bigger and slower: a one-step command took
+// 0.92 s with 17 tools and 1.55 s with all 56 (median of 3, measured).
+export const ON_REQUEST = {
+  duplicate_tab: /\bduplicate\b|\bcopy (this|the) tab\b/,
+  pin_tab: /\b(un)?pin\b/,
+  mute_tab: /\b(un)?mute\b|\bsilence\b/,
+  find_tab: /\btabs?\b/,
+  list_tabs: /\btabs?\b/,
+  zoom_tab: /\bzoom\b|\bbigger\b|\bsmaller\b|\blarger\b|\bmagnif/,
+  focus_next: /\bnext\b.*\b(field|box|button|item|link|control)\b/,
+  focus_prev: /\b(previous|last|back)\b.*\b(field|box|button|item|link|control)\b/,
+  right_click: /\bright[- ]?click\b|\bcontext menu\b/,
+  take_screenshot: /\bscreen ?shot\b|\bcapture\b|\bsnip\b/,
+  get_page_state: /\btabs?\b|\bpage state\b/,
+  execute_javascript: /\bjava ?script\b|\bscript\b/,
+  list_running_apps: /\b(apps?|programs?|applications?|windows?)\b.*\b(open|running)\b|\bwhat('s| is) open\b/,
+  switch_ai_provider: /\b(provider|openai|gpt|claude|anthropic|gemini|ai model)\b/,
+  set_silence_timeout: /\b(silence|timeout|pause length|wait (longer|less))\b/,
+  clear_chat_history: /\b(clear|delete|forget|reset)\b.*\b(chat|history|conversation)\b/,
+};
+
+// Words that mean a site's tools may be needed even from another page
+const SITE_WORDS = { 'youtube.com': /\b(youtube|videos?|watch|play)\b/ };
+
+/** Whether a page's address is on a site: "https://m.youtube.com/watch?v=1" is on "youtube.com". */
+export function onSite(url, site) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === site || host.endsWith(`.${site}`);
+  } catch {
+    return false;
+  }
+}
+
 // ── Tool Registry Class ──
 
 export class ToolRegistry {
@@ -1207,12 +1522,21 @@ export class ToolRegistry {
   /**
    * Get tools available for the current context
    */
-  getToolsForContext(context = {}) {
+  getToolsForContext(context = {}, said = '') {
     const hasExtension = context.extensionConnected !== false;
+    const words = typeof said === 'string' ? said.toLowerCase() : '';
 
     return this.tools
       .filter(tool => {
         if (tool.selector.requiresExtension && !hasExtension) return false;
+        // With the person's words: rarely needed tools only when the words ask for them
+        if (words && ON_REQUEST[tool.name] && !ON_REQUEST[tool.name].test(words)) return false;
+        // A site's own tools only while the active tab is on that site (YouTube),
+        // or when the words are about it ("play Thriller": search, then pick one)
+        if (tool.selector.site && !onSite(context.activeTab?.url, tool.selector.site)
+            && !(words && SITE_WORDS[tool.selector.site]?.test(words))) return false;
+        // An app's own tools only while that app is in front (Notepad)
+        if (tool.selector.app && String(context.screenModel?.app || '').toLowerCase().replace(/\.exe$/, '') !== tool.selector.app) return false;
         return true;
       })
       .map(tool => ({
@@ -1230,6 +1554,10 @@ export class ToolRegistry {
     if (!tool) {
       return { status: 'error', error: `Unknown tool: ${name}` };
     }
+    // During an exam no tool runs: nothing may open, search, type or click
+    if (this.examLock?.()) {
+      return { status: 'error', error: 'An exam is running, so AbleSpeak\'s tools are switched off until it ends.' };
+    }
 
     // ── Consequential-action gate ──────────────────────────────────────────
     // For a student who cannot grab a mouse to undo, an irreversible action
@@ -1240,7 +1568,7 @@ export class ToolRegistry {
     // "yes") bypasses the gate. This is the single chokepoint for BOTH the
     // fast path and the AI tool-calling loop.
     if (!opts.confirmed) {
-      const consequence = classifyConsequential(name, await this._resolveGateArgs(name, args, wsHub));
+      const consequence = classifyConsequential(name, await this._resolveGateArgs(name, args, wsHub), await this._gateWhere(name, args, wsHub));
       if (consequence) {
         if (wsHub) {
           wsHub._pendingConfirmation = { tool: name, args, prompt: consequence.prompt, id: consequence.id };
@@ -1262,6 +1590,33 @@ export class ToolRegistry {
       console.error(`[ToolRegistry] Error executing ${name}:`, err.message);
       return { status: 'error', error: err.message };
     }
+  }
+
+  /**
+   * Where a key that sends or deletes only in some apps (safety.js) would
+   * land: the app in front and the browser's active tab. Looked up only for
+   * those keys; a lookup that fails or is slow leaves it unknown, and then
+   * the gate asks anyway.
+   */
+  async _gateWhere(name, args, wsHub) {
+    // A key that answers a dialog (Enter, Y) matters only for what is in front
+    const answerKey = name === 'send_system_keys' && /^(?:enter|space|y|alt\+y)$/i.test(String(args?.keys || '').replace(/\s+/g, ''));
+    if (!appDependentKey(name, args) && !answerKey) return {};
+    const tabUrl = wsHub?.browserContext?.activeTab?.url || null;
+    // press_key_combination always goes to the browser's tab
+    if (name !== 'send_system_keys') return { tabUrl };
+    let timer;
+    const front = await Promise.race([
+      Promise.resolve().then(() => this.keyTarget()).catch(() => null),
+      new Promise(resolve => { timer = setTimeout(resolve, FRONT_WINDOW_WAIT_MS, null); }),
+    ]).finally(() => clearTimeout(timer));
+    return { frontApp: front?.process || null, frontTitle: front?.title || null, tabUrl };
+  }
+
+  /** The app send_system_keys would press keys into: { process, title } or null. */
+  async keyTarget() {
+    const { keyTargetApp } = await import('./system-tools.js');
+    return keyTargetApp();
   }
 
   /**

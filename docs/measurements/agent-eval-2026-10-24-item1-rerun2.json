@@ -1,0 +1,551 @@
+{
+  "date": "2026-10-24 00:54",
+  "label": "item1-rerun2",
+  "model": "gemini-2.5-flash",
+  "tasks": 5,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "completedAndSaid": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 6,
+      "median": 6,
+      "max": 6
+    },
+    "medianSeconds": {
+      "min": 26,
+      "median": 26,
+      "max": 26
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T21:54:34.775Z",
+      "tasks": 5,
+      "completed": 2,
+      "completionRate": 0.4,
+      "completedAndSaid": 2,
+      "completedAndSaidRate": 0.4,
+      "falseDone": 0,
+      "replanned": 3,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 6,
+      "medianSeconds": 26,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "I couldn't finish: The step intended to open the 'Documents' folder in File Explorer, but instead, a Word document named 'Document3' was opened.. I did 3 of 5 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open the 'Documents' folder in File Explorer, but instead, it opened a new document in Microsoft Word."
+            },
+            {
+              "do": "Switch to File Explorer",
+              "tool": "focus_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer is now the active application."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open the 'Documents' folder in File Explorer, but instead, a Word document named 'Document2' was opened."
+            },
+            {
+              "do": "Switch to File Explorer",
+              "tool": "focus_application",
+              "ok": true,
+              "why": "The window changed from 'Document2 - Word' to 'Home - File Explorer', which matches the expected result of switching to File Explorer."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open the 'Documents' folder in File Explorer, but instead, a Word document named 'Document3' was opened."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 26442,
+          "checks": [
+            {
+              "kind": "window",
+              "app": "notepad",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "I couldn't find an open window for \"notepad\"."
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "explorer-open-pdf",
+          "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+          "status": "failed",
+          "said": "I couldn't finish: The step intended to open 'Documents' in File Explorer, but instead, a Word document named 'Document6' was opened.. I did 3 of 5 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The File Explorer application was successfully opened, and the window title changed to 'Home - File Explorer', which is a valid starting view for File Explorer."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open 'Documents' (File Explorer), but instead, a Word document named 'Document4' was opened."
+            },
+            {
+              "do": "Switch to File Explorer",
+              "tool": "focus_application",
+              "ok": true,
+              "why": "The window changed from 'Document4 - Word' to 'Home - File Explorer', which matches the expected result of switching to File Explorer."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open 'Documents' (File Explorer), but instead, a Word document named 'Document5 - Word' was opened."
+            },
+            {
+              "do": "Switch to File Explorer",
+              "tool": "focus_application",
+              "ok": true,
+              "why": "The window changed from 'Document5 - Word' to 'Home - File Explorer', indicating that File Explorer was successfully switched to and focused."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open 'Documents' in File Explorer, but instead, a Word document named 'Document6' was opened."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 27810,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"Document6 - Word\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The Alt+F key combination should have opened the 'File' menu in Notepad, but no menu appeared on the screen.. I did 3 of 8 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to '*notepad-check.txt - Notepad', indicating Notepad was opened as intended."
+            },
+            {
+              "do": "Type hello there",
+              "tool": "system_type_text",
+              "ok": false,
+              "why": "The text 'hello there' was typed twice, resulting in 'hello therehello there' instead of 'hello there'."
+            },
+            {
+              "do": "Press Ctrl+A",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The text '22 of 22 characters' appeared, indicating that all 22 characters in the document were selected, which is the purpose of Ctrl+A."
+            },
+            {
+              "do": "Type hello there",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The text editor's value changed to 'hello there', matching the expected result of typing 'hello there'."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Save As dialog box did not open, and nothing visible changed on the screen."
+            },
+            {
+              "do": "Press Alt+F",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The Alt+F key combination should have opened the 'File' menu in Notepad, but no menu appeared on the screen."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 33210,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "spotify-search",
+          "instruction": "Open Spotify and search for Sauti Sol",
+          "status": "done",
+          "said": "I opened Spotify and searched for Sauti Sol.",
+          "steps": [
+            {
+              "do": "Open Spotify",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed from 'Document6 - Word' to 'Spotify Premium', and many Spotify-related controls appeared, indicating Spotify is open and in the foreground."
+            },
+            {
+              "do": "Press Ctrl+L",
+              "tool": "send_system_keys",
+              "ok": true,
+              "why": "The search bar, labeled 'What do you want to play?', is now focused and expanded, which aligns with the step's purpose."
+            },
+            {
+              "do": "Type Sauti Sol",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The text 'Sauti Sol' was typed into the search box, and the screen now displays search results related to 'Sauti Sol', including playlists, songs, and the artist themselves."
+            }
+          ],
+          "replans": 0,
+          "confirmations": 0,
+          "ms": 19356,
+          "checks": [
+            {
+              "kind": "control",
+              "app": "spotify",
+              "nameIncludes": "Sauti Sol",
+              "notType": [
+                "Edit",
+                "ComboBox"
+              ],
+              "ok": true,
+              "detail": "found DataItem \"sauti sol songs\""
+            }
+          ],
+          "passed": true
+        },
+        {
+          "id": "start-menu-calculator",
+          "instruction": "Open the Start menu, search for Calculator and open it",
+          "status": "done",
+          "said": "I opened Calculator.",
+          "steps": [
+            {
+              "do": "Open Calculator",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window changed from 'Spotify Premium' to 'Calculator', and the 'Calculator' window and its controls appeared on the screen, matching the expected result of opening Calculator."
+            }
+          ],
+          "replans": 0,
+          "confirmations": 0,
+          "ms": 6206,
+          "checks": [
+            {
+              "kind": "window",
+              "app": "calculator",
+              "titleIncludes": "Calculator",
+              "ok": true,
+              "detail": "window \"Calculator\""
+            }
+          ],
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T21:54:34.775Z",
+  "completed": 2,
+  "completionRate": 0.4,
+  "completedAndSaid": 2,
+  "completedAndSaidRate": 0.4,
+  "falseDone": 0,
+  "replanned": 3,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 6,
+  "medianSeconds": 26,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "I couldn't finish: The step intended to open the 'Documents' folder in File Explorer, but instead, a Word document named 'Document3' was opened.. I did 3 of 5 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open the 'Documents' folder in File Explorer, but instead, it opened a new document in Microsoft Word."
+        },
+        {
+          "do": "Switch to File Explorer",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer is now the active application."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open the 'Documents' folder in File Explorer, but instead, a Word document named 'Document2' was opened."
+        },
+        {
+          "do": "Switch to File Explorer",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The window changed from 'Document2 - Word' to 'Home - File Explorer', which matches the expected result of switching to File Explorer."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open the 'Documents' folder in File Explorer, but instead, a Word document named 'Document3' was opened."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 26442,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "notepad",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "I couldn't find an open window for \"notepad\"."
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "explorer-open-pdf",
+      "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+      "status": "failed",
+      "said": "I couldn't finish: The step intended to open 'Documents' in File Explorer, but instead, a Word document named 'Document6' was opened.. I did 3 of 5 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The File Explorer application was successfully opened, and the window title changed to 'Home - File Explorer', which is a valid starting view for File Explorer."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open 'Documents' (File Explorer), but instead, a Word document named 'Document4' was opened."
+        },
+        {
+          "do": "Switch to File Explorer",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The window changed from 'Document4 - Word' to 'Home - File Explorer', which matches the expected result of switching to File Explorer."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open 'Documents' (File Explorer), but instead, a Word document named 'Document5 - Word' was opened."
+        },
+        {
+          "do": "Switch to File Explorer",
+          "tool": "focus_application",
+          "ok": true,
+          "why": "The window changed from 'Document5 - Word' to 'Home - File Explorer', indicating that File Explorer was successfully switched to and focused."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open 'Documents' in File Explorer, but instead, a Word document named 'Document6' was opened."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 27810,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"Document6 - Word\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The Alt+F key combination should have opened the 'File' menu in Notepad, but no menu appeared on the screen.. I did 3 of 8 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to '*notepad-check.txt - Notepad', indicating Notepad was opened as intended."
+        },
+        {
+          "do": "Type hello there",
+          "tool": "system_type_text",
+          "ok": false,
+          "why": "The text 'hello there' was typed twice, resulting in 'hello therehello there' instead of 'hello there'."
+        },
+        {
+          "do": "Press Ctrl+A",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The text '22 of 22 characters' appeared, indicating that all 22 characters in the document were selected, which is the purpose of Ctrl+A."
+        },
+        {
+          "do": "Type hello there",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor's value changed to 'hello there', matching the expected result of typing 'hello there'."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Save As dialog box did not open, and nothing visible changed on the screen."
+        },
+        {
+          "do": "Press Alt+F",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The Alt+F key combination should have opened the 'File' menu in Notepad, but no menu appeared on the screen."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 33210,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "spotify-search",
+      "instruction": "Open Spotify and search for Sauti Sol",
+      "status": "done",
+      "said": "I opened Spotify and searched for Sauti Sol.",
+      "steps": [
+        {
+          "do": "Open Spotify",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed from 'Document6 - Word' to 'Spotify Premium', and many Spotify-related controls appeared, indicating Spotify is open and in the foreground."
+        },
+        {
+          "do": "Press Ctrl+L",
+          "tool": "send_system_keys",
+          "ok": true,
+          "why": "The search bar, labeled 'What do you want to play?', is now focused and expanded, which aligns with the step's purpose."
+        },
+        {
+          "do": "Type Sauti Sol",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text 'Sauti Sol' was typed into the search box, and the screen now displays search results related to 'Sauti Sol', including playlists, songs, and the artist themselves."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 19356,
+      "checks": [
+        {
+          "kind": "control",
+          "app": "spotify",
+          "nameIncludes": "Sauti Sol",
+          "notType": [
+            "Edit",
+            "ComboBox"
+          ],
+          "ok": true,
+          "detail": "found DataItem \"sauti sol songs\""
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "start-menu-calculator",
+      "instruction": "Open the Start menu, search for Calculator and open it",
+      "status": "done",
+      "said": "I opened Calculator.",
+      "steps": [
+        {
+          "do": "Open Calculator",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window changed from 'Spotify Premium' to 'Calculator', and the 'Calculator' window and its controls appeared on the screen, matching the expected result of opening Calculator."
+        }
+      ],
+      "replans": 0,
+      "confirmations": 0,
+      "ms": 6206,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "calculator",
+          "titleIncludes": "Calculator",
+          "ok": true,
+          "detail": "window \"Calculator\""
+        }
+      ],
+      "passed": true
+    }
+  ]
+}

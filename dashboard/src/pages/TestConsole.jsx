@@ -12,6 +12,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { api } from '../lib/api';
+import WebSources, { webAnswerOf } from '../components/WebSources';
 import {
   TITLE, SECTION, MUTED, BODY, PAGE, CARD, WELL, DIVIDER,
   PRIMARY, QUIET, DANGER, SMALL_QUIET, FIELD, DOT, INK,
@@ -60,6 +61,7 @@ function eventNote(msg) {
       if (msg.phase === 'plan') return `Plan: ${(msg.steps || []).map((step, i) => `${i + 1}. ${step.do}`).join('   ')}`;
       if (msg.phase === 'step') return `Step ${msg.index + 1} of ${msg.total}: ${msg.step?.do || ''}`;
       if (msg.phase === 'check' && !msg.ok) return `Step ${msg.index + 1} didn't work: ${msg.why || ''}`;
+      if (msg.phase === 'final_check' && !msg.ok) return `Not finished yet: ${msg.why || ''}`;
       if (msg.phase === 'replan') return `Trying another way: ${msg.why || ''}`;
       return null;
     default:
@@ -69,7 +71,7 @@ function eventNote(msg) {
 
 /** Whether an event note is about something that went wrong. */
 const noteIsProblem = msg =>
-  (msg.type === 'dictation_typed' && !!msg.error) || (msg.type === 'agent_progress' && msg.phase === 'check' && !msg.ok);
+  (msg.type === 'dictation_typed' && !!msg.error) || (msg.type === 'agent_progress' && ['check', 'final_check'].includes(msg.phase) && !msg.ok);
 
 const clock = time => time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
@@ -180,7 +182,7 @@ const VOICE_STATES = {
 };
 
 // A literal command or tool name: small, muted monospace
-const CODE = 'font-mono text-[12px] leading-4 text-[#c9b8a5]';
+const CODE = 'font-mono text-[12px] leading-4 text-[var(--ink-quiet)]';
 
 // A 48px target around a control drawn smaller, without moving anything.
 const HIT = "relative before:absolute before:-inset-2 before:content-['']";
@@ -565,7 +567,7 @@ export default function TestConsole() {
                   type="button"
                   onClick={() => sendCommand(phrase)}
                   disabled={!connected}
-                  className="w-full min-h-[44px] px-5 py-2.5 text-left flex items-center justify-between gap-3 hover:bg-[#18202d] transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  className="w-full min-h-[44px] px-5 py-2.5 text-left flex items-center justify-between gap-3 hover:bg-[var(--sunken)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
                   <span className={BODY}>
                     <span className="sr-only">Send </span>“{phrase}”
@@ -577,7 +579,7 @@ export default function TestConsole() {
           </ul>
 
           <div className={`px-5 py-4 border-t ${DIVIDER} shrink-0 flex items-start gap-2 ${MUTED}`}>
-            <CheckIcon className="w-4 h-4 text-[#68d9c3] shrink-0 mt-0.5" />
+            <CheckIcon className="w-4 h-4 text-[var(--ok)] shrink-0 mt-0.5" />
             <span>These are sent exactly as if the user said them.</span>
           </div>
         </aside>
@@ -595,7 +597,7 @@ export default function TestConsole() {
         >
           {isListening
             ? <StopIcon className="w-4 h-4" />
-            : <MicIcon className="w-4 h-4 text-[#68d9c3]" strokeWidth={2} />}
+            : <MicIcon className="w-4 h-4 text-[var(--ok)]" strokeWidth={2} />}
           <span>{isListening ? 'Stop' : 'Speak'}</span>
         </button>
 
@@ -617,7 +619,7 @@ export default function TestConsole() {
               onClick={() => { setInputText(''); inputRef.current?.focus(); }}
               aria-label="Clear the text"
               title="Clear text"
-              className={`${HIT} !absolute right-2 w-7 h-7 rounded-md text-[#c9b8a5] hover:text-[#dae3f4] hover:bg-[#222a37] flex items-center justify-center transition-colors`}
+              className={`${HIT} !absolute right-2 w-7 h-7 rounded-md text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--raised)] flex items-center justify-center transition-colors`}
             >
               <CloseIcon className="w-4 h-4" />
             </button>
@@ -637,7 +639,7 @@ export default function TestConsole() {
 function EmptyTranscript() {
   return (
     <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center px-6 gap-2">
-      <WaveIcon className="w-5 h-5 text-[#8b95a7]" />
+      <WaveIcon className="w-5 h-5 text-[var(--ink-faint)]" />
       <p className={`${MUTED} max-w-sm`}>
         No commands tried yet. Press Speak or type a command below, and what AbleSpeak heard and did will show here.
       </p>
@@ -697,13 +699,14 @@ function TranscriptItem({ message }) {
       <div className={`max-w-[80%] rounded-lg border ${DIVIDER} px-4 py-3`}>
         <div className="flex items-center gap-2 mb-1">
           <span className={`w-2 h-2 rounded-full shrink-0 ${message.error ? DOT.bad : DOT.ok}`} aria-hidden="true" />
-          <span className={`text-[13px] font-medium ${message.error ? INK.bad : 'text-[#dae3f4]'}`}>
+          <span className={`text-[13px] font-medium ${message.error ? INK.bad : 'text-[var(--ink)]'}`}>
             {message.error ? 'AbleSpeak (didn’t work)' : 'AbleSpeak'}
           </span>
           <time dateTime={iso} className={`${MUTED} tabular-nums`}>{shown}</time>
         </div>
 
         <div className={`${BODY} ${hasFooter ? 'mb-2.5' : ''} whitespace-pre-wrap break-words`}>{message.text}</div>
+        <WebSources result={webAnswerOf(calls)} />
 
         {hasFooter && (
           <div className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-2.5 border-t ${DIVIDER}`}>
@@ -712,7 +715,7 @@ function TranscriptItem({ message }) {
               if (!toolFailed(tc)) {
                 return (
                   <span key={i} className="inline-flex items-center gap-1.5">
-                    <WrenchIcon className="w-3.5 h-3.5 text-[#8b95a7]" />
+                    <WrenchIcon className="w-3.5 h-3.5 text-[var(--ink-faint)]" />
                     <span className={CODE}>{name}</span>
                   </span>
                 );

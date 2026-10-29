@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — Sign in</title>
+<!--
+  Sign in — the first screen until someone is signed in.
+  Ports to dashboard/src/pages/SignIn.jsx.
+
+  No frame: App.jsx draws this route bare (`bare = pathname === '/sign-in'`),
+  because the menu would offer pages that need an account.
+
+  Two things decide the design:
+
+  1. No password. A person who cannot use a keyboard cannot type one, and a
+     password read aloud in a classroom is not a secret. A six-digit code can
+     be *said* — the voice bar is listening, so "four two nine one six three"
+     fills the field.
+
+  2. Never locked out. "Not now" is a real, equal choice, not a grudging link:
+     when the internet is down a student must still be able to use their own
+     computer. The voice bar's microphone switches on either way.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,GRAD@8..144,100..1000,-200..150&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-refined.css">
+<script src="shell.js" defer></script>
+<style>
+  /* This screen stands alone, so it centres itself rather than sitting in the frame. */
+  .signin-wrap {
+    height: 100%; overflow-y: auto;
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px 24px;
+  }
+  .signin-col { width: 100%; max-width: 420px; }
+  /* The code boxes: six, each its own target, 64px tall so a shaky hand can hit one. */
+  .code-row { display: flex; gap: 8px; }
+  .code-row input {
+    flex: 1 1 0; min-width: 0; height: 64px;
+    text-align: center; font-size: 24px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: var(--as-field); color: var(--as-ink);
+    border: 1px solid var(--as-line-field); border-radius: var(--as-r);
+  }
+  .code-row input:focus { outline: none; border-color: var(--as-amber); }
+  .signin-why { display: flex; gap: 12px; }
+  .signin-why .material-symbols-outlined { font-size: 20px; color: var(--as-ok); margin-top: 2px; }
+</style>
+</head>
+<body data-bare>
+
+<div class="signin-wrap">
+  <main class="signin-col" id="main-content">
+
+    <!-- ── Who this is ── -->
+    <div class="as-row" style="gap:12px;margin-bottom:28px">
+      <span aria-hidden="true" style="width:48px;height:48px;border-radius:9999px;background:var(--as-amber-light);color:var(--as-on-amber-avatar);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span class="material-symbols-outlined" style="font-size:26px">record_voice_over</span>
+      </span>
+      <div>
+        <h1 class="as-title" id="sign-in-heading" style="font-size:24px;line-height:30px">Sign in to AbleSpeak</h1>
+        <p class="as-muted">Your words and progress follow you to any computer.</p>
+      </div>
+    </div>
+
+    <!-- ── Step 1: the email address ──
+         Shown first; once a code is sent this card is replaced by step 2. -->
+    <section class="as-card as-p-5" aria-labelledby="email-step">
+      <h2 id="email-step" class="as-section">Your email address</h2>
+      <p class="as-muted as-mt-1">
+        AbleSpeak will email a six-digit code. There is no password to remember.
+      </p>
+      <form class="as-stack as-stack--sm as-mt-3">
+        <div>
+          <label class="as-field-label" for="email">Email address</label>
+          <input class="as-field" id="email" type="email" inputmode="email" autocomplete="email"
+                 placeholder="you@school.ac.ke" style="min-height:56px">
+        </div>
+        <button type="submit" class="as-btn as-primary" style="min-height:56px;width:100%">
+          Email me a code
+        </button>
+      </form>
+
+      <!-- The other way in -->
+      <div class="as-row as-mt-3" style="gap:12px">
+        <span style="flex:1 1 auto;height:1px;background:var(--as-line)"></span>
+        <span class="as-muted">or</span>
+        <span style="flex:1 1 auto;height:1px;background:var(--as-line)"></span>
+      </div>
+      <button type="button" class="as-btn as-quiet as-mt-3" style="min-height:56px;width:100%">
+        <span class="material-symbols-outlined" style="font-size:20px" aria-hidden="true">login</span>
+        Sign in with Google
+      </button>
+      <p class="as-muted as-mt-3">
+        Your browser opens, you sign in there, and AbleSpeak comes back to the front.
+      </p>
+    </section>
+
+    <!-- ── Step 2: the code ──
+         Kept in the file so the screen shows both halves of the flow. In the app
+         this replaces the card above once the code has been sent. -->
+    <section class="as-card as-p-5 as-mt-5" aria-labelledby="code-step">
+      <div class="as-row as-row--wrap">
+        <h2 id="code-step" class="as-section">Type or say the code</h2>
+        <span class="as-spacer"></span>
+        <span class="as-status as-ok"><span class="as-dot as-ok"></span>Listening</span>
+      </div>
+      <p class="as-muted as-mt-1">
+        Sent to <span class="as-body" data-private>a.kamau@school.ac.ke</span>.
+        You can read it out: “four two nine one six three”.
+      </p>
+
+      <form class="as-mt-3">
+        <fieldset style="border:0;padding:0;margin:0">
+          <legend class="as-sr">The six-digit code from your email</legend>
+          <div class="code-row">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 1 of 6" value="4">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 2 of 6" value="2">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 3 of 6" value="9">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 4 of 6" value="1">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 5 of 6">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 6 of 6">
+          </div>
+        </fieldset>
+        <button type="submit" class="as-btn as-primary as-mt-3" style="min-height:56px;width:100%">Sign in</button>
+      </form>
+
+      <div class="as-row as-row--wrap as-mt-3">
+        <button type="button" class="as-row-action" style="padding-left:0">Send another code</button>
+        <span class="as-spacer"></span>
+        <span class="as-muted">The code lasts 10 minutes</span>
+      </div>
+    </section>
+
+    <!-- ── Not now ──
+         An equal choice, not a grudging link: nobody is locked out of their own
+         computer because the internet is down. -->
+    <section class="as-card as-p-5 as-mt-5" aria-labelledby="skip-heading">
+      <h2 id="skip-heading" class="as-section">Don’t want to sign in?</h2>
+      <p class="as-muted as-mt-1">
+        AbleSpeak works without an account. Your settings and progress stay on this
+        computer, and you can carry them as a file from Voice &amp; words.
+      </p>
+      <button type="button" class="as-btn as-quiet as-mt-3" style="min-height:56px;width:100%">
+        Not now — keep using this computer only
+      </button>
+      <p class="as-muted as-mt-3">You will be asked again the next time AbleSpeak starts.</p>
+    </section>
+
+    <!-- ── Why an account helps ── -->
+    <section class="as-mt-5" aria-labelledby="why-heading">
+      <h2 id="why-heading" class="as-section" style="margin-bottom:12px">Why sign in</h2>
+      <ul class="as-stack as-stack--sm">
+        <li class="signin-why">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <span>
+            <span class="as-body as-strong">Your words and shortcuts go with you</span>
+            <span class="as-muted" style="display:block">The same listening settings on any school computer.</span>
+          </span>
+        </li>
+        <li class="signin-why">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <span>
+            <span class="as-body as-strong">Your progress is kept safe</span>
+            <span class="as-muted" style="display:block">Dated evidence for a progress review, even if this computer is replaced.</span>
+          </span>
+        </li>
+        <li class="signin-why">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <span>
+            <span class="as-body as-strong">Still works without internet</span>
+            <span class="as-muted" style="display:block">Signing in is never needed to use the computer you are at.</span>
+          </span>
+        </li>
+      </ul>
+    </section>
+
+    <!-- What leaves the computer, said plainly on the screen that does it -->
+    <p class="as-notice as-mt-5">
+      Signing in uses Supabase in the EU, and Google if you choose it.
+      Everything else — your settings, commands and progress — stays on this computer.
+    </p>
+
+    <!-- ── Signed in ──
+         The same route once an account is in use: who it is, and the way out. -->
+    <section class="as-card as-p-5 as-mt-5" aria-labelledby="signed-in-heading">
+      <div class="as-row as-row--wrap">
+        <span class="as-avatar" aria-hidden="true">AK</span>
+        <div style="min-width:0">
+          <h2 id="signed-in-heading" class="as-section">You’re signed in</h2>
+          <p class="as-muted" data-private>a.kamau@school.ac.ke · Admin</p>
+        </div>
+        <span class="as-spacer"></span>
+        <button type="button" class="as-btn as-quiet">Sign out</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+</body>
+</html>

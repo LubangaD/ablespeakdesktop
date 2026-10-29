@@ -1,35 +1,92 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ADMIN_EVENT, setAdminToken } from './lib/api';
 import AdminGate from './components/AdminGate';
+import Avatar from './components/Avatar';
 import { useSignInFirst } from './lib/signInFirst';
 
-// Each section loads on its own, so the app opens on the page asked for
-const Home = lazy(() => import('./pages/Home'));
-const MyProgress = lazy(() => import('./pages/MyProgress'));
-const Students = lazy(() => import('./pages/Students'));
-const SpeechProfile = lazy(() => import('./pages/SpeechProfile'));
-const TestConsole = lazy(() => import('./pages/TestConsole'));
-const DeveloperHub = lazy(() => import('./pages/DeveloperHub'));
-const SettingsPage = lazy(() => import('./pages/Settings'));
-const SignIn = lazy(() => import('./pages/SignIn'));
+// Each section loads on its own, so the app opens on the page asked for.
+// An update replaces those files: a window left open from before asks for one
+// that is gone, and the whole window went blank ("Screen details", 17 Oct 2026).
+// Then the app reloads once, which fetches the new files.
+const RELOADED_FOR_UPDATE = 'ablespeak-reloaded-for-update';
+function page(load) {
+  return lazy(() => load().then(
+    mod => {
+      try { sessionStorage.removeItem(RELOADED_FOR_UPDATE); } catch {}
+      return mod;
+    },
+    err => {
+      let tried = false;
+      try {
+        tried = sessionStorage.getItem(RELOADED_FOR_UPDATE) === '1';
+        sessionStorage.setItem(RELOADED_FOR_UPDATE, '1');
+      } catch {}
+      if (tried) throw err; // still missing after a reload: PageError says so
+      window.location.reload();
+      return new Promise(() => {});
+    },
+  ));
+}
+const Home = page(() => import('./pages/Home'));
+const MyProgress = page(() => import('./pages/MyProgress'));
+const Students = page(() => import('./pages/Students'));
+const SpeechProfile = page(() => import('./pages/SpeechProfile'));
+const TestConsole = page(() => import('./pages/TestConsole'));
+const DeveloperHub = page(() => import('./pages/DeveloperHub'));
+const SettingsPage = page(() => import('./pages/Settings'));
+const SignIn = page(() => import('./pages/SignIn'));
+const Exams = page(() => import('./pages/Exams'));
+const ExamScreen = page(() => import('./pages/ExamScreen'));
+const Profile = page(() => import('./pages/Profile'));
 
-// The dashboard's sections. The person signed in sees their own pages; the
-// `admin` ones (managing users, the test console, keys, prompts, raw logs)
-// are reached through the small Admin link, need the admin PIN, and only then
-// appear in the menu.
+/** A page that breaks shows this, never a blank window. Going to another page clears it. */
+class PageError extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error) {
+    console.error('[Dashboard] A page failed to show:', error);
+  }
+  componentDidUpdate(prev) {
+    if (prev.resetKey !== this.props.resetKey && this.state.error) this.setState({ error: null });
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="max-w-xl mx-auto mt-24 p-6 rounded-xl bg-[#151f2e] border border-white/[0.08] text-[#dbe4f2]">
+        <h1 className="text-[20px] leading-7 font-semibold">This page didn’t open</h1>
+        <p className="mt-2 text-[14px] leading-5 text-[#c6b9a9]">AbleSpeak may have been updated while this window was open. Reloading usually fixes it.</p>
+        <div className="mt-4 flex items-center gap-2">
+          <button type="button" onClick={() => window.location.reload()} className="min-h-[40px] px-4 rounded-lg bg-[#f5a623] text-[#3d2600] font-semibold">Reload</button>
+          <a href="/" className="min-h-[40px] px-4 rounded-lg inline-flex items-center border border-white/[0.12] hover:bg-[#1d2736]">Go to Home</a>
+        </div>
+      </div>
+    );
+  }
+}
+
+// The dashboard's sections, in menu order, with the tier that opens each
+// (docs/AbleSpeak-Documentation.md, Part 5 "Who can open what"):
+//   user   — Home, My progress, Voice & words: everyone
+//   helper — Users, Exams: a helper or admin account, or the helper PIN
+//   admin  — Test console, Developer Hub, Settings: an admin account,
+//            an admin Windows account, or the admin PIN
+// The menu icon for each path is HOME_NAV_ICONS, below.
 const allSections = [
-  { path: '/', label: 'Home', icon: ['M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'] },
-  { path: '/progress', label: 'My progress', icon: ['M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z'] },
-  { path: '/speech', label: 'Voice & words', icon: ['M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z'] },
-  { path: '/students', label: 'Users', admin: true, helper: true, icon: ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z'] },
-  { path: '/test', label: 'Test console', admin: true, icon: ['M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'] },
-  { path: '/developer', label: 'Developer Hub', admin: true, icon: ['M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4'] },
-  { path: '/settings', label: 'Settings', admin: true, icon: [
-    'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
-    'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
-  ] },
+  { path: '/', label: 'Home' },
+  { path: '/progress', label: 'My progress' },
+  { path: '/speech', label: 'Voice & words' },
+  { path: '/students', label: 'Users', admin: true, helper: true },
+  { path: '/exams', label: 'Exams', admin: true, helper: true },
+  { path: '/test', label: 'Test console', admin: true },
+  { path: '/developer', label: 'Developer Hub', admin: true },
+  { path: '/settings', label: 'Settings', admin: true },
 ];
 const navItems = allSections.filter(s => !s.admin);
 const adminItems = allSections.filter(s => s.admin);
@@ -38,7 +95,6 @@ const adminItems = allSections.filter(s => s.admin);
 const helperItems = adminItems.filter(s => s.helper);
 const adminOnlyItems = adminItems.filter(s => !s.helper);
 
-const SENSITIVITY_LABEL = { standard: 'Standard profile', quiet: 'Quiet voice profile', noisy: 'Noisy room profile' };
 
 // Server events that change what the top bar and Home show
 const STATUS_EVENTS = ['voice_sleeping', 'voice_awake', 'voice_dismissed', 'voice_restored', 'privacy_mode', 'dictation_mode', 'extension_status'];
@@ -49,6 +105,7 @@ const STATUS_EVENTS = ['voice_sleeping', 'voice_awake', 'voice_dismissed', 'voic
  */
 function AppRoutes({ onConnectionChange, wsRef }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -87,6 +144,19 @@ function AppRoutes({ onConnectionChange, wsRef }) {
             }));
           }
 
+          // An exam: the exam screen follows it live, and opens when a sitting starts
+          if (msg.type === 'exam_state' || msg.type === 'exam_mode') {
+            window.dispatchEvent(new CustomEvent('ablespeak-exam', { detail: msg }));
+            if (msg.type === 'exam_mode' && msg.enabled) navigate('/exam');
+            if (msg.type === 'exam_mode') queryClient.invalidateQueries({ queryKey: ['liveExam'] });
+          }
+
+          // A paper was saved into the exam folder: the Exams page lists it
+          if (msg.type === 'exam_folder') {
+            queryClient.invalidateQueries({ queryKey: ['exams'] });
+            queryClient.invalidateQueries({ queryKey: ['examFolder'] });
+          }
+
           if (STATUS_EVENTS.includes(msg.type)) queryClient.invalidateQueries({ queryKey: ['status'] });
           if (msg.type === 'active_student') queryClient.invalidateQueries({ queryKey: ['activeStudent'] });
         } catch { /* ignore parse errors */ }
@@ -108,12 +178,16 @@ function AppRoutes({ onConnectionChange, wsRef }) {
   }, [navigate, onConnectionChange, queryClient, wsRef]);
 
   return (
+    <PageError resetKey={location.pathname}>
     <Suspense fallback={null}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/progress" element={<MyProgress />} />
         <Route path="/sign-in" element={<SignIn />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/students" element={<AdminGate need="helper"><Students /></AdminGate>} />
+        <Route path="/exams" element={<AdminGate need="helper"><Exams /></AdminGate>} />
+        <Route path="/exam" element={<ExamScreen />} />
         <Route path="/speech" element={<SpeechProfile />} />
         <Route path="/test" element={<AdminGate><TestConsole /></AdminGate>} />
         <Route path="/developer" element={<Navigate to="/developer/tools" replace />} />
@@ -130,24 +204,11 @@ function AppRoutes({ onConnectionChange, wsRef }) {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
+    </PageError>
   );
 }
 
 const pad = n => String(n).padStart(2, '0');
-
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** "Thu 17 Sep 2026 · 10:48" */
-function clockText(date) {
-  return `${DAYS[date.getDay()]} ${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()} · ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** The HH:MM a session started, from "YYYY-MM-DD HH:MM:SS" in local time. */
-function startTime(startedAt) {
-  const match = /\d{2}:\d{2}/.exec(startedAt?.split(' ')[1] || '');
-  return match ? match[0] : null;
-}
 
 /** Voice states worth a word in the top bar; listening normally needs none. */
 function voiceNotice(voice) {
@@ -167,180 +228,20 @@ function initials(name) {
   return (words[0] || '').slice(0, 2).toUpperCase();
 }
 
-// Who is at this computer, how their microphone is set, the time, and this computer
-function TopBar() {
-  const [now, setNow] = useState(() => new Date());
-  const { data: active } = useQuery({ queryKey: ['activeStudent'], queryFn: api.getActiveStudent, refetchInterval: 15000 });
-  const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 5000 });
-  const student = active?.student;
-  const { data: profile } = useQuery({
-    queryKey: ['profile', student?.id],
-    queryFn: () => api.getProfile(student.id),
-    enabled: !!student,
-  });
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 15000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const since = startTime(active?.startedAt);
-  const notice = voiceNotice(status?.voice);
-  const computer = status?.computer;
-
-  return (
-    <header className="h-14 bg-[#0A1628] border-b border-[rgba(255,255,255,0.12)] flex items-center justify-between gap-4 px-8 flex-shrink-0 z-10" aria-label="Session">
-      <div className="flex items-center gap-3 min-w-0">
-        <Link to="/students" className="inline-flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-[#102038] border border-[rgba(255,255,255,0.14)] text-xs text-[#EDF0F5] min-w-0 overflow-hidden hover:border-[rgba(255,255,255,0.28)] transition-colors">
-          {student ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-[#34D399] shrink-0" aria-hidden="true" />
-              <span className="font-semibold text-white truncate min-w-0">{student.name}</span>
-              <span className="text-[#94A3B8] shrink-0" aria-hidden="true">·</span>
-              <span className="text-[#94A3B8] whitespace-nowrap shrink-0">Active Session{since ? ` (${since})` : ''}</span>
-              {/* A voice notice takes the profile's room, so the name stays readable */}
-              {profile?.listening?.sensitivity && !notice && (
-                <>
-                  <span className="text-[#94A3B8] hidden xl:inline" aria-hidden="true">·</span>
-                  <span className="text-[#1D9E8A] font-medium whitespace-nowrap hidden xl:inline">{SENSITIVITY_LABEL[profile.listening.sensitivity]}</span>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <span className="w-2 h-2 rounded-full bg-[#64748B] shrink-0" aria-hidden="true" />
-              <span className="font-semibold text-white">No user chosen</span>
-              <span className="text-[#94A3B8]" aria-hidden="true">·</span>
-              <span className="text-[#94A3B8] whitespace-nowrap">Choose one on Users</span>
-            </>
-          )}
-        </Link>
-        {notice && (
-          <span role="status" className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#F5A623]/10 border border-[#F5A623]/30 text-[#F5A623] text-xs font-semibold whitespace-nowrap">
-            {notice}
-          </span>
-        )}
-      </div>
-
-      <div className="flex items-center gap-4 shrink-0">
-        <div className="text-xs text-[#94A3B8] font-mono tabular">{clockText(now)}</div>
-        {computer && (
-          <>
-            <div className="h-4 w-px bg-[rgba(255,255,255,0.12)]" aria-hidden="true" />
-            <div className="flex items-center gap-2" data-private title={`${computer} (Facilitator console)`}>
-              <div className="w-7 h-7 rounded-full bg-[#152A4A] border border-[rgba(255,255,255,0.16)] flex items-center justify-center text-xs font-semibold text-[#F5A623]" aria-hidden="true">
-                {initials(computer)}
-              </div>
-              <span className="text-xs text-[#EDF0F5] font-medium hidden xl:inline">{computer} (Facilitator console)</span>
-            </div>
-          </>
-        )}
-      </div>
-    </header>
-  );
-}
-
-/**
- * The way into Developer Hub and Settings: small, at the foot of the sidebar,
- * and behind the admin PIN. Round-trip times, ports and versions moved there
- * too (Settings shows the version) — teachers and students don't need them.
- */
-function AdminLink({ className }) {
-  return (
-    <NavLink to="/settings" className={className} aria-label="Admin pages (PIN needed)">
-      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">lock</span>
-      <span>Admin</span>
-    </NavLink>
-  );
-}
-
-// Is the dashboard talking to AbleSpeak?
-function GatewayStatus({ connected }) {
-  return (
-    <div className="p-4 border-t border-[rgba(255,255,255,0.08)] bg-[#07101E]">
-      <div className="flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2" role="status">
-          {connected ? (
-            <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#34D399] opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#34D399]" />
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full h-2.5 w-2.5 bg-[#FB7185]" aria-hidden="true" />
-          )}
-          <span className="text-[#EDF0F5] font-medium text-sm">{connected ? 'Connected' : 'Offline'}</span>
-        </div>
-        <AdminLink className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-[#94A3B8] hover:text-white hover:bg-[#102038]" />
-      </div>
-    </div>
-  );
-}
-
-function NavIcon({ paths, active }) {
-  return (
-    <svg className={`w-5 h-5 flex-shrink-0${active ? ' text-[#F5A623]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={active ? 2.2 : 2} aria-hidden="true">
-      {paths.map(d => <path key={d} strokeLinecap="round" strokeLinejoin="round" d={d} />)}
-    </svg>
-  );
-}
-
-// The navy sidebar the Students, Speech profile, Test console, Developer hub and Settings screens draw
-function Sidebar({ connected }) {
-  return (
-    <aside className="w-[260px] flex-shrink-0 bg-[#0A1628] border-r border-[rgba(255,255,255,0.12)] flex flex-col justify-between h-full z-20">
-      <div className="flex flex-col min-h-0">
-        {/* Logo and name */}
-        <div className="p-6 pb-5 border-b border-[rgba(255,255,255,0.08)]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#0F1F38] border border-[#F5A623] flex items-center justify-center flex-shrink-0">
-              <svg className="w-6 h-6 text-[#F5A623]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" x2="12" y1="19" y2="22" />
-              </svg>
-            </div>
-            <div>
-              <div className="font-heading text-lg font-bold text-white tracking-tight leading-tight">AbleSpeak</div>
-              <div className="inline-flex items-center gap-1.5 mt-0.5">
-                <span className="w-2 h-2 rounded-full bg-[#1D9E8A]" aria-hidden="true" />
-                <span className="text-xs font-medium text-[#94A3B8] tracking-wide">Tier 2 assistive AI</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <nav className="p-4 space-y-2 overflow-y-auto" aria-label="Main navigation">
-          {navItems.map(({ path, label, icon }) => (
-            <NavLink
-              key={path}
-              to={path}
-              end={path === '/'}
-              className={({ isActive }) => `flex items-center gap-3.5 px-4 h-12 rounded-xl text-sm transition-colors ${
-                isActive
-                  ? 'font-semibold text-[#F5A623] bg-[#0F1F38] border-2 border-[#F5A623]'
-                  : 'font-medium text-[#94A3B8] hover:text-white hover:bg-[#102038]'
-              }`}
-            >
-              {({ isActive }) => (
-                <>
-                  <NavIcon paths={icon} active={isActive} />
-                  <span>{label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-      </div>
-
-      <GatewayStatus connected={connected} />
-    </aside>
-  );
-}
-
-// ── Home's own frame ──
-// The Home screen (docs/design/stitch/home.html) draws a charcoal sidebar and
-// top bar in its own palette, unlike the other five screens.
-const HOME_NAV_ICONS = { '/': 'grid_view', '/progress': 'insights', '/students': 'groups', '/speech': 'tune', '/test': 'forum', '/developer': 'terminal', '/settings': 'settings' };
+// ── The frame ──
+// One sidebar and top bar for every section, in the grey-blue palette of
+// src/lib/ui.js. The screens are docs/design/ui/ (01-home.html … 10-settings.html).
+// Every section in `allSections` needs an icon here, or its menu item draws blank.
+const HOME_NAV_ICONS = {
+  '/': 'grid_view',
+  '/progress': 'insights',
+  '/speech': 'tune',
+  '/students': 'groups',
+  '/exams': 'assignment',
+  '/test': 'forum',
+  '/developer': 'terminal',
+  '/settings': 'settings',
+};
 const H_LABEL_SM = 'font-sans text-[12px] leading-4 tracking-[0.04em] font-bold';
 const H_LABEL_MD = 'font-sans text-[14px] leading-[18px] tracking-[0.02em] font-semibold';
 const SENSITIVITY_SHORT = { standard: 'Standard', quiet: 'Quiet Voice', noisy: 'Noisy Room' };
@@ -368,15 +269,15 @@ function MenuLink({ path, label, locked = false }) {
       aria-label={locked ? `${label} (locked, PIN needed)` : undefined}
       className={({ isActive }) => `min-h-[44px] px-3 py-1.5 rounded-lg flex items-center gap-3 transition-colors text-[14px] leading-5 ${
         isActive
-          ? 'bg-[#222a37] text-[#dae3f4] font-semibold shadow-[inset_3px_0_0_#f5a623]'
-          : 'text-[#c9b8a5] font-medium hover:bg-[#18202d] hover:text-[#dae3f4]'
+          ? 'bg-[var(--raised)] text-[var(--ink)] font-semibold shadow-[inset_3px_0_0_var(--accent)]'
+          : 'text-[var(--ink-quiet)] font-medium hover:bg-[var(--sunken)] hover:text-[var(--ink)]'
       }`}
     >
       {({ isActive }) => (
         <>
-          <span className={`material-symbols-outlined text-[20px] ${isActive ? 'text-[#ffc880]' : ''}`} aria-hidden="true">{HOME_NAV_ICONS[path]}</span>
+          <span className={`material-symbols-outlined text-[20px] ${isActive ? 'text-[var(--accent-soft)]' : ''}`} aria-hidden="true">{HOME_NAV_ICONS[path]}</span>
           <span className="flex-1">{label}</span>
-          {locked && <span className="material-symbols-outlined text-[16px] text-[#8b95a7]" aria-hidden="true">lock</span>}
+          {locked && <span className="material-symbols-outlined text-[16px] text-[var(--ink-faint)]" aria-hidden="true">lock</span>}
         </>
       )}
     </NavLink>
@@ -386,7 +287,7 @@ function MenuLink({ path, label, locked = false }) {
 /** A heading in the menu: the tier's name, and whether it is open or which PIN opens it. */
 function NavGroup({ title, note }) {
   return (
-    <p className="px-3 pt-4 pb-1 flex items-center justify-between text-[12px] leading-4 text-[#8b95a7]">
+    <p className="px-3 pt-4 pb-1 flex items-center justify-between text-[12px] leading-4 text-[var(--ink-faint)]">
       <span className="font-semibold uppercase tracking-[0.06em]">{title}</span>
       <span>{note}</span>
     </p>
@@ -408,11 +309,11 @@ function HomeSidebar({ connected }) {
   };
 
   return (
-    <aside className="w-[250px] flex-shrink-0 h-full bg-[#141c28]/95 z-20 flex flex-col justify-between p-4 shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+    <aside className="w-[250px] flex-shrink-0 h-full bg-[var(--sidebar)] z-20 flex flex-col justify-between p-4 shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
       <div className="flex flex-col gap-4 min-h-0">
         <div className="flex items-center gap-2.5 px-1.5 pt-1 pb-2">
           <img src="/ablespeak-logo.png" alt="" className="w-10 h-10 rounded-full shrink-0" draggable="false" />
-          <span className="font-heading text-[18px] leading-7 font-semibold text-[#dae3f4] tracking-tight">AbleSpeak</span>
+          <span className="font-heading text-[18px] leading-7 font-semibold text-[var(--ink)] tracking-tight">AbleSpeak</span>
         </div>
 
         <nav className="flex flex-col gap-1 overflow-y-auto" aria-label="Main navigation">
@@ -425,7 +326,7 @@ function HomeSidebar({ connected }) {
       </div>
 
       <div className="flex flex-col gap-3 pt-3">
-        <div className="min-h-[48px] px-3 py-1.5 rounded-lg bg-[#18202d] flex items-center justify-between">
+        <div className="min-h-[48px] px-3 py-1.5 rounded-lg bg-[var(--sunken)] flex items-center justify-between">
           <div className="flex items-center gap-1.5" role="status">
             {connected ? (
               <span className="relative flex h-2 w-2" aria-hidden="true">
@@ -433,31 +334,42 @@ function HomeSidebar({ connected }) {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-[#54ebaf]" />
               </span>
             ) : (
-              <span className="inline-flex rounded-full h-2 w-2 bg-[#ffb4ab]" aria-hidden="true" />
+              <span className="inline-flex rounded-full h-2 w-2 bg-[var(--bad)]" aria-hidden="true" />
             )}
-            <span className={`${H_LABEL_SM} text-[#dae3f4]`}>{connected ? 'Connected' : 'Offline'}</span>
+            <span className={`${H_LABEL_SM} text-[var(--ink)]`}>{connected ? 'Connected' : 'Offline'}</span>
           </div>
           {adminRole && !byAccount && (
-            <button type="button" onClick={lock} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[#d7c3ae] hover:text-[#dae3f4] hover:bg-[#222a37] ${H_LABEL_SM}`}>
+            <button type="button" onClick={lock} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--raised)] ${H_LABEL_SM}`}>
               <span className="material-symbols-outlined text-[16px]" aria-hidden="true">lock</span>
               <span>Lock</span>
             </button>
           )}
         </div>
-        <Link to="/sign-in" className="min-h-[40px] px-3 rounded-lg flex items-center gap-2 text-[13px] font-medium text-[#dae3f4] bg-[#18202d] hover:bg-[#222a37] border border-white/[0.06] transition-colors">
-          <span className="material-symbols-outlined text-[18px] text-[#ffc880]" aria-hidden="true">account_circle</span>
-          <span className="truncate">{account?.signedIn ? account.user?.email || 'Your account' : 'Sign in to your account'}</span>
-        </Link>
+        {account?.signedIn ? (
+          // The account: its photo and name, opening the Profile page
+          <Link to="/profile" className="min-h-[44px] px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 bg-[var(--sunken)] hover:bg-[var(--raised)] border border-white/[0.06] transition-colors" aria-label={`Your profile: ${account.user?.name || account.user?.email || 'your account'}`}>
+            <Avatar photo={account.user?.photo} name={account.user?.name} email={account.user?.email} size={28} />
+            <span className="flex flex-col min-w-0">
+              <span className="truncate text-[13px] font-medium text-[var(--ink)]" data-private>{account.user?.name || 'Your profile'}</span>
+              <span className="truncate text-[12px] leading-4 text-[var(--ink-quiet)]" data-private>{account.user?.email}</span>
+            </span>
+          </Link>
+        ) : (
+          <Link to="/sign-in" className="min-h-[40px] px-3 rounded-lg flex items-center gap-2 text-[13px] font-medium text-[var(--ink)] bg-[var(--sunken)] hover:bg-[var(--raised)] border border-white/[0.06] transition-colors">
+            <span className="material-symbols-outlined text-[18px] text-[var(--ink-faint)]" aria-hidden="true">account_circle</span>
+            <span className="truncate">Sign in to your account</span>
+          </Link>
+        )}
         {(me || computer) && (
           <div className="flex items-center gap-3 px-1.5 py-1.5">
-            <div className="w-8 h-8 rounded-full bg-[#ffc880] flex items-center justify-center shrink-0 text-[#452b00] text-[13px] font-semibold" aria-hidden="true">
+            <div className="w-8 h-8 rounded-full bg-[var(--sunken)] border border-[var(--line-strong)] flex items-center justify-center shrink-0 text-[var(--ink-quiet)] text-[12px] font-[640]" aria-hidden="true">
               {me ? initials(me.name) : <span className="material-symbols-outlined text-[18px]">person</span>}
             </div>
             <div className="flex flex-col min-w-0">
-              <span className={`${H_LABEL_MD} text-[#dae3f4] leading-tight truncate`} data-private>{me ? me.name : computer}</span>
-              <span className="text-[12px] leading-4 text-[#c9b8a5]">
+              <span className={`${H_LABEL_MD} text-[var(--ink)] leading-tight truncate`} data-private>{me ? me.name : computer}</span>
+              <span className="text-[12px] leading-4 text-[var(--ink-quiet)]">
                 {me ? 'On this computer' : 'No user signed in'}
-                {adminRole && <> · <span className="text-[#ffc880]">{byAccount ? 'Admin account' : adminRole === 'admin' ? 'Admin pages open' : 'Helper pages open'}</span></>}
+                {adminRole && <> · <span className="text-[var(--accent-soft)]">{byAccount ? 'Admin account' : adminRole === 'admin' ? 'Admin pages open' : 'Helper pages open'}</span></>}
               </span>
             </div>
           </div>
@@ -473,6 +385,7 @@ function HomeTopBar({ wsRef, connected }) {
   const { data: active } = useQuery({ queryKey: ['activeStudent'], queryFn: api.getActiveStudent, refetchInterval: 15000 });
   const { data: status } = useQuery({ queryKey: ['status'], queryFn: api.getStatus, refetchInterval: 5000 });
   const student = active?.student;
+  const { data: account } = useQuery({ queryKey: ['account'], queryFn: api.getAccountStatus, retry: false, refetchInterval: 60000 });
   const { data: profile } = useQuery({
     queryKey: ['profile', student?.id],
     queryFn: () => api.getProfile(student.id),
@@ -494,25 +407,25 @@ function HomeTopBar({ wsRef, connected }) {
   };
 
   return (
-    <header className="h-16 shrink-0 bg-[#141c28]/80 z-10 shadow-[0_1px_8px_rgba(0,0,0,0.04)]" aria-label="Session">
+    <header className="h-16 shrink-0 bg-[var(--topbar)] z-10 shadow-[0_1px_8px_rgba(0,0,0,0.04)]" aria-label="Session">
       <div className="h-16 w-full px-6 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
-          <Link to="/progress" className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-[#18202d] hover:bg-[#222a37] transition-colors min-w-0">
-            <span className="material-symbols-outlined text-[#ffc880] text-[20px]" aria-hidden="true">account_box</span>
+          <Link to="/progress" className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-[var(--sunken)] hover:bg-[var(--raised)] transition-colors min-w-0">
+            <span className="material-symbols-outlined text-[var(--ink-faint)] text-[20px]" aria-hidden="true">account_box</span>
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className={`${H_LABEL_MD} text-[#dae3f4] truncate`}>{student ? student.name : 'No user signed in'}</span>
-              <span className={`${H_LABEL_SM} text-[#d7c3ae]`} aria-hidden="true">•</span>
-              <span className={`text-[12px] leading-4 ${student ? 'text-[#68d9c3]' : 'text-[#c9b8a5]'} whitespace-nowrap`}>{student ? 'Signed in' : 'Sign in to Windows to start'}</span>
+              <span className={`${H_LABEL_MD} text-[var(--ink)] truncate`}>{student ? student.name : 'No user signed in'}</span>
+              <span className={`${H_LABEL_SM} text-[var(--ink-quiet)]`} aria-hidden="true">•</span>
+              <span className={`text-[12px] leading-4 ${student ? 'text-[var(--ok)]' : 'text-[var(--ink-quiet)]'} whitespace-nowrap`}>{student ? 'Signed in' : 'Sign in to Windows to start'}</span>
             </div>
           </Link>
           {listening && (
-            <div className={`hidden lg:flex items-center gap-1.5 px-3 py-1 rounded bg-[#222a37] text-[#d7c3ae] whitespace-nowrap ${H_LABEL_SM}`}>
-              <span className="material-symbols-outlined text-[#68d9c3] text-[16px]" aria-hidden="true">hearing</span>
+            <div className={`hidden lg:flex items-center gap-1.5 px-3 py-1 rounded bg-[var(--raised)] text-[var(--ink-quiet)] whitespace-nowrap ${H_LABEL_SM}`}>
+              <span className="material-symbols-outlined text-[var(--ok)] text-[16px]" aria-hidden="true">hearing</span>
               <span>{SENSITIVITY_SHORT[listening.sensitivity] || 'Standard'} · {Number(listening.pauseSeconds).toFixed(1)} s pause</span>
             </div>
           )}
           {notice && (
-            <span role="status" className={`px-3 py-1 rounded bg-[#f5a623]/20 text-[#ffc880] whitespace-nowrap ${H_LABEL_SM}`}>{notice}</span>
+            <span role="status" className={`px-3 py-1 rounded bg-[var(--accent-dim)] text-[var(--accent-soft)] whitespace-nowrap ${H_LABEL_SM}`}>{notice}</span>
           )}
         </div>
 
@@ -525,20 +438,52 @@ function HomeTopBar({ wsRef, connected }) {
             onClick={toggleOverlay}
             disabled={blocked}
             title={shown && voice?.sleeping ? 'Voice is asleep. Say “wake up” first.' : undefined}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#18202d] hover:bg-[#222a37] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-white/[0.035] hover:bg-white/[0.07] border border-[var(--line)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <span className={`${H_LABEL_SM} text-[#d7c3ae]`}>Overlay</span>
-            <span className={`w-9 h-5 rounded-full p-0.5 flex items-center ${shown ? 'bg-[#24a28e] justify-end' : 'bg-[#2d3543] justify-start'}`} aria-hidden="true">
-              <span className={`w-4 h-4 rounded-full ${shown ? 'bg-[#00382f]' : 'bg-[#d7c3ae]'}`} />
+            <span className={`${H_LABEL_SM} text-[var(--ink-quiet)]`}>Overlay</span>
+            <span className={`w-9 h-5 rounded-full p-0.5 flex items-center ${shown ? 'bg-[#1f9c89] justify-end' : 'bg-white/[0.13] justify-start'}`} aria-hidden="true">
+              <span className={`w-4 h-4 rounded-full ${shown ? 'bg-[#04201c]' : 'bg-[#d8c7b3]'}`} />
             </span>
-            <span className={`${H_LABEL_SM} text-[#dae3f4]`}>{shown == null ? '—' : shown ? 'Shown' : 'Hidden'}</span>
+            <span className={`${H_LABEL_SM} text-[var(--ink)]`}>{shown == null ? '—' : shown ? 'Shown' : 'Hidden'}</span>
           </button>
-          <div className="w-8 h-8 rounded-full bg-[#ffc880] flex items-center justify-center" title="Facilitator console" aria-hidden="true">
-            <span className="material-symbols-outlined text-[#452b00] text-[18px]">person</span>
-          </div>
+          {account?.signedIn ? (
+            <Link to="/profile" className="rounded-full focus-visible:outline-2" aria-label="Your profile" title="Your profile">
+              <Avatar photo={account.user?.photo} name={account.user?.name} email={account.user?.email} size={36} />
+            </Link>
+          ) : (
+            <Link to="/sign-in" className="w-9 h-9 rounded-full bg-[var(--sunken)] border border-[var(--line-strong)] flex items-center justify-center hover:bg-[var(--raised)]" aria-label="Sign in to your account" title="Sign in">
+              <span className="material-symbols-outlined text-[var(--ink-faint)] text-[18px]" aria-hidden="true">person</span>
+            </Link>
+          )}
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Until a signed-in person has chosen whether to share usage (Profile ›
+ * Help improve AbleSpeak), a one-line ask. Nothing is shared until they agree.
+ * "Later" hides it until AbleSpeak next opens.
+ */
+const CONSENT_LATER = 'ablespeak-consent-later';
+function ConsentPrompt() {
+  const { pathname } = useLocation();
+  const { data: account } = useQuery({ queryKey: ['account'], queryFn: api.getAccountStatus, retry: false, refetchInterval: 60000 });
+  const [later, setLater] = useState(() => { try { return sessionStorage.getItem(CONSENT_LATER) === '1'; } catch { return false; } });
+  if (!account?.signedIn || account.user?.consentAsked || later || pathname === '/profile' || pathname === '/exam') return null;
+  const dismiss = () => {
+    try { sessionStorage.setItem(CONSENT_LATER, '1'); } catch {}
+    setLater(true);
+  };
+  return (
+    <div role="region" aria-label="Help improve AbleSpeak" className="mx-8 mt-6 rounded-lg bg-[var(--sunken)] border-l-2 border-[var(--accent-soft)] px-4 py-3 flex flex-wrap items-center gap-3">
+      <p className="text-[14px] leading-5 text-[var(--ink)] flex-1 min-w-[260px]">
+        Help improve AbleSpeak: choose whether to share how you use it — never what you say. Nothing is shared until you agree.
+      </p>
+      <Link to="/profile#privacy-heading" className="inline-flex items-center min-h-[44px] px-4 rounded-[10px] text-[14px] font-[600] bg-[image:var(--accent-grad)] text-[var(--on-accent)]">Choose in your profile</Link>
+      <button type="button" onClick={dismiss} className="min-h-[44px] px-4 rounded-[10px] text-[14px] text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--raised)]">Later</button>
+    </div>
   );
 }
 
@@ -555,16 +500,17 @@ function Shell() {
     <>
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-3 focus:rounded-xl focus:bg-[#F5A623] focus:text-[#050D19] focus:font-bold"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-3 focus:rounded-xl focus:bg-[var(--accent)] focus:text-[var(--on-accent)] focus:font-bold"
       >
         Skip to main content
       </a>
-      <div className="h-full flex overflow-hidden text-[#EDF0F5] antialiased bg-[#0D1627]">
+      <div className="h-full flex overflow-hidden text-[var(--ink)] antialiased bg-[var(--page)]">
         {!bare && <HomeSidebar connected={connected} />}
 
-        <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden bg-[#0D1627]">
+        <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden bg-[var(--page)]">
           {!bare && <HomeTopBar wsRef={wsRef} connected={connected} />}
           <main id="main-content" className="relative flex-1 min-h-0 overflow-y-auto" tabIndex={-1}>
+            {!bare && <ConsentPrompt />}
             <AppRoutes onConnectionChange={setConnected} wsRef={wsRef} />
           </main>
         </div>

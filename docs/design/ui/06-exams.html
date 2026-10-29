@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — Exams</title>
+<!--
+  Exams — the teacher's side of a voice-sat exam.
+  Ports to dashboard/src/pages/Exams.jsx. Design: docs/AbleSpeak-Exam-Mode.md.
+
+  The first design file this screen has had. Exam mode is the newest part of
+  Tier 2 (13 Oct 2026) and the highest-stakes: a student's script is the record
+  of what they know, so the page is built so that a paper cannot quietly be sat
+  before anyone has read it.
+
+  That is why "check its questions" is a hard gate, not a warning:
+  `Start exam` stays disabled until a teacher has opened the paper and saved it.
+  A paper that drops into the exam folder is listed with what needs looking at —
+  a picture AbleSpeak cannot read, a question with one option, no questions
+  found — and those are listed as things to *check*, never as errors, because
+  only a teacher can tell whether the parse is right.
+
+  The page also says plainly what exam mode is not: practice and mocks only,
+  because transcription needs the internet and the audio leaves the country.
+  Hiding that from a teacher would be the real failure.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..700&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-ui.css">
+<script src="shell.js" defer></script>
+</head>
+<body data-route="/exams">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <div data-shell="sidebar"></div>
+
+  <div class="as-main-col">
+    <div data-shell="topbar"></div>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Exams</h1>
+            <p class="as-muted as-mt-1">
+              AbleSpeak reads each question aloud and writes down the student’s spoken
+              answers exactly as said. During an exam the AI assistant, the web and
+              every other tool are switched off. Afterwards, download the script for marking.
+            </p>
+          </header>
+
+          <!-- ── An exam running now ──
+               Only one exam runs on a computer at a time, so this is a single
+               banner, and the one action is to open the screen the student sees. -->
+          <div class="as-card as-p-4 as-row as-row--wrap" role="status">
+            <span class="as-dot as-dot--lg as-ok"></span>
+            <span class="as-body">
+              <strong data-private>Amina Kamau</strong> is sitting
+              Form 2 Biology — End of Term 2 — 7 of 12 answered.
+            </span>
+            <span class="as-spacer"></span>
+            <a href="07-exam-screen.html" class="as-btn as-primary">Open the exam screen</a>
+          </div>
+
+          <!-- ── The exam folder ──
+               Papers saved here are picked up without an upload, which is how a
+               teacher who cannot find the dashboard still gets a paper in. -->
+          <section class="as-card as-p-5" aria-labelledby="folder-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="folder-heading" class="as-section">Exam folder</h2>
+              <span class="as-spacer"></span>
+              <button type="button" class="as-small-quiet">
+                <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">folder_open</span>
+                Open the folder
+              </button>
+            </div>
+            <p class="as-muted as-mt-1">
+              Save a paper into <span class="as-mono" data-private>Documents\AbleSpeak Exams</span>
+              and it appears here by itself. A file is read once per version of its contents.
+            </p>
+
+            <!-- Files that could not be read, with what to do instead -->
+            <div class="as-well as-p-4 as-mt-3" aria-label="Files that could not be read">
+              <p class="as-body as-strong">2 files could not be read</p>
+              <ul class="as-stack as-stack--xs as-mt-3">
+                <li class="as-row as-row--wrap" style="gap:8px">
+                  <span class="material-symbols-outlined as-warn" style="font-size:18px" aria-hidden="true">description</span>
+                  <span class="as-body as-mono" style="flex:1 1 220px" data-private>Chemistry-Paper1-scan.pdf</span>
+                  <span class="as-muted">A scanned picture, with no text — upload a Word file, or a PDF made from one</span>
+                </li>
+                <li class="as-row as-row--wrap" style="gap:8px">
+                  <span class="material-symbols-outlined as-warn" style="font-size:18px" aria-hidden="true">description</span>
+                  <span class="as-body as-mono" style="flex:1 1 220px" data-private>Maths-Mock-2025.doc</span>
+                  <span class="as-muted">An old Word format — open it in Word and save as .docx</span>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <!-- ── Or upload one here ── -->
+          <section class="as-card as-p-5" aria-labelledby="upload-heading">
+            <h2 id="upload-heading" class="as-section">Or upload a paper here</h2>
+            <p class="as-muted as-mt-1">
+              Word (.docx) or a PDF with real text. Word’s own numbering, tables and
+              equations are kept. The paper is read on this computer and never sent anywhere.
+            </p>
+            <form class="as-row as-row--wrap as-mt-3" style="gap:12px">
+              <div style="flex:1 1 280px">
+                <label class="as-field-label" for="paper">Choose a file</label>
+                <input class="as-field" id="paper" type="file" accept=".docx,.pdf" style="padding:8px 12px">
+              </div>
+              <button type="submit" class="as-btn as-primary" style="align-self:flex-end">Read the paper</button>
+            </form>
+          </section>
+
+          <!-- ── Check the questions ──
+               Shown after an import, and whenever a teacher opens a paper. This is
+               the gate: nothing can be sat until this has been saved once. -->
+          <section class="as-card as-p-5" aria-labelledby="check-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="check-heading" class="as-section">Check the questions</h2>
+              <span class="as-spacer"></span>
+              <span class="as-muted" data-private>Form 2 Biology — End of Term 2</span>
+            </div>
+            <p class="as-muted as-mt-1">
+              This is exactly what will be read aloud. Fix anything that is wrong
+              before a student sits it.
+            </p>
+
+            <!-- Things to check: stated as questions for a human, not as errors -->
+            <div class="as-notice as-warn-edge as-mt-3" aria-label="Things to check">
+              <p><strong>3 things to check</strong></p>
+              <ul class="as-stack as-stack--xs as-mt-3">
+                <li>· Question 4 has a diagram. AbleSpeak cannot describe a picture — write it in words, or arrange a human reader.</li>
+                <li>· Question 7 has only one option. A multiple-choice question usually has more; check whether options were missed.</li>
+                <li>· Questions jump from 9 to 11. Check whether question 10 is missing from the paper.</li>
+              </ul>
+            </div>
+
+            <!-- The exam's own settings -->
+            <div class="as-grid as-grid--3 as-mt-5">
+              <div>
+                <label class="as-field-label" for="exam-title">Title</label>
+                <input class="as-field" id="exam-title" value="Form 2 Biology — End of Term 2">
+              </div>
+              <div>
+                <label class="as-field-label" for="exam-time">Time limit</label>
+                <div class="as-row">
+                  <input class="as-field as-tabular" id="exam-time" inputmode="numeric" value="90" style="max-width:100px">
+                  <span class="as-muted">minutes</span>
+                </div>
+              </div>
+              <div>
+                <span class="as-field-label" id="readback-label">Read each answer back</span>
+                <button type="button" class="as-switch" role="switch" aria-checked="true" aria-labelledby="readback-label">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">On</span>
+                </button>
+                <p class="as-muted as-mt-1">So a blind student hears what went down.</p>
+              </div>
+            </div>
+
+            <div class="as-mt-5">
+              <label class="as-field-label" for="exam-instructions">Instructions, read before question 1</label>
+              <textarea class="as-field" id="exam-instructions" rows="3">Answer all questions in Section A. Write your answers in full sentences. You have 90 minutes.</textarea>
+            </div>
+
+            <!-- Each question as it will be read -->
+            <h3 class="as-section as-mt-5" style="font-size:14px">Questions found: 12</h3>
+            <ul class="as-stack as-stack--sm as-mt-3">
+
+              <li class="as-well as-p-4">
+                <div class="as-row as-row--wrap">
+                  <span class="as-body as-strong" style="color:var(--as-amber-light)">Question 1</span>
+                  <span class="as-spacer"></span>
+                  <span class="as-muted">2 marks</span>
+                  <button type="button" class="as-row-action">Edit</button>
+                </div>
+                <p class="as-body as-mt-3">Define osmosis.</p>
+              </li>
+
+              <li class="as-well as-p-4">
+                <div class="as-row as-row--wrap">
+                  <span class="as-body as-strong" style="color:var(--as-amber-light)">Question 2 (a)</span>
+                  <span class="as-spacer"></span>
+                  <span class="as-muted">1 mark · multiple choice</span>
+                  <button type="button" class="as-row-action">Edit</button>
+                </div>
+                <p class="as-body as-mt-3">Which part of the cell carries out respiration?</p>
+                <ol class="as-stack as-stack--xs as-mt-3">
+                  <li class="as-body">A — Nucleus</li>
+                  <li class="as-body">B — Mitochondria</li>
+                  <li class="as-body">C — Ribosome</li>
+                  <li class="as-body">D — Cell wall</li>
+                </ol>
+              </li>
+
+              <!-- A question the teacher must act on before the paper can be sat -->
+              <li class="as-well as-p-4" style="border-color:rgba(255,200,128,0.4)">
+                <div class="as-row as-row--wrap">
+                  <span class="as-body as-strong" style="color:var(--as-amber-light)">Question 4</span>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>Has a picture</span>
+                  <button type="button" class="as-row-action">Edit</button>
+                </div>
+                <p class="as-body as-mt-3">Study the diagram below and name the parts labelled X and Y.</p>
+                <div class="as-mt-3">
+                  <label class="as-field-label" for="q4-alt">Describe the picture in words, so it can be read aloud</label>
+                  <textarea class="as-field" id="q4-alt" rows="2"
+                    placeholder="A cross-section of a leaf. X points to the upper layer of cells; Y points to a small opening on the underside."></textarea>
+                </div>
+              </li>
+
+            </ul>
+
+            <div class="as-row as-row--wrap as-mt-5">
+              <button type="button" class="as-btn as-primary">Save — this paper is checked</button>
+              <button type="button" class="as-btn as-quiet">Close without saving</button>
+              <span class="as-spacer"></span>
+              <span class="as-muted">Saving is what allows a student to sit it.</span>
+            </div>
+          </section>
+
+          <!-- ── Exam papers ── -->
+          <section class="as-card as-p-5" aria-labelledby="exams-heading">
+            <h2 id="exams-heading" class="as-section">Exam papers</h2>
+            <ul class="as-list as-mt-3">
+
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong" data-private>Form 2 Biology — End of Term 2</span>
+                  <span class="as-muted" style="display:block">
+                    12 answers · 90 min · added 13 Oct · sat 1 time
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Check questions</button>
+                <button type="button" class="as-row-action">Delete</button>
+                <button type="button" class="as-btn as-quiet" disabled aria-disabled="true"
+                        title="An exam is already running on this computer">Start exam</button>
+              </li>
+
+              <!-- Straight from the folder: cannot be started yet -->
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong" data-private>Form 2 English — Comprehension</span>
+                  <span class="as-status as-warn" style="display:flex">
+                    <span class="as-dot as-warn"></span>
+                    New from the exam folder — check its questions before a student sits it (2 to look at)
+                  </span>
+                  <span class="as-muted" style="display:block">
+                    8 answers · no time limit · added 13 Oct
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Check questions</button>
+                <button type="button" class="as-row-action">Delete</button>
+                <button type="button" class="as-btn as-quiet" disabled aria-disabled="true"
+                        title="Check its questions first">Start exam</button>
+              </li>
+
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong" data-private>Form 1 Maths — Mock</span>
+                  <span class="as-muted" style="display:block">
+                    20 answers · 120 min · added 9 Oct · sat 3 times
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Check questions</button>
+                <button type="button" class="as-row-action">Delete</button>
+                <!-- Who sits it is chosen here, so it can never be started for nobody -->
+                <span class="as-row" style="gap:8px">
+                  <label class="as-sr" for="start-who-maths">Who is sitting it</label>
+                  <select class="as-field" id="start-who-maths" style="min-width:160px;min-height:36px;padding:4px 36px 4px 10px;font-size:13px">
+                    <option>Choose a student…</option>
+                    <option>Amina Kamau</option>
+                    <option>Brian Otieno</option>
+                    <option>Faith Wanjiru</option>
+                  </select>
+                  <button type="button" class="as-btn as-quiet" disabled aria-disabled="true"
+                          title="An exam is already running on this computer">Start exam</button>
+                </span>
+              </li>
+
+            </ul>
+          </section>
+
+          <!-- ── Sittings and scripts ── -->
+          <section class="as-card as-p-5" aria-labelledby="sittings-heading">
+            <h2 id="sittings-heading" class="as-section">Sittings and scripts</h2>
+            <div class="as-mt-3" style="overflow-x:auto">
+              <table class="as-table">
+                <thead>
+                  <tr>
+                    <th>Student</th><th>Exam</th><th>Started</th>
+                    <th>Answered</th><th>Status</th><th><span class="as-sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td data-private>Amina Kamau</td>
+                    <td data-private>Form 2 Biology — End of Term 2</td>
+                    <td>13 Oct, 13:40</td>
+                    <td class="as-tabular">7 of 12</td>
+                    <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Being sat now</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td data-private>Brian Otieno</td>
+                    <td data-private>Form 1 Maths — Mock</td>
+                    <td>12 Oct, 09:15</td>
+                    <td class="as-tabular">20 of 20</td>
+                    <td><span class="as-status as-idle"><span class="as-dot as-idle"></span>Finished by the student</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td data-private>Faith Wanjiru</td>
+                    <td data-private>Form 1 Maths — Mock</td>
+                    <td>12 Oct, 09:15</td>
+                    <td class="as-tabular">18 of 20</td>
+                    <td><span class="as-status as-warn"><span class="as-dot as-warn"></span>Time ran out</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                  <!-- A sitting interrupted by a crash or restart can be carried on;
+                       the time the app was closed is not counted. -->
+                  <tr>
+                    <td data-private>Joseph Mwangi</td>
+                    <td data-private>Form 1 Maths — Mock</td>
+                    <td>9 Oct, 14:02</td>
+                    <td class="as-tabular">11 of 20</td>
+                    <td><span class="as-status as-warn"><span class="as-dot as-warn"></span>Stopped part-way</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Carry on</button>
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="as-muted as-mt-3">
+              Every script states whether its audit trail passed the integrity check,
+              and carries an invigilator signature line.
+            </p>
+          </section>
+
+          <!-- ── What the student can say ──
+               Kept on the teacher's page so an invigilator can prompt a student
+               without leaving the screen. -->
+          <section class="as-card as-p-5" aria-labelledby="say-heading">
+            <h2 id="say-heading" class="as-section">What the student can say</h2>
+            <div class="as-grid as-grid--2 as-mt-3">
+              <div class="as-well as-p-4">
+                <p class="as-body as-strong">Moving and hearing</p>
+                <p class="as-muted as-mt-1">
+                  “Read the question”, “read the options”, “next”, “previous”,
+                  “go to question 5”, “go to question 2 b”, “slower”, “faster”,
+                  “how much time is left”, “where am I”, “unanswered questions”,
+                  “read the instructions”, “help”, “finish exam”.
+                </p>
+              </div>
+              <div class="as-well as-p-4">
+                <p class="as-body as-strong">Answering</p>
+                <p class="as-muted as-mt-1">
+                  “Answer B” for a choice. “Answer” to start writing: everything said
+                  is written until “done”. “Full stop”, “comma”, “new paragraph”;
+                  “delete the last word”, “delete the last sentence”, “undo”,
+                  “read my answer”, “spell m i t o” to write a word letter by letter;
+                  “maths on” for symbols.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── What this is not ready for ──
+               Last on the page, and never hidden: a teacher deciding whether to
+               use this for a real exam needs to read it. -->
+          <section class="as-notice as-bad-edge" aria-labelledby="not-ready-heading">
+            <p id="not-ready-heading"><strong>For practice and mock exams only.</strong></p>
+            <p class="as-mt-1">
+              Turning speech into text needs the internet, and the student’s voice goes
+              to Google Gemini — outside Kenya. For a formal exam that needs parental
+              consent and a data protection assessment, and KNEC has published no rule
+              yet on speech-to-text. Recognition on this computer, with no audio leaving
+              it, is the next step. See <span class="as-mono">docs/AbleSpeak-Exam-Mode.md</span>.
+            </p>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

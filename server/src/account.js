@@ -25,13 +25,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { localOnly } from './routes/settings.js';
 import { fromOwnPages } from './admin-pin.js';
+import { cleanProfile, cleanConsent, photoFromDataUrl, profileOf, SUPABASE_SETUP_SQL, optionsFor } from './profile.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODE_RE = /^\d{6,10}$/;
 
-/** A plain-language error the dashboard can show as it is. */
+/** A plain-language error the dashboard can show as it is; `extra` goes with it (setup steps). */
 class AccountError extends Error {
-  constructor(message, status = 400) { super(message); this.status = status; }
+  constructor(message, status = 400, extra = null) { super(message); this.status = status; this.extra = extra; }
 }
 
 /**
@@ -39,14 +40,14 @@ class AccountError extends Error {
  * DPAPI) when AbleSpeak runs in Electron; in memory only otherwise (tests,
  * `npm start`), so nothing readable is ever written to disk.
  */
-export function createSecureStore(filePath, { loadSafeStorage = defaultSafeStorage } = {}) {
+export function createSecureStore(filePath, { loadSafeStorage = defaultSafeStorage, what = 'the sign-in' } = {}) {
   let memory = null;
   let warned = false;
 
   async function safe() {
     const storage = await loadSafeStorage();
     if (storage?.isEncryptionAvailable?.()) return storage;
-    if (!warned) { warned = true; console.warn('[Account] Secure storage unavailable — the sign-in lasts until AbleSpeak closes'); }
+    if (!warned) { warned = true; console.warn(`[Account] Secure storage unavailable — ${what} will last only until AbleSpeak closes`); }
     return null;
   }
 
@@ -114,7 +115,10 @@ export function createAccount({
       refresh_token: data.refresh_token,
       access_token: data.access_token,
       expires_at: now() + (Number(data.expires_in) || 3600) * 1000,
-      user: { id: data.user?.id || null, email: data.user?.email || fallbackEmail, role: roleOf(data.user) },
+      user: { id: data.user?.id || current?.user?.id || null, email: data.user?.email || fallbackEmail, role: roleOf(data.user) },
+      // The profile's details (profile.js), kept so the name, photo and
+      // analytics choice are known without asking Supabase each time
+      meta: data.user?.user_metadata || current?.meta || null,
     };
     await store.save(current);
   }
@@ -139,19 +143,178 @@ export function createAccount({
     if (!configured()) throw new AccountError('Sign-in isn’t set up on this computer yet.', 503);
   }
 
+  const OFFLINE = 'AbleSpeak couldn’t reach your account. Check the internet and try again.';
+
+  /**
+   * Renew the session, once however many ask at the same moment: Supabase
+   * replaces the refresh token each time it is used, so two renewals at once
+   * could have the second refused and sign the person out. → { ok } or
+   * { ok: false, status, refused } (refused: Supabase said the sign-in has ended).
+   */
+  let renewing = null;
+  function renew(session) {
+    if (!renewing) {
+      renewing = (async () => {
+        const { ok, status, data } = await auth('token?grant_type=refresh_token', { refresh_token: session.refresh_token });
+        if (ok && data?.refresh_token) {
+          await keep(data, session.user?.email);
+          return { ok: true };
+        }
+        const refused = status === 400 || status === 401;
+        // Signed out only if the token refused is still the one kept (not one already replaced)
+        if (refused && (await store.load())?.refresh_token === session.refresh_token) {
+          console.warn(`[Account] Supabase refused to renew the sign-in (${status}: ${data?.error_code || data?.error || 'no detail'}) — signed out`);
+          current = null;
+          await store.clear();
+        }
+        return { ok: false, status, refused };
+      })().finally(() => { renewing = null; });
+    }
+    return renewing;
+  }
+
+  /** The signed-in session, its access token renewed when it has less than a minute left. */
+  async function signedIn() {
+    requireConfigured();
+    const session = current || await store.load();
+    current = session;
+    if (!session?.refresh_token) throw new AccountError('Sign in to your AbleSpeak account first.', 401);
+    if (session.access_token && (session.expires_at || 0) - now() > 60000) return session;
+    const renewed = await renew(session);
+    if (renewed.ok) return current;
+    if (renewed.refused && !current) throw new AccountError('Your sign-in has ended. Sign in again.', 401);
+    if (current?.access_token && current.refresh_token !== session.refresh_token) return current; // another caller renewed it
+    throw new AccountError(OFFLINE, 503);
+  }
+
+  /** The account's own user record: read (GET), or its details changed (PUT { data }). */
+  async function userRecord(method = 'GET', body = null) {
+    const session = await signedIn();
+    let res;
+    try {
+      res = await fetchImpl(`${base}/auth/v1/user`, {
+        method,
+        headers: { apikey: key, Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      throw new AccountError(OFFLINE, 503);
+    }
+    const user = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn(`[Account] The profile ${method === 'GET' ? 'read' : 'save'} failed (${res.status}): ${user?.msg || user?.error_description || user?.error || 'no detail'}`);
+      throw new AccountError(method === 'GET' ? 'Your profile couldn’t be loaded. Try again.' : 'Your profile couldn’t be saved. Try again.', 502);
+    }
+    current = { ...current, meta: user.user_metadata || current.meta || null, user: { ...current.user, id: user.id || current.user?.id || null } };
+    await store.save(current);
+    return user;
+  }
+
+  /** A file in the account's private photo folder (Supabase Storage, bucket `avatars`). */
+  async function photoStore(method, path, { body = null, type = null } = {}) {
+    const session = await signedIn();
+    try {
+      return await fetchImpl(`${base}/storage/v1/object/${path}`, {
+        method,
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${session.access_token}`,
+          ...(type ? { 'Content-Type': type, 'x-upsert': 'true' } : {}),
+        },
+        ...(body ? { body } : {}),
+        signal: AbortSignal.timeout(20000),
+      });
+    } catch {
+      throw new AccountError(OFFLINE, 503);
+    }
+  }
+
   return {
     configured,
 
-    /** Who is signed in, and their AbleSpeak role; never includes tokens. */
+    /** Who is signed in, their AbleSpeak role, name and photo; never includes tokens. */
     async status() {
       const session = configured() ? await store.load() : null;
       current = session;
+      const profile = session ? profileOf({ user_metadata: session.meta || {} }) : null;
       return {
         configured: configured(),
         signedIn: !!session,
         skipped,
-        user: session ? { email: session.user?.email || null, role: session.user?.role || null } : null,
+        user: session ? {
+          email: session.user?.email || null,
+          role: session.user?.role || null,
+          name: profile.full_name || null,
+          photo: profile.photo,
+          consentAsked: !!profile.consent,
+        } : null,
       };
+    },
+
+    /** The signed-in account's id and details, for analytics (analytics.js); never tokens. */
+    identity() {
+      if (!configured() || !current?.user?.id) return null;
+      return { userId: current.user.id, meta: current.meta || {} };
+    },
+
+    /** The profile (profile.js profileOf), fresh from the account. */
+    async profile() {
+      return profileOf(await userRecord('GET'));
+    },
+
+    /** Save the profile's details; only its own fields, checked. */
+    async saveProfile(input = {}) {
+      // The team's roles (Developer) only for an admin account (set in Supabase)
+      const access = (current || await store.load())?.user?.role || null;
+      const { fields, errors } = cleanProfile(input, { team: access === 'admin' });
+      if (errors.length) throw new AccountError(errors.join(' '));
+      if (!Object.keys(fields).length) return this.profile();
+      return profileOf(await userRecord('PUT', { data: fields }));
+    },
+
+    /** The analytics choice: off until agreed; under 18 a parent or guardian agrees. */
+    async saveConsent(input = {}) {
+      const user = await userRecord('GET');
+      const { consent, error } = cleanConsent(input, user.user_metadata?.age_group || null, new Date(now()));
+      if (error) throw new AccountError(error);
+      console.log(`[Account] Analytics ${consent.analytics ? `turned on (agreed by ${consent.by})` : 'turned off'}`);
+      return profileOf(await userRecord('PUT', { data: { analytics_consent: consent } }));
+    },
+
+    /** A new profile photo (a data: URL from the dashboard, already made small there). */
+    async savePhoto(dataUrl) {
+      const photo = photoFromDataUrl(dataUrl);
+      if (photo.error) throw new AccountError(photo.error);
+      const session = await signedIn();
+      const path = `${session.user.id}/avatar`;
+      const res = await photoStore('POST', `avatars/${path}`, { body: photo.buffer, type: photo.type });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        console.warn(`[Account] Saving the photo failed (${res.status}): ${detail?.message || detail?.error || 'no detail'}`);
+        const notSetUp = /bucket not found|row-level security|policy/i.test(`${detail?.message} ${detail?.error}`) || res.status === 404;
+        throw notSetUp
+          ? new AccountError('Profile photos aren’t set up in your AbleSpeak Supabase project yet. Its owner runs the setup once.', 409, { setup: SUPABASE_SETUP_SQL })
+          : new AccountError('The photo couldn’t be saved. Try again.', 502);
+      }
+      return profileOf(await userRecord('PUT', { data: { avatar_path: path, avatar_version: now() } }));
+    },
+
+    /** Remove the profile photo (a Google photo shows again, if there is one). */
+    async removePhoto() {
+      const session = await signedIn();
+      const path = current?.meta?.avatar_path;
+      if (path) await photoStore('DELETE', `avatars/${path}`).catch(() => null);
+      return profileOf(await userRecord('PUT', { data: { avatar_path: null, avatar_version: null } }));
+    },
+
+    /** The profile photo's bytes, or null (no photo, not reachable). */
+    async photo() {
+      const path = current?.meta?.avatar_path || (await store.load())?.meta?.avatar_path;
+      if (!path) return null;
+      const res = await photoStore('GET', `authenticated/avatars/${path}`);
+      if (!res.ok) return null;
+      return { buffer: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') || 'image/jpeg' };
     },
 
     /** "Not now": carry on without an account until AbleSpeak next starts. */
@@ -173,17 +336,14 @@ export function createAccount({
     async refresh() {
       const session = configured() ? await store.load() : null;
       current = session;
-      if (!session?.refresh_token) return;
+      if (!session?.refresh_token) {
+        if (configured()) console.log('[Account] No saved sign-in on this computer');
+        return;
+      }
       try {
-        const { ok, status, data } = await auth('token?grant_type=refresh_token', { refresh_token: session.refresh_token });
-        if (ok && data?.refresh_token) {
-          await keep(data, session.user?.email);
-          console.log(`[Account] Session renewed${current.user.role ? ` (${current.user.role})` : ''}`);
-        } else if (status === 400 || status === 401) {
-          current = null;
-          await store.clear();
-          console.log('[Account] The saved sign-in is no longer valid — signed out');
-        }
+        // The same renewal as everywhere else, so two never use one refresh token
+        const renewed = await renew(session);
+        if (renewed.ok) console.log(`[Account] Session renewed${current.user.role ? ` (${current.user.role})` : ''}`);
       } catch {
         // No internet: keep the saved session and its role until next time
       }
@@ -286,12 +446,26 @@ export function createAccountRouter(account) {
       res.json(await fn(req));
     } catch (err) {
       res.status(err instanceof AccountError ? err.status : 500)
-        .json({ error: err instanceof AccountError ? err.message : 'Something went wrong. Try again.' });
+        .json({ error: err instanceof AccountError ? err.message : 'Something went wrong. Try again.', ...(err?.extra || {}) });
       if (!(err instanceof AccountError)) console.error('[Account]', err.message);
     }
   };
 
   router.get('/status', handle(() => account.status()));
+  // The profile (dashboard › Profile): details, photo, the analytics choice
+  router.get('/profile', handle(async () => {
+    const profile = await account.profile();
+    return { ...profile, options: optionsFor(profile.access, profile.role) };
+  }));
+  router.put('/profile', handle(req => account.saveProfile(req.body || {})));
+  router.put('/consent', handle(req => account.saveConsent(req.body || {})));
+  router.put('/photo', handle(req => account.savePhoto(req.body?.image)));
+  router.delete('/photo', handle(() => account.removePhoto()));
+  router.get('/photo', async (req, res) => {
+    const photo = await account.photo().catch(() => null);
+    if (!photo) return res.status(404).end();
+    res.set('Content-Type', photo.type).set('Cache-Control', 'private, max-age=86400').send(photo.buffer);
+  });
   router.post('/sign-in/email', handle(req => account.sendCode(req.body?.email)));
   router.post('/sign-in/code', handle(req => account.verifyCode(req.body?.email, req.body?.code)));
   router.post('/sign-in/google', handle(() => account.startGoogle()));

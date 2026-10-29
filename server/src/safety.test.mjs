@@ -45,6 +45,85 @@ test('reversible / benign actions are NOT gated', () => {
   assert.equal(classifyConsequential(null), null);
 });
 
+// ── Keys that send or delete only in some apps (test script SF-08, WRK-10) ──
+// Ctrl+Enter / Alt+S send in Outlook and webmail; Delete / Ctrl+D delete in
+// File Explorer and Outlook. Elsewhere they are a page break, a fill, a
+// character. The gate is told the app in front and the browser's tab; when
+// it can't say, it asks anyway.
+
+const keys = (k, where) => classifyConsequential('send_system_keys', { keys: k }, where)?.id || null;
+const tabKey = (args, tabUrl) => classifyConsequential('press_key_combination', args, { tabUrl })?.id || null;
+
+test('Ctrl+Enter and Alt+S ask first in Outlook, classic or new', () => {
+  for (const frontApp of ['OUTLOOK', 'olk', 'HxOutlook']) {
+    assert.equal(keys('Ctrl+Enter', { frontApp }), 'send', frontApp);
+    assert.equal(keys('Alt+S', { frontApp }), 'send', frontApp);
+  }
+  assert.equal(keys('ctrl + enter', { frontApp: 'OUTLOOK' }), 'send');
+  assert.equal(keys('Control+Return', { frontApp: 'OUTLOOK' }), 'send');
+});
+
+test('Ctrl+Enter and Alt+S ask first in a webmail tab, and not on other pages', () => {
+  for (const tabUrl of ['https://mail.google.com/mail/u/0/#inbox', 'https://outlook.office.com/mail/', 'https://outlook.live.com/mail/0/', 'https://mail.yahoo.com/d/folders/1']) {
+    assert.equal(keys('Ctrl+Enter', { frontApp: 'chrome', tabUrl }), 'send', tabUrl);
+    assert.equal(keys('Alt+S', { frontApp: 'msedge', tabUrl }), 'send', tabUrl);
+    assert.equal(tabKey({ key: 'Enter', ctrl: true }, tabUrl), 'send', tabUrl);
+  }
+  assert.equal(keys('Ctrl+Enter', { frontApp: 'chrome', tabUrl: 'https://docs.google.com/document/d/1' }), null);
+  assert.equal(tabKey({ key: 'Enter', ctrl: true }, 'https://docs.google.com/document/d/1'), null);
+});
+
+test('Ctrl+Enter and Alt+S stay quick in Word, Excel and other apps', () => {
+  for (const frontApp of ['WINWORD', 'EXCEL', 'notepad', 'POWERPNT', 'explorer']) {
+    assert.equal(keys('Ctrl+Enter', { frontApp }), null, frontApp);
+    assert.equal(keys('Alt+S', { frontApp }), null, frontApp);
+  }
+});
+
+test('Delete and Ctrl+D ask first in File Explorer and Outlook', () => {
+  for (const frontApp of ['explorer', 'OUTLOOK', 'olk']) {
+    assert.equal(keys('Delete', { frontApp }), 'delete', frontApp);
+    assert.equal(keys('Del', { frontApp }), 'delete', frontApp);
+    assert.equal(keys('Ctrl+D', { frontApp }), 'delete', frontApp);
+  }
+  assert.equal(keys('Delete', { frontApp: 'chrome', tabUrl: 'https://outlook.office.com/mail/' }), 'delete');
+  assert.equal(tabKey({ key: 'Delete' }, 'https://outlook.live.com/mail/0/'), 'delete');
+});
+
+test('Delete and Ctrl+D stay quick while editing, and on other pages', () => {
+  for (const frontApp of ['WINWORD', 'EXCEL', 'notepad']) {
+    assert.equal(keys('Delete', { frontApp }), null, frontApp);
+    assert.equal(keys('Ctrl+D', { frontApp }), null, frontApp);
+  }
+  assert.equal(keys('Delete', { frontApp: 'chrome', tabUrl: 'https://mail.google.com/mail/u/0/' }), null);
+  assert.equal(tabKey({ key: 'Delete' }, 'https://docs.google.com/document/d/1'), null);
+});
+
+test('when the app in front or the tab is not known, these keys ask anyway', () => {
+  assert.equal(keys('Ctrl+Enter'), 'send');
+  assert.equal(keys('Alt+S', {}), 'send');
+  assert.equal(keys('Delete', { frontApp: null }), 'delete');
+  assert.equal(keys('Ctrl+D', { frontApp: '' }), 'delete');
+  assert.equal(keys('Ctrl+Enter', { frontApp: 'chrome' }), 'send', 'a browser, page not known');
+  assert.equal(keys('Delete', { frontApp: 'chrome' }), 'delete', 'a browser, page not known');
+  assert.equal(tabKey({ key: 'Enter', ctrl: true }), 'send');
+  assert.equal(tabKey({ key: 'Delete' }), 'delete');
+});
+
+test('the tool\'s own arguments cannot say which app is in front', () => {
+  assert.equal(classifyConsequential('send_system_keys', { keys: 'Ctrl+Enter', frontApp: 'WINWORD' }).id, 'send');
+});
+
+test('other keys are never asked about, even in Outlook or Explorer', () => {
+  for (const k of ['Enter', 'Ctrl+C', 'Ctrl+S', 'Ctrl+Z', 'Backspace', 'Ctrl+Shift+Enter', 'Alt+D', 'Tab']) {
+    assert.equal(keys(k, { frontApp: 'OUTLOOK' }), null, k);
+    assert.equal(keys(k, { frontApp: 'explorer' }), null, k);
+  }
+  // Already asked everywhere: permanent delete, closing a window
+  assert.equal(keys('Shift+Delete', { frontApp: 'WINWORD' }), 'delete');
+  assert.equal(keys('Alt+F4', { frontApp: 'WINWORD' }), 'close-app');
+});
+
 // ── CVA-1: element-targeting tools gated by what they actually click, not just
 // the tool name (a voice-driven click is the product's core interaction, and
 // its tool name is always click_element/select_option/click_desktop_element —
@@ -182,4 +261,15 @@ test('real answers are never taken for an echo', () => {
   for (const answer of ['yes', 'Yes.', 'no', 'yes close it', 'Yes, close the document.', 'Yes, close this window', 'no leave it open', 'cancel']) {
     assert.ok(!isEchoOf(answer, CLOSE_PROMPT), answer);
   }
+});
+
+// ── Replacing a file asks first (24 Oct 2026) ──────────────────────────────
+
+test('replacing a file asks: save_document_as with replace, or Enter in the "replace?" box', () => {
+  assert.equal(classifyConsequential('save_document_as', { name: 'notes', replace: true })?.id, 'replace');
+  assert.equal(classifyConsequential('save_document_as', { name: 'notes' }), null, 'a new name is safe');
+  assert.equal(classifyConsequential('send_system_keys', { keys: 'Enter' }, { frontTitle: 'Confirm Save As' })?.id, 'replace');
+  assert.equal(classifyConsequential('send_system_keys', { keys: 'Alt+Y' }, { frontTitle: 'Confirm Save As' })?.id, 'replace');
+  assert.equal(classifyConsequential('send_system_keys', { keys: 'Escape' }, { frontTitle: 'Confirm Save As' }), null, 'cancelling is safe');
+  assert.equal(classifyConsequential('send_system_keys', { keys: 'Enter' }, { frontTitle: 'notes.txt - Notepad' }), null, 'Enter elsewhere is safe');
 });

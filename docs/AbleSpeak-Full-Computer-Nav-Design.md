@@ -160,7 +160,8 @@ sequenceDiagram
 - **Screen model** (`screen-model.js` + `uia/screen-model-cs.js`): one cached read of the front window's controls — name, type, position, state and which actions each supports. The AI acts on a control by its ref (`uia_act`): press, toggle, select, expand or collapse, type a value, scroll, move a slider (`set_range`), focus, or read text (all, selection, word, line, paragraph or page).
 - **Focus events:** a background handler counts keyboard-focus changes; a cached read is thrown away as soon as focus moves.
 - **Office** (`office-uia.js` + `uia/office-uia-cs.js`): a small UIA3 client reads Excel's and Word's own accessibility properties — a cell's formula, number format and table position; Word's spelling errors and suggestions. `fix_spelling` asks Word itself to apply a suggestion.
-- **Fallbacks:** mouse clicks at coordinates, keystrokes, and a desktop screenshot the AI can look at.
+- **Fallbacks:** keystrokes, and mouse clicks at coordinates. The desktop screenshot is switched off (`electron-main.cjs` `capture-screen`), so the AI is told never to guess a position: it searches the window with `uia_query` or asks the person to name something nearby.
+- **After acting:** the task agent waits for the screen to settle (up to 4 s after opening an app) before checking a step, and the one-command loop tells the AI when a round of desktop actions changed nothing (`screen-change.js`, after Google's ARTEMIS).
 - All of this runs in **one PowerShell worker** started at launch (C# compiled once), so a desktop action takes tens to hundreds of milliseconds.
 
 ### Tools
@@ -260,6 +261,7 @@ The sidebar always shows the three tiers, so the split is visible; locked pages 
 | Voice bar look and words | `server/overlay.html`, `server/overlay-messages.js`; when it shows: `server/electron-main.cjs` |
 | Dashboard pages and look | `dashboard/src/pages/`, `dashboard/src/lib/ui.js` |
 | Browser actions | `chrome-integration-master/service-worker.js` |
+| Exam mode (upload a paper, sit it by voice, download the script) | `server/src/exam/`, `dashboard/src/pages/Exams.jsx`, `ExamScreen.jsx` — see [AbleSpeak-Exam-Mode.md](AbleSpeak-Exam-Mode.md) |
 
 **Tests:** `cd server && npm test` (382 tests, including real UI Automation checks on Windows and a fake Supabase for sign-in). Dashboard: `cd dashboard && node scripts/check-page.mjs <file>` and `npm run build`.
 

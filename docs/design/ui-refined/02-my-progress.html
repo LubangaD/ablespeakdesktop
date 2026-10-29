@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — My progress</title>
+<!--
+  My progress — the person's own use of AbleSpeak.
+  Ports to dashboard/src/pages/MyProgress.jsx.
+
+  This page is the student's, not the teacher's: it only ever shows the person
+  signed in, never anyone else (the teacher's comparison lives on Users). So it
+  says "you", counts in plain words, and never ranks one person against another.
+
+  The chart is two colours stacked, and each is labelled in the legend — the
+  colours were checked against the #141c28 card for a colour-blind reader.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,GRAD@8..144,100..1000,-200..150&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-refined.css">
+<script src="shell.js" defer></script>
+</head>
+<body data-route="/progress">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <div data-shell="sidebar"></div>
+
+  <div class="as-main-col">
+    <div data-shell="topbar"></div>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">My progress</h1>
+            <p class="as-muted as-mt-1">
+              How you have been using AbleSpeak. Only you see this.
+            </p>
+          </header>
+
+          <!-- ── Your numbers ── -->
+          <section aria-labelledby="my-numbers-heading">
+            <h2 id="my-numbers-heading" class="as-sr">Your numbers</h2>
+            <dl class="as-grid as-grid--3">
+              <div class="as-stat">
+                <dt>Commands this week</dt>
+                <dd>
+                  <span class="as-number">214</span>
+                  <span class="as-stat-note">48 today</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Worked</dt>
+                <dd>
+                  <span class="as-number">91%</span>
+                  <span class="as-stat-note">195 of 214 this week</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Days in a row</dt>
+                <dd>
+                  <span class="as-number">7</span>
+                  <span class="as-stat-note">Since 7 Oct</span>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <!-- ── Commands per day ──
+               One bar per day, oldest first, with a gap for days with none.
+               Worked sits below, didn't work above, so the whole bar is the
+               day's total and the green part is what went right. -->
+          <section class="as-card as-p-5" aria-labelledby="per-day-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="per-day-heading" class="as-section">Commands per day</h2>
+              <span class="as-spacer"></span>
+              <div class="as-legend">
+                <span><i class="as-bar-ok"></i>Worked</span>
+                <span><i class="as-bar-bad"></i>Didn’t work</span>
+              </div>
+            </div>
+
+            <!-- The heights are the share of the tallest day, so the chart needs
+                 no axis: the day numbers run beneath it and the text below says
+                 what the gaps mean. -->
+            <div class="as-bars as-mt-3" role="img"
+                 aria-label="Commands per day for the last fourteen days. The busiest day was 11 October with 52 commands, of which 48 worked.">
+              <div><span class="as-bar-bad" style="height:6px"></span><span class="as-bar-ok" style="height:54px"></span></div>
+              <div><span class="as-bar-bad" style="height:9px"></span><span class="as-bar-ok" style="height:71px"></span></div>
+              <div><span class="as-bar-bad" style="height:4px"></span><span class="as-bar-ok" style="height:40px"></span></div>
+              <div><span class="as-bar-ok" style="height:0"></span></div>
+              <div><span class="as-bar-bad" style="height:11px"></span><span class="as-bar-ok" style="height:83px"></span></div>
+              <div><span class="as-bar-bad" style="height:7px"></span><span class="as-bar-ok" style="height:66px"></span></div>
+              <div><span class="as-bar-bad" style="height:5px"></span><span class="as-bar-ok" style="height:48px"></span></div>
+              <div><span class="as-bar-bad" style="height:13px"></span><span class="as-bar-ok" style="height:95px"></span></div>
+              <div><span class="as-bar-bad" style="height:8px"></span><span class="as-bar-ok" style="height:112px"></span></div>
+              <div><span class="as-bar-bad" style="height:12px"></span><span class="as-bar-ok" style="height:140px"></span></div>
+              <div><span class="as-bar-bad" style="height:6px"></span><span class="as-bar-ok" style="height:88px"></span></div>
+              <div><span class="as-bar-ok" style="height:0"></span></div>
+              <div><span class="as-bar-bad" style="height:9px"></span><span class="as-bar-ok" style="height:104px"></span></div>
+              <div><span class="as-bar-bad" style="height:5px"></span><span class="as-bar-ok" style="height:126px"></span></div>
+            </div>
+            <div class="as-bars-axis" aria-hidden="true">
+              <span>30</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span>
+              <span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span>
+            </div>
+            <p class="as-muted as-mt-3">
+              Nothing on 3 and 12 October — AbleSpeak was not used those days.
+            </p>
+          </section>
+
+          <div class="as-grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);align-items:start">
+
+            <!-- ── What you say most ──
+                 Counts, not a ranking: each bar is the share of the top phrase. -->
+            <section class="as-card as-p-5" aria-labelledby="top-heading">
+              <h2 id="top-heading" class="as-section">What you say most</h2>
+              <ul class="as-stack as-stack--xs as-mt-3">
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“scroll down”</span>
+                    <span class="as-body as-tabular as-strong">61</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:100%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“open chrome”</span>
+                    <span class="as-body as-tabular as-strong">34</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:56%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“read this page”</span>
+                    <span class="as-body as-tabular as-strong">28</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:46%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“go back”</span>
+                    <span class="as-body as-tabular as-strong">22</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:36%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“pause”</span>
+                    <span class="as-body as-tabular as-strong">19</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:31%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+              </ul>
+              <p class="as-muted as-mt-3">
+                A phrase you say often can become a shortcut on
+                <a href="03-voice-and-words.html" class="as-ok" style="text-decoration:underline">Voice &amp; words</a>.
+              </p>
+            </section>
+
+            <!-- ── Your recent commands ── -->
+            <section class="as-card" aria-labelledby="mine-heading">
+              <h2 id="mine-heading" class="as-section" style="padding:16px 20px 12px">Your recent commands</h2>
+              <div style="overflow-x:auto">
+                <table class="as-table">
+                  <thead>
+                    <tr><th>When</th><th>What you said</th><th>What happened</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="as-tabular">14:05</td>
+                      <td>“open chrome”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:04</td>
+                      <td>“search for photosynthesis”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:02</td>
+                      <td>“click the second result”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:01</td>
+                      <td>“click the blue thing”</td>
+                      <td><span class="as-status as-warn"><span class="as-dot as-warn"></span>Asked again</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">13:58</td>
+                      <td>“open my email”</td>
+                      <td><span class="as-status as-bad"><span class="as-dot as-bad"></span>Didn’t work</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">13:55</td>
+                      <td>“dictate, photosynthesis happens in the leaf”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">12 Oct, 16:20</td>
+                      <td>“pause spotify”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style="padding:12px 20px 16px">
+                <button type="button" class="as-small-quiet">Show more</button>
+              </div>
+            </section>
+
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

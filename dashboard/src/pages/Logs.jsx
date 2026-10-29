@@ -22,8 +22,8 @@ const LEVELS = ['INFO', 'WARN', 'ERROR'];
 const LEVEL_TONE = { INFO: 'ok', WARN: 'warn', ERROR: 'bad', DEBUG: 'idle' };
 const LEVEL_WORD = { INFO: 'Info', WARN: 'Warning', ERROR: 'Error', DEBUG: 'Debug' };
 const levelWord = l => LEVEL_WORD[l] || (l ? String(l).charAt(0) + String(l).slice(1).toLowerCase() : 'Debug');
-const ROW = { WARN: 'bg-[#ffc880]/[0.04]', ERROR: 'bg-[#ffb4ab]/[0.05]' };
-const MESSAGE = { INFO: 'text-[#dae3f4]', WARN: 'text-[#dae3f4]', ERROR: 'text-[#dae3f4]', DEBUG: 'text-[#c9b8a5]' };
+const ROW = { WARN: 'bg-[#ffc87a]/[0.04]', ERROR: 'bg-[#ffb3aa]/[0.05]' };
+const MESSAGE = { INFO: 'text-[var(--ink)]', WARN: 'text-[var(--ink)]', ERROR: 'text-[var(--ink)]', DEBUG: 'text-[var(--ink-quiet)]' };
 
 function Icon({ name, className = '', style }) {
   return <span className={`material-symbols-outlined ${className}`} style={style} aria-hidden="true">{name}</span>;
@@ -48,14 +48,14 @@ function MessageText({ text, toolNames }) {
   if (!toolNames.size) return text;
   return String(text).split(/(\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b)/g).map((part, i) => (
     i % 2 && toolNames.has(part)
-      ? <code key={i} className="text-[#ffc880]">{part}</code>
+      ? <code key={i} className="text-[var(--accent-soft)]">{part}</code>
       : part
   ));
 }
 
 const SEG = 'min-h-[36px] px-3 rounded-md text-[13px] flex items-center gap-1.5 transition-colors';
-const SEG_ON = `${SEG} bg-[#222a37] text-[#ffc880] font-semibold`;
-const SEG_OFF = `${SEG} text-[#c9b8a5] hover:text-[#dae3f4] hover:bg-[#18202d]`;
+const SEG_ON = `${SEG} bg-[var(--raised)] text-[var(--accent-soft)] font-semibold`;
+const SEG_OFF = `${SEG} text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--sunken)]`;
 
 /**
  * The log card. `preview` shows only the newest lines, for the Tools tab,
@@ -145,13 +145,13 @@ export function LogPanel({ preview = false, headingId = 'logs-heading' }) {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button type="button" onClick={togglePause} aria-pressed={paused} className={QUIET}>
-            <Icon name={paused ? 'play_arrow' : 'pause'} className="text-[18px] text-[#c9b8a5]" />
+            <Icon name={paused ? 'play_arrow' : 'pause'} className="text-[18px] text-[var(--ink-quiet)]" />
             <span>{paused ? 'Resume scrolling' : 'Pause scrolling'}</span>
           </button>
           {preview && (
             <Link to="/developer/logs" className={QUIET}>
               <span>Open Logs tab</span>
-              <Icon name="arrow_forward" className="text-[18px] text-[#c9b8a5]" />
+              <Icon name="arrow_forward" className="text-[18px] text-[var(--ink-quiet)]" />
             </Link>
           )}
         </div>
@@ -159,10 +159,10 @@ export function LogPanel({ preview = false, headingId = 'logs-heading' }) {
 
       {/* Level filter */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div role="group" aria-label="Filter by log level" className="flex gap-1 p-1 rounded-lg bg-[#0f1724] border border-white/[0.06] flex-wrap">
+        <div role="group" aria-label="Filter by log level" className="flex gap-1 p-1 rounded-lg bg-[var(--sunken)] border border-white/[0.06] flex-wrap">
           <button type="button" aria-pressed={!level} onClick={() => setLevel(null)} className={!level ? SEG_ON : SEG_OFF}>
             <span>All</span>
-            <span className="text-[12px] font-normal text-[#8b95a7] tabular-nums">{logs.length}</span>
+            <span className="text-[12px] font-normal text-[var(--ink-faint)] tabular-nums">{logs.length}</span>
           </button>
           {LEVELS.map(l => {
             const selected = level === l;
@@ -170,12 +170,12 @@ export function LogPanel({ preview = false, headingId = 'logs-heading' }) {
               <button key={l} type="button" aria-pressed={selected} onClick={() => setLevel(l)} className={selected ? SEG_ON : SEG_OFF}>
                 <span className={`w-2 h-2 rounded-full ${DOT[LEVEL_TONE[l]]}`} aria-hidden="true" />
                 <span>{levelWord(l)}</span>
-                <span className="text-[12px] font-normal text-[#8b95a7] tabular-nums">{counts[l]}</span>
+                <span className="text-[12px] font-normal text-[var(--ink-faint)] tabular-nums">{counts[l]}</span>
               </button>
             );
           })}
         </div>
-        <span className="text-[12px] leading-5 text-[#8b95a7]">Log file checked every 1s · Keeps the latest {BUFFER} lines</span>
+        <span className="text-[12px] leading-5 text-[var(--ink-faint)]">Log file checked every 1s · Keeps the latest {BUFFER} lines</span>
       </div>
 
       {/* The lines */}
@@ -185,12 +185,12 @@ export function LogPanel({ preview = false, headingId = 'logs-heading' }) {
         aria-label={preview ? 'Newest AbleSpeak log lines' : 'AbleSpeak log output'}
         aria-live={preview || paused ? 'off' : 'polite'}
         tabIndex={0}
-        className={`bg-[#0f1724] border border-white/[0.06] rounded-lg p-2 font-mono text-[12px] leading-5 flex flex-col gap-0.5 ${
+        className={`bg-[var(--sunken)] border border-white/[0.06] rounded-lg p-2 font-mono text-[12px] leading-5 flex flex-col gap-0.5 ${
           preview ? 'overflow-x-auto' : 'h-[480px] overflow-y-auto'
         }`}
       >
         {shown.length === 0 && (
-          <p className="font-sans text-[13px] leading-5 text-[#8b95a7] px-2 py-1.5">
+          <p className="font-sans text-[13px] leading-5 text-[var(--ink-faint)] px-2 py-1.5">
             {isError ? "Couldn't load the logs. Check the AbleSpeak server is running, then reload."
               : logs.length === 0 ? 'Waiting for log events…'
               : `No ${levelWord(level).toLowerCase()} lines in the latest ${logs.length}.`}
@@ -200,7 +200,7 @@ export function LogPanel({ preview = false, headingId = 'logs-heading' }) {
           const tone = LEVEL_TONE[log.level] || 'idle';
           return (
             <div key={`${log.timestamp}-${logs.length - shown.length + i}`} className={`flex items-start gap-3 py-1.5 px-2 rounded hover:bg-white/[0.03] transition-colors ${ROW[log.level] || ''}`}>
-              <span className="text-[#8b95a7] select-none shrink-0 whitespace-nowrap tabular-nums">{when(log.timestamp, today)}</span>
+              <span className="text-[var(--ink-faint)] select-none shrink-0 whitespace-nowrap tabular-nums">{when(log.timestamp, today)}</span>
               <span className={`w-[72px] shrink-0 flex items-center gap-1.5 font-sans ${INK[tone]}`}>
                 <span className={`w-2 h-2 rounded-full shrink-0 ${DOT[tone]}`} aria-hidden="true" />
                 {levelWord(log.level)}

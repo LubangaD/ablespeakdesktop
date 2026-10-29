@@ -21,14 +21,15 @@ const button = (name, extra = {}) => ({ ref: name, type: 'Button', name, actions
  * A fake agent. `replies` answers model calls in order, by kind:
  * plan / choose / check / summary. `screens` are returned by readScreen in order.
  */
-function makeAgent({ plans = [], chooses = [], checks = [], summary = 'All done.', screens = [], results = {}, cancelled = () => false } = {}) {
-  const calls = { llm: [], tools: [], events: [] };
+function makeAgent({ plans = [], chooses = [], checks = [], finals = [], summary = 'All done.', screens = [], results = {}, cancelled = () => false } = {}) {
+  const calls = { llm: [], tools: [], events: [], waits: [] };
   let screenIndex = 0;
   const agent = new TaskAgent({
-    llm: async ({ system, messages, tools }) => {
-      calls.llm.push({ system, messages, tools });
+    llm: async ({ system, messages, tools, temperature }) => {
+      calls.llm.push({ system, messages, tools, temperature });
       if (system.startsWith('You plan tasks')) return { text: JSON.stringify(plans.shift() ?? { steps: [] }) };
       if (system.startsWith('You check')) return { text: JSON.stringify(checks.shift() ?? { ok: true, why: 'fine' }) };
+      if (system.startsWith('You decide whether a whole task')) return { text: JSON.stringify(finals.shift() ?? { verdict: 'done', why: 'it shows' }) };
       if (system.startsWith('You are AbleSpeak. In one')) return { text: summary };
       const next = chooses.shift();
       return next === 'DONE' ? { text: 'DONE' } : { text: '', toolCalls: next ? [next] : null };
@@ -44,9 +45,162 @@ function makeAgent({ plans = [], chooses = [], checks = [], summary = 'All done.
     fastMatch: text => (text === 'scroll down' ? { tool: 'scroll', args: { direction: 'down' } } : null),
     report: event => calls.events.push(event),
     isCancelled: cancelled,
+    // Waiting for the screen to settle takes no time in tests
+    wait: async ms => { calls.waits.push(ms); },
   });
   return { agent, calls };
 }
+
+// ── Waiting for the screen, asking again for JSON (after ARTEMIS) ──────────
+
+test('an app that takes a moment to open is waited for before the step is checked', async () => {
+  const desktop = screen('Desktop', [button('Start')]);
+  const notepad = screen('Untitled - Notepad', [button('File')]);
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Open Notepad', expect: 'Notepad is open' }] }],
+    chooses: [{ name: 'open_application', arguments: { app_name: 'notepad' } }],
+    // plan, before the step, then three reads after it: still opening, still opening, open
+    screens: [desktop, desktop, desktop, desktop, notepad],
+  });
+  const result = await agent.run('open notepad');
+  assert.equal(result.status, 'done');
+  assert.equal(calls.waits.length, 2);
+  const check = calls.llm.find(c => c.system.startsWith('You check'));
+  assert.match(check.messages[0].content, /window changed from "Desktop" to "Untitled - Notepad"/);
+});
+
+test('a dialog that takes focus before it is listed is still waited for (Save As, 24 Oct 2026)', async () => {
+  const editing = screen('notes.txt - Notepad', [{ type: 'Edit', name: 'Text editor', focused: true }]);
+  const focusGone = screen('notes.txt - Notepad', [{ type: 'Edit', name: 'Text editor', focused: false }]);
+  const dialog = screen('Save as', [button('Save'), { type: 'Edit', name: 'File name:' }]);
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Press Ctrl+Shift+S', expect: 'The Save As dialog is open' }] }],
+    chooses: [{ name: 'send_system_keys', arguments: { keys: 'Ctrl+Shift+S' } }],
+    screens: [editing, editing, focusGone, focusGone, dialog],
+  });
+  await agent.run('save it as notes');
+  const check = calls.llm.find(c => c.system.startsWith('You check')).messages[0].content;
+  assert.match(check, /window changed from "notes.txt - Notepad" to "Save as"/);
+});
+
+test('a screen that never changes is watched for a short while only', async () => {
+  const doc = screen('Doc', [button('Bold')]);
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Press Bold', expect: 'Bold is on' }] }],
+    chooses: [{ name: 'uia_act', arguments: { name: 'Bold' } }],
+    checks: [{ ok: true, why: 'fine' }],
+    screens: [doc],
+  });
+  await agent.run('make it bold');
+  assert.equal(calls.waits.length, 10, '4 s in 400 ms steps after a click');
+});
+
+test('a plan that comes back as prose is asked for once more, as JSON', async () => {
+  const { agent, calls } = makeAgent({
+    plans: ['Sure! First I will scroll.', { steps: [{ do: 'scroll down', expect: '' }] }],
+    screens: [screen('Doc')],
+  });
+  const result = await agent.run('scroll down and then read it');
+  assert.equal(result.status, 'done');
+  const planCalls = calls.llm.filter(c => c.system.startsWith('You plan tasks'));
+  assert.equal(planCalls.length, 2);
+  assert.match(planCalls[1].messages.at(-1).content, /not valid JSON/);
+});
+
+// ── Checking the whole task before saying "done" (after ARTEMIS's final review) ──
+
+test('steps that each "worked" but leave the task unfinished are re-planned (Explorer, 23 Oct 2026)', async () => {
+  const home = screen('Home - File Explorer', [button('Downloads', { type: 'TreeItem', selected: true })]);
+  const downloads = screen('Downloads - File Explorer', [button('Downloads', { type: 'TreeItem', selected: true })]);
+  const { agent, calls } = makeAgent({
+    plans: [
+      { steps: [{ do: 'Select Downloads', expect: 'Downloads is selected' }] },
+      { steps: [{ do: 'Open Downloads', expect: 'The Downloads folder is open' }] },
+    ],
+    chooses: [{ name: 'uia_act', arguments: { name: 'Downloads', action: 'select' } }, { name: 'uia_act', arguments: { name: 'Downloads', action: 'invoke' } }],
+    finals: [{ verdict: 'not_done', why: 'The window still shows Home, not Downloads.' }, { verdict: 'done', why: 'Downloads is open.' }],
+    screens: [home, home, downloads],
+  });
+  const result = await agent.run('Open File Explorer and go to the Downloads folder');
+  assert.equal(result.status, 'done');
+  assert.equal(result.replans, 1);
+  assert.ok(calls.events.some(e => e.type === 'final_check' && /still shows Home/.test(e.why)));
+});
+
+test('a task still unfinished after the re-plans says so, and keeps the typing', async () => {
+  const doc = screen('Doc', [button('Bold')]);
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Type Title', expect: '' }] }, { steps: [{ do: 'Type Title', expect: '' }] }, { steps: [{ do: 'Type Title', expect: '' }] }],
+    chooses: [{ name: 'system_type_text', arguments: { text: 'Title' } }, { name: 'system_type_text', arguments: { text: 'Title' } }, { name: 'system_type_text', arguments: { text: 'Title' } }],
+    finals: [{ verdict: 'not_done', why: 'Title is not bold.' }, { verdict: 'not_done', why: 'Title is not bold.' }, { verdict: 'not_done', why: 'Title is not bold.' }],
+    screens: [doc],
+  });
+  const result = await agent.run('type Title and make it bold');
+  assert.equal(result.status, 'failed');
+  assert.match(result.text, /^The task doesn't look finished: Title is not bold\./);
+  assert.ok(!calls.tools.some(t => t.args?.keys === 'Ctrl+Z'), 'each step worked, so nothing is undone');
+});
+
+test('"unsure" at the end counts as finished; a routine is not judged at all', async () => {
+  const doc = screen('Doc');
+  const unsure = makeAgent({ plans: [{ steps: [{ do: 'scroll down', expect: '' }] }], finals: [{ verdict: 'unsure', why: 'it was a sound' }], screens: [doc] });
+  assert.equal((await unsure.agent.run('scroll down and then play the sound')).status, 'done');
+
+  const routine = makeAgent({ screens: [doc] });
+  await routine.agent.run('start my homework', {}, { plan: [{ do: 'scroll down' }] });
+  assert.ok(!routine.calls.llm.some(c => c.system.startsWith('You decide whether a whole task')));
+});
+
+test('the step checker\'s rules: purpose over detail, selected is not opened, unsure over failed', async () => {
+  const doc = screen('Doc', [button('Bold')]);
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Press Bold', expect: 'Bold is on' }] }],
+    chooses: [{ name: 'uia_act', arguments: { name: 'Bold' } }],
+    checks: [{ verdict: 'unsure', why: 'the list does not show bold' }],
+    screens: [doc, doc, screen('Doc', [button('Bold', { toggled: 'on' })])],
+  });
+  const result = await agent.run('make it bold');
+  assert.equal(result.status, 'done', 'unsure lets the task go on');
+  const rules = calls.llm.find(c => c.system.startsWith('You check')).system;
+  assert.match(rules, /Selecting or focusing an item is not opening it/);
+  assert.match(rules, /"unsure"/);
+});
+
+test('in a Save As dialog, "open Documents" is not the quick app command (24 Oct 2026)', async () => {
+  const dialog = screen('Save as', [{ type: 'Edit', name: 'File name:' }, button('Save')]);
+  const { agent, calls } = makeAgent({
+    chooses: [{ name: 'uia_act', arguments: { name: 'File name:', action: 'set_value', value: 'notes.txt' } }],
+    screens: [dialog],
+  });
+  agent.fastMatch = text => (/^open documents$/i.test(text) ? { tool: 'open_application', args: { app_name: 'documents' } } : null);
+  await agent.run('my routine', {}, { plan: [{ do: 'Open Documents', expect: '' }] });
+  assert.equal(calls.tools[0].name, 'uia_act', 'the model chose, not the quick command');
+  const guidance = calls.llm.find(c => /carrying out one step/.test(c.system)).system;
+  assert.match(guidance, /A Save As or Open dialog is in front/);
+});
+
+test('apps are opened directly, never through the Start menu (24 Oct 2026 regression)', async () => {
+  const { agent, calls } = makeAgent({ plans: [{ steps: [{ do: 'Open Notepad', expect: '' }] }], chooses: [{ name: 'open_application', arguments: { app_name: 'notepad' } }], screens: [screen('Desktop')] });
+  await agent.run('open notepad and type hi');
+  const planPrompt = calls.llm.find(c => c.system.startsWith('You plan tasks')).system;
+  assert.match(planPrompt, /never through the Start menu or the Windows key/);
+  assert.doesNotMatch(planPrompt, /open the Start menu = press the Windows key/);
+  const choosePrompt = calls.llm.find(c => /carrying out one step/.test(c.system)).system;
+  assert.match(choosePrompt, /never the Start menu or the Windows key/);
+});
+
+test('plans, checks and step choices are asked for at temperature 0', async () => {
+  const doc = screen('Doc', [button('Bold')]);
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Press Bold', expect: 'Bold is on' }] }],
+    chooses: [{ name: 'uia_act', arguments: { name: 'Bold' } }],
+    screens: [doc, doc, screen('Doc', [button('Bold', { toggled: 'on' })])],
+  });
+  await agent.run('make it bold');
+  const deciding = calls.llm.filter(c => !c.system.startsWith('You are AbleSpeak. In one'));
+  assert.ok(deciding.length >= 3);
+  assert.ok(deciding.every(c => c.temperature === 0));
+});
 
 // ── Deciding to plan ───────────────────────────────────────────────────────
 
@@ -113,12 +267,59 @@ test('a two-step task: each step acts once and is checked against the screen', a
 
 test('a step the router knows skips the model', async () => {
   const { agent, calls } = makeAgent({
-    screens: [screen('Doc')],
+    screens: [{ ...screen('Wikipedia - Google Chrome'), app: 'chrome' }],
   });
   const outcome = await agent.run('my routine', {}, { plan: [{ do: 'scroll down', expect: '' }] });
   assert.equal(outcome.status, 'done');
   assert.deepEqual(calls.tools, [{ name: 'scroll', args: { direction: 'down' } }]);
   assert.equal(calls.llm.filter(c => !c.system.startsWith('You are AbleSpeak. In one')).length, 0, 'no plan, choose or check calls');
+});
+
+// ── Tools that fit the window in front (agent eval, 23 Oct 2026) ──────────
+
+test('in a desktop app, a quick "scroll down" scrolls the app, not a Chrome tab', async () => {
+  const { agent, calls } = makeAgent({ screens: [{ ...screen('notes.txt - Notepad'), app: 'notepad' }] });
+  await agent.run('my routine', {}, { plan: [{ do: 'scroll down', expect: '' }] });
+  assert.deepEqual(calls.tools, [{ name: 'desktop_scroll', args: { direction: 'down' } }]);
+});
+
+test('web-page tools are not offered in a desktop app or in a browser without the extension', async () => {
+  const notepad = { ...screen('notes.txt - Notepad'), app: 'notepad' };
+  const edge = { ...screen('Bing - Microsoft Edge'), app: 'msedge' };
+  const chrome = { ...screen('Google - Google Chrome'), app: 'chrome' };
+  const { agent } = makeAgent();
+  assert.equal(agent.usableTools(notepad)('press_key_combination'), false);
+  assert.equal(agent.usableTools(notepad)('open_url'), true, 'a website can be opened from anywhere');
+  assert.equal(agent.usableTools(notepad)('send_system_keys'), true);
+  assert.equal(agent.usableTools(edge)('open_url'), false, 'it would open in Chrome, not Edge');
+  assert.equal(agent.usableTools(edge)('uia_act'), true);
+  assert.equal(agent.usableTools(chrome)('press_key_combination'), true);
+});
+
+test('typing is checked against the document\'s text, not only its controls (Word)', async () => {
+  const word = { ...screen('Document1 - Word', [button('Bold')]), app: 'winword' };
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'Type Science homework', expect: 'The text appears in the document' }] }],
+    chooses: [{ name: 'system_type_text', arguments: { text: 'Science homework' } }],
+    screens: [word],
+  });
+  agent.readDocument = async () => '';
+  await agent.run('open word and type science homework');
+  const check = calls.llm.find(c => c.system.startsWith('You check')).messages[0].content;
+  assert.match(check, /Text in the document now: ""/);
+  const final = calls.llm.find(c => c.system.startsWith('You decide whether a whole task')).messages[0].content;
+  assert.match(final, /Text in the document now: ""/);
+});
+
+test('an end result that could not be checked is said to be unchecked', async () => {
+  const { agent, calls } = makeAgent({
+    plans: [{ steps: [{ do: 'scroll down', expect: '' }] }],
+    finals: [{ verdict: 'unsure', why: 'it is a sound' }],
+    screens: [screen('Doc')],
+  });
+  await agent.run('scroll down and play the sound');
+  const summary = calls.llm.find(c => c.system.startsWith('You are AbleSpeak. In one')).messages[0].content;
+  assert.match(summary, /could not be checked on the screen/);
 });
 
 test('a step already done on screen is not repeated', async () => {

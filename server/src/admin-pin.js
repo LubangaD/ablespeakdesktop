@@ -265,7 +265,8 @@ export function createAdminGate({ envPath = defaultEnvPath, now = () => Date.now
   });
 
   const gate = {
-    router, requireAdmin, requireHelper, pinSet,
+    // requestRole: 'admin' | 'helper' | null, for routes that open more to an admin
+    router, requireAdmin, requireHelper, pinSet, requestRole,
     openSetup: ms => { setupOpenUntil = now() + ms; },
   };
   gates.add(gate);

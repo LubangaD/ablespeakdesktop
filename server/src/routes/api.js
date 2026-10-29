@@ -34,7 +34,11 @@ export function createApiRouter({ wsProxy, logTailer, libraryScanner, voqalHomeP
       extensionClients: status.extensionClients,
       alerts: alerts.length,
       checks,
-      alertDetails: alerts
+      alertDetails: alerts,
+      // Speech recognition on this computer (local-asr.js): ready, starting, failed, missing or off
+      speechOnComputer: wsProxy.localAsr?.status() ?? { state: 'off' },
+      // AbleSpeak's real-time speech service (remote-asr.js): ready, connecting, asleep, reconnecting, failed, unconfigured
+      speechService: wsProxy.remoteAsr?.status() ?? { state: 'unconfigured' },
     });
   });
 

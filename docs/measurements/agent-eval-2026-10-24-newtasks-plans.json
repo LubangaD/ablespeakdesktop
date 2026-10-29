@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-24 00:27",
+  "plansOnly": true,
+  "results": [
+    {
+      "id": "excel-type",
+      "instruction": "Open Excel, start a blank workbook and type Budget in the first cell",
+      "planned": 3,
+      "steps": [
+        "Open the Excel app.",
+        "Press the \"Blank workbook\" button.",
+        "Type \"Budget\""
+      ],
+      "reason": null,
+      "error": null
+    },
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "planned": 3,
+      "steps": [
+        "Open File Explorer",
+        "Open \"Documents\"",
+        "Open \"ablespeak-eval.txt\""
+      ],
+      "reason": null,
+      "error": null
+    },
+    {
+      "id": "explorer-open-pdf",
+      "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+      "planned": 3,
+      "steps": [
+        "Open File Explorer",
+        "Open \"Documents\"",
+        "Open \"ablespeak-eval.pdf\""
+      ],
+      "reason": null,
+      "error": null
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "planned": 6,
+      "steps": [
+        "Open the Notepad app",
+        "Type \"hello there\"",
+        "Press the \"Save\" button",
+        "Open the \"Documents\" folder",
+        "Type \"eval-saved.txt\" in the \"File name\" text input",
+        "Press the \"Save\" button"
+      ],
+      "reason": null,
+      "error": null
+    },
+    {
+      "id": "spotify-search",
+      "instruction": "Open Spotify and search for Sauti Sol",
+      "planned": 3,
+      "steps": [
+        "Open the Spotify app.",
+        "Press the Search button.",
+        "Type \"Sauti Sol\" into the search bar."
+      ],
+      "reason": null,
+      "error": null
+    },
+    {
+      "id": "start-menu-calculator",
+      "instruction": "Open the Start menu, search for Calculator and open it",
+      "planned": 3,
+      "steps": [
+        "Press the Windows key",
+        "Type \"Calculator\"",
+        "Press Enter"
+      ],
+      "reason": null,
+      "error": null
+    }
+  ]
+}

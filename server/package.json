@@ -9,6 +9,7 @@
     "dev": "node --watch src/index.js",
     "test": "node --test",
     "desktop": "node launch-electron.cjs",
+    "voice-model": "node tools/fetch-voice-model.mjs",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
@@ -27,12 +28,17 @@
       "overlay-preload.cjs",
       "overlay-wake.cjs",
       "wake-preload.cjs",
+      "tts-host.cjs",
+      "NOTICE.md",
       "tools/**/*",
       "node_modules/**/*",
       "!**/*.test.mjs",
       "!tools/grounding-eval/images/**",
       "!tools/grounding-eval/out/**",
-      "!tools/grounding-eval/dataset.json"
+      "!tools/grounding-eval/dataset.json",
+      "!tools/live-chrome.mjs",
+      "!tools/live-chrome-run/**",
+      "!tools/fetch-voice-model.mjs"
     ],
     "extraResources": [
       {
@@ -42,13 +48,27 @@
       {
         "from": "../chrome-integration-master",
         "to": "chrome-extension"
+      },
+      {
+        "from": "vendor/voice-lock",
+        "to": "voice-lock"
       }
     ],
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "src/voiceprint-worker.cjs",
+      "node_modules/sherpa-onnx-node/**",
+      "node_modules/sherpa-onnx-win-x64/**"
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "../dashboard/public/ablespeak-logo.png"
     },
     "nsis": {
@@ -63,10 +83,14 @@
   "dependencies": {
     "chokidar": "^4.0.0",
     "cors": "^2.8.5",
+    "docx": "^9.10.0",
     "dotenv": "^16.4.0",
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "helmet": "^8.0.0",
+    "jszip": "^3.10.2",
+    "pdfjs-dist": "^6.4.299",
+    "sherpa-onnx-node": "1.13.8",
     "sql.js": "^1.11.0",
     "uuid": "^11.0.0",
     "ws": "^8.18.0"
@@ -74,6 +98,7 @@
   "devDependencies": {
     "cross-env": "^10.1.0",
     "electron": "^42.1.0",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.8.1",
+    "playwright-core": "^1.64.1"
   }
 }

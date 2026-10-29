@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — Exam screen</title>
+<!--
+  The exam screen — the exam being sat, in large print.
+  Ports to dashboard/src/pages/ExamScreen.jsx. Design: docs/AbleSpeak-Exam-Mode.md.
+
+  Two people read this screen at once, and that is the whole design problem:
+
+  · The student, who may have low vision, needs the question and their own answer
+    in the largest type on the screen, and needs to know what AbleSpeak is
+    waiting for — because they cannot see a cursor blink.
+  · The invigilator, standing beside them, needs the clock, how far through they
+    are, and Pause / End exam — without those controls being anywhere a student
+    might hit them.
+
+  So: question and answer in the middle at the student's chosen size (18–64px,
+  28 by default, remembered), the clock top right, and the invigilator's controls
+  alone below a rule at the foot.
+
+  Everything scales from one number. The app keeps `size` in state and derives
+  the rest (0.85 for the title, 0.75 for section headings, 0.55 for small text),
+  so A+ grows the whole screen in proportion rather than only the body text.
+  Here that is written as --exam-size and calc(), which ports straight back.
+
+  "Heard:" shows the last thing the student said, so a wrong word is visible to
+  both of them immediately — the fastest way to catch a mis-transcription before
+  it is marked.
+
+  One thing this file does NOT change: the app draws this route inside the normal
+  frame (App.jsx treats only /sign-in as bare), so the sidebar is still there
+  during a sitting. See README.md — it is listed as a proposal, not done here.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,GRAD@8..144,100..1000,-200..150&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-refined.css">
+<script src="shell.js" defer></script>
+<style>
+  /* One number drives the whole screen. The app holds it in state as `size`
+     and writes it to localStorage as `examTextSize`. */
+  .exam { --exam-size: 28px; max-width: 1100px; }
+
+  .exam-title   { font-size: calc(var(--exam-size) * 0.85); font-weight: 600; color: var(--as-ink); }
+  .exam-clock   { font-size: var(--exam-size); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--as-ink); }
+  .exam-clock.is-low { color: var(--as-bad); }          /* under 5 minutes */
+  .exam-heading { font-size: calc(var(--exam-size) * 0.75); font-weight: 600; }
+  .exam-big     { font-size: var(--exam-size); line-height: 1.45; color: var(--as-ink); white-space: pre-wrap; }
+  .exam-small   { font-size: max(15px, calc(var(--exam-size) * 0.55)); line-height: 1.5; }
+
+  /* The answer sits in a well, so the student can see where their words land
+     even when there are none yet. */
+  .exam-answer {
+    border-radius: var(--as-r-lg); background: var(--as-field);
+    border: 1px solid var(--as-line-field); padding: 20px; min-height: 120px;
+  }
+  .exam-answer.is-empty { color: #8b95a7; }
+
+  .exam-foot {
+    margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--as-line);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  }
+  /* A− / A+ are deliberately large: the student may press them themselves. */
+  .exam-size-btn { min-width: 56px; min-height: 48px; font-size: 16px; font-weight: 600; }
+</style>
+</head>
+<body data-route="/exam">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <div data-shell="sidebar"></div>
+
+  <div class="as-main-col">
+    <div data-shell="topbar"></div>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <div class="as-page exam">
+
+        <!-- ── Who, what, and how long is left ── -->
+        <header class="as-row as-row--wrap" style="gap:8px 24px">
+          <h1 class="exam-title" data-private>Form 2 Biology — End of Term 2</h1>
+          <span class="as-spacer"></span>
+          <p class="exam-clock" aria-label="Time left 41 minutes 18 seconds">41:18</p>
+        </header>
+        <p class="as-muted exam-small as-mt-1">
+          <span data-private>Amina Kamau</span> · 7 of 12 answered
+        </p>
+
+        <!-- ── The question, as it is read aloud ──
+             The number is shown above, so it is not read twice. -->
+        <section class="as-card as-p-5 as-mt-5" aria-labelledby="question-label">
+          <p id="question-label" class="exam-heading" style="color:var(--as-amber)">
+            Question 2 (a)
+            <span style="color:var(--as-ink-quiet);font-weight:400">— 8 of 12</span>
+          </p>
+          <p class="exam-big as-mt-3">Which part of the cell carries out respiration?</p>
+
+          <!-- Options are listed so a sighted student can follow along while they
+               are read; the student answers by saying the letter. -->
+          <ol class="as-stack as-stack--xs as-mt-5">
+            <li class="exam-big">A — Nucleus</li>
+            <li class="exam-big">B — Mitochondria</li>
+            <li class="exam-big">C — Ribosome</li>
+            <li class="exam-big">D — Cell wall</li>
+          </ol>
+        </section>
+
+        <!-- ── The answer as it stands ──
+             What AbleSpeak is waiting for is a dot and words, never a colour or
+             a blinking cursor: a blind student is told it aloud, and a sighted
+             one reads it here. -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-labelledby="answer-label">
+          <div class="as-row as-row--wrap">
+            <h2 id="answer-label" class="exam-heading">Answer</h2>
+            <span class="as-status as-ok exam-small">
+              <span class="as-dot as-dot--lg as-ok"></span>Writing the answer — say “done” to finish
+            </span>
+            <span class="as-muted exam-small">· Maths on</span>
+          </div>
+
+          <div class="exam-answer as-mt-3">
+            <p class="exam-big">Mitochondria carry out respiration. They release energy from glucose.</p>
+          </div>
+
+          <!-- The last thing heard, so a wrong word is caught at once -->
+          <p class="as-muted exam-small as-mt-3">Heard: “they release energy from glucose full stop”</p>
+        </section>
+
+        <!-- ── The student's controls, then the invigilator's ──
+             Separated by the rule, and labelled, so nobody presses the wrong one. -->
+        <footer class="exam-foot">
+          <span class="as-muted exam-small">Text size</span>
+          <button type="button" class="as-btn as-quiet exam-size-btn" aria-label="Smaller text">A−</button>
+          <button type="button" class="as-btn as-quiet exam-size-btn" aria-label="Larger text">A+</button>
+
+          <span class="as-spacer"></span>
+
+          <span class="as-muted exam-small">Invigilator:</span>
+          <button type="button" class="as-btn as-quiet">Pause</button>
+          <button type="button" class="as-btn as-danger">End exam</button>
+        </footer>
+
+        <!-- ─────────────────────────────────────────────────────────────────
+             The screen's other states. Kept in this file so the port covers
+             all of them; in the app each replaces the two cards above.
+             ───────────────────────────────────────────────────────────────── -->
+
+        <h2 class="as-section" style="margin-top:56px;padding-top:24px;border-top:1px solid var(--as-line)">
+          The screen’s other states
+        </h2>
+        <p class="as-muted as-mt-1">Reference for the port — not shown at the same time as the above.</p>
+
+        <!-- Paused: the clock has stopped, and the one way back is obvious -->
+        <section class="as-card as-p-5 as-mt-5" aria-label="Paused">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Answer</h3>
+            <span class="as-status as-warn exam-small">
+              <span class="as-dot as-dot--lg as-warn"></span>Paused — the clock has stopped
+            </span>
+            <span class="as-spacer"></span>
+            <button type="button" class="as-btn as-primary">Carry on</button>
+          </div>
+          <div class="exam-answer as-mt-3">
+            <p class="exam-big">Mitochondria carry out respiration.</p>
+          </div>
+        </section>
+
+        <!-- Waiting for a plain yes: "okay, wait…" carries on, by design -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-label="Waiting for yes or no">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Finish the exam?</h3>
+            <span class="as-status as-warn exam-small">
+              <span class="as-dot as-dot--lg as-warn"></span>Waiting for yes or no
+            </span>
+          </div>
+          <p class="exam-big as-mt-3">
+            You have 5 questions with no answer. Say “yes” to finish, or anything else to carry on.
+          </p>
+        </section>
+
+        <!-- The clock under five minutes, in coral — with the words beside it,
+             so the colour is never the only warning. -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-label="Little time left">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Time</h3>
+            <span class="as-spacer"></span>
+            <p class="exam-clock is-low" aria-label="Time left 4 minutes 12 seconds">04:12</p>
+          </div>
+          <p class="as-bad exam-small as-mt-3">
+            Said aloud at 30, 15, 5 and 1 minutes left.
+          </p>
+        </section>
+
+        <!-- Ended: says how it ended, and that the answers are safe -->
+        <section class="as-card as-p-5" style="margin-top:16px" role="status" aria-label="The exam has ended">
+          <p class="exam-big">The exam has ended. The student finished the exam.</p>
+          <p class="as-muted exam-small as-mt-3">
+            The answers are saved. The teacher can download the script from the Exams page.
+          </p>
+          <a href="06-exams.html" class="as-btn as-primary as-mt-5">Go to Exams</a>
+        </section>
+
+        <!-- Nothing running on this computer -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-label="No exam is running">
+          <p class="exam-big">No exam is running on this computer.</p>
+          <a href="06-exams.html" class="as-btn as-quiet as-mt-5">Go to Exams</a>
+        </section>
+
+        <!-- A clip that could not be made out. Nothing is ever dropped quietly
+             in an exam: the phrase filters used outside exams are off. -->
+        <section class="as-card as-p-5" style="margin-top:16px" role="alert" aria-label="Not caught">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Answer</h3>
+            <span class="as-status as-bad exam-small">
+              <span class="as-dot as-dot--lg as-bad"></span>I did not catch that clearly. Please say it again.
+            </span>
+          </div>
+          <div class="exam-answer is-empty as-mt-3">
+            <p class="exam-big">No answer yet</p>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

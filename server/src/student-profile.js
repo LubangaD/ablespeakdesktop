@@ -18,17 +18,30 @@ export const PROFILE_VERSION = 1;
 export const SENSITIVITY = {
   // speech: level that counts as speech; silence: below this is quiet;
   // quiet: voice-level sound too soft to count (the "didn't catch that" cue)
-  standard: { speech: 45, silence: 15, quiet: 30 },
-  quiet: { speech: 28, silence: 10, quiet: 18 },
+  // Lowered 17 Oct 2026 from 45 / 28 / 60. Measured through the voice bar's own
+  // mic path, a normal speaking voice peaked at 31–93 per phrase and the room
+  // at 1–12: Standard at 45 missed 6 of 30 phrases and Noisy room at 60 missed
+  // 13, so people shouted. (The level averages every pitch up to 24 kHz while
+  // a voice is mostly under 4 kHz, which is why it reads lower than it sounds.)
+  standard: { speech: 32, silence: 15, quiet: 21 },
+  quiet: { speech: 22, silence: 10, quiet: 14 },
   // Noisy room: no "say it louder" band (quiet = speech), because there it is
   // mostly other people talking. Automatic gain stays on (see listeningSettings).
-  noisy: { speech: 60, silence: 22, quiet: 60 },
+  noisy: { speech: 45, silence: 22, quiet: 45 },
 };
+
+// Where speech is recognised (local-asr.js, WsProxy._transcribeClip):
+// auto: commands on this computer, everything else with Gemini;
+// local: this computer only, never the internet; online: Gemini only.
+export const SPEECH_ENGINES = ['auto', 'local', 'online'];
 
 export const DEFAULT_PROFILE = Object.freeze({
   version: PROFILE_VERSION,
   // needsName: only act on phrases that start with "AbleSpeak" (noisy places; wake-name.js)
-  listening: Object.freeze({ sensitivity: 'standard', pauseSeconds: 1.5, needsName: false }),
+  // cleanUpDictation: dictated words are corrected by Gemini before they are
+  // typed (misheard words, punctuation, capitals, um/uh), like Claude's or
+  // Wispr Flow's dictation. The text goes to Google; never in an exam.
+  listening: Object.freeze({ sensitivity: 'standard', pauseSeconds: 1.5, needsName: false, speechEngine: 'auto', cleanUpDictation: true }),
   vocabulary: Object.freeze([]),
   aliases: Object.freeze([]),
   macros: Object.freeze([]),
@@ -49,10 +62,18 @@ export function normaliseProfile(input = {}) {
 
   const listening = { ...DEFAULT_PROFILE.listening };
   if (source.listening !== undefined) {
-    const { sensitivity, pauseSeconds, needsName } = source.listening || {};
+    const { sensitivity, pauseSeconds, needsName, speechEngine, cleanUpDictation } = source.listening || {};
     if (needsName !== undefined) {
       if (typeof needsName === 'boolean') listening.needsName = needsName;
       else errors.push('listening.needsName must be true or false');
+    }
+    if (cleanUpDictation !== undefined) {
+      if (typeof cleanUpDictation === 'boolean') listening.cleanUpDictation = cleanUpDictation;
+      else errors.push('listening.cleanUpDictation must be true or false');
+    }
+    if (speechEngine !== undefined) {
+      if (SPEECH_ENGINES.includes(speechEngine)) listening.speechEngine = speechEngine;
+      else errors.push(`listening.speechEngine must be one of: ${SPEECH_ENGINES.join(', ')}`);
     }
     if (sensitivity !== undefined) {
       if (Object.hasOwn(SENSITIVITY, sensitivity)) listening.sensitivity = sensitivity;
@@ -157,11 +178,12 @@ export function saveProfile(studentId, changes) {
 
 /** What the overlay needs to listen well for this student. */
 export function listeningSettings(profile) {
-  const { sensitivity, pauseSeconds, needsName } = profile.listening;
+  const { sensitivity, pauseSeconds, needsName, speechEngine } = profile.listening;
   const levels = SENSITIVITY[sensitivity] || SENSITIVITY.standard;
   return {
     sensitivity,
     needsName: !!needsName,
+    speechEngine: speechEngine || 'auto',
     speechThreshold: levels.speech,
     silenceThreshold: levels.silence,
     quietThreshold: levels.quiet,

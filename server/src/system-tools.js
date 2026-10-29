@@ -7,8 +7,8 @@
 
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { writeFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, unlinkSync, readdirSync, existsSync } from 'fs';
+import { join, parse } from 'path';
 import { tmpdir } from 'os';
 import { resolveAppName, pickWindow } from './app-names.js';
 import { SCREEN_MODEL_CS } from './uia/screen-model-cs.js';
@@ -198,15 +198,20 @@ while ($true) {
 }
 
 const _psWorker = new PSWorker();
+// Reading the screen (the window list, the screen model, Office, what is
+// playing) has a worker of its own. With one queue, a read started while the
+// person speaks made the next action wait behind it, and actions held up
+// reads (17 Oct 2026). Each worker is its own PowerShell process.
+const _psReadWorker = new PSWorker();
 
 /**
- * Pre-start the PowerShell worker so the first voice command doesn't pay
+ * Pre-start the PowerShell workers so the first voice command doesn't pay
  * the spawn + assembly-load cost. Called at server startup.
  */
 export async function warmupSystemTools() {
   try {
-    await _psWorker.run('Write-Output "warm"', 20000);
-    console.log('[PSWorker] Warmed up and ready');
+    await Promise.all([_psWorker, _psReadWorker].map(w => w.run('Write-Output "warm"', 20000)));
+    console.log('[PSWorker] Warmed up and ready (actions and screen reads)');
   } catch (err) {
     console.warn('[PSWorker] Warmup failed:', err.message);
   }
@@ -234,25 +239,30 @@ async function psScriptFile(script, timeoutMs = 8000) {
  * Run a PowerShell script — fast path via the persistent worker,
  * temp-file fallback if the worker fails.
  */
-async function psScript(script, timeoutMs = 8000) {
+async function psScript(script, timeoutMs = 8000, worker = _psWorker) {
   try {
-    return await _psWorker.run(script, timeoutMs);
+    return await worker.run(script, timeoutMs);
   } catch (err) {
     console.warn('[PSWorker] Worker failed (' + err.message + ') — using temp-file fallback');
     return psScriptFile(script, timeoutMs + 5000);
   }
 }
 
-/** Run a script in the UI Automation worker (used by screen-model.js). */
-export const runPowerShell = psScript;
+/** A script that reads the screen, in the reading worker. */
+const psRead = (script, timeoutMs = 8000) => psScript(script, timeoutMs, _psReadWorker);
 
-/** End the PowerShell worker so a script or test process can exit. */
+/** Run a script in the screen-reading UI Automation worker (screen-model.js, office-uia.js). */
+export const runPowerShell = psRead;
+
+/** End the PowerShell workers so a script or test process can exit. */
 export function stopSystemTools() {
-  const proc = _psWorker.proc;
-  if (!proc) return;
-  try { proc.stdin.write('EXIT\n'); } catch {}
-  try { proc.kill(); } catch {}
-  _psWorker.proc = null;
+  for (const worker of [_psWorker, _psReadWorker]) {
+    const proc = worker.proc;
+    if (!proc) continue;
+    try { proc.stdin.write('EXIT\n'); } catch {}
+    try { proc.kill(); } catch {}
+    worker.proc = null;
+  }
 }
 
 // ── System Media Control ──
@@ -278,6 +288,112 @@ export function mediaAppName(aumid) {
   return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'the music';
 }
 
+// Windows' own media controls (the sessions the volume flyout shows), as
+// $mgr in PowerShell, with AbleAwait for their async calls
+const MEDIA_SESSIONS = `
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
+  function AbleAwait($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op)); $task.Wait(3000) | Out-Null; $task.Result }
+  [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime] | Out-Null
+  $mgr = AbleAwait ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])`;
+
+/**
+ * What is playing right now, in any app: music, a video, a podcast.
+ * → { playing: true, apps: ['Spotify'] } | { playing: false, apps: [] },
+ *   or null when Windows didn't answer
+ */
+export async function mediaPlaying(timeoutMs = 5000) {
+  const script = `
+try {${MEDIA_SESSIONS}
+  $playing = @()
+  foreach ($s in $mgr.GetSessions()) {
+    if ([string]$s.GetPlaybackInfo().PlaybackStatus -eq 'Playing') { $playing += $s.SourceAppUserModelId }
+  }
+  Write-Output ('MEDIA|' + ($playing -join ';'))
+} catch { Write-Output ('ERR|' + $_.Exception.Message) }
+`;
+  const out = String(await psRead(script, timeoutMs) || '').trim();
+  const line = out.split(/\r?\n/).reverse().find(l => /^(MEDIA|ERR)\|/.test(l)) || '';
+  if (!line.startsWith('MEDIA|')) return null;
+  const apps = [...new Set(line.slice(6).split(';').filter(Boolean).map(mediaAppName))];
+  return { playing: apps.length > 0, apps };
+}
+
+const SESSION_METHODS = {
+  play_pause: 'TryTogglePlayPauseAsync', play: 'TryPlayAsync', pause: 'TryPauseAsync',
+  next: 'TrySkipNextAsync', previous: 'TrySkipPreviousAsync', stop: 'TryStopAsync',
+};
+
+/**
+ * Play, pause or skip in one app (or, with no app, the one Windows shows)
+ * through its media session. No window comes forward and no key is typed,
+ * so nothing lands in the app's search box (Spotify's took the space key).
+ * → { status: 'success', playing, app, track } | { status: 'none' } (no
+ *   session, or it refused) | { status: 'error', message }
+ */
+async function sessionMediaControl(action, safeName) {
+  const pick = safeName
+    ? `$mgr.GetSessions() | Where-Object { $_.SourceAppUserModelId -like '*${safeName}*' } | Select-Object -First 1`
+    : '$mgr.GetCurrentSession()';
+  const want = { play: 'Playing', pause: 'Paused', stop: 'Stopped' }[action] || '';
+  const waits = action === 'next' || action === 'previous' ? 3 : 10;
+  const script = `
+try {${MEDIA_SESSIONS}
+  $s = ${pick}
+  if (-not $s) { Write-Output 'NOSESSION'; return }
+  $before = [string]$s.GetPlaybackInfo().PlaybackStatus
+  $ok = AbleAwait ($s.${SESSION_METHODS[action]}()) ([bool])
+  if (-not $ok) { Write-Output 'REFUSED'; return }
+  $after = $before
+  for ($i = 0; $i -lt ${waits}; $i++) {
+    Start-Sleep -Milliseconds 150
+    $after = [string]$s.GetPlaybackInfo().PlaybackStatus
+    if (('${want}' -ne '' -and $after -eq '${want}') -or ('${want}' -eq '' -and $after -ne $before)) { break }
+  }
+  $track = ''
+  try {
+    $p = AbleAwait ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+    if ($p.Title) { $track = $p.Title; if ($p.Artist) { $track = $p.Artist + ' - ' + $p.Title } }
+  } catch {}
+  Write-Output ('SESSION|' + $before + '|' + $after + '|' + $s.SourceAppUserModelId + '|' + $track)
+} catch { Write-Output ('ERR|' + $_.Exception.Message) }
+`;
+  const out = String(await psScript(script, 10000) || '').trim();
+  const line = out.split(/\r?\n/).reverse().find(l => /^(SESSION\||NOSESSION|REFUSED|ERR\|)/.test(l)) || '';
+  if (line === 'NOSESSION' || line === 'REFUSED') return { status: 'none' };
+  if (!line.startsWith('SESSION|')) return { status: 'error', message: line.startsWith('ERR|') ? line.slice(4) : (out || 'No answer from Windows media controls') };
+  const [, before, after, aumid, ...track] = line.split('|');
+  return {
+    status: 'success', wasPlaying: before === 'Playing', playing: after === 'Playing',
+    app: mediaAppName(aumid), track: track.join('|').trim(),
+  };
+}
+
+/**
+ * The part of an app's name that its media session id contains: "Spotify
+ * Premium" → "spotify" (SpotifyAB.SpotifyMusic_…!Spotify). Never empty for a
+ * name, since an empty one would match whichever app Windows shows.
+ */
+export function mediaSessionName(appName) {
+  return String(appName || '').trim().toLowerCase().split(/\s+/)[0];
+}
+
+/** What a media session did, for the AI and the person. */
+export function sessionReply(action, { wasPlaying, playing, app, track }) {
+  const starting = action === 'play' || (action === 'play_pause' && !wasPlaying);
+  if (starting) {
+    return playing
+      ? { status: 'success', action, app, message: `Playing ${track || app}.` }
+      : { status: 'error', message: `${app} didn't start playing. Use click_desktop_element with name:"Play", app_name:"${app}" to click its Play button.` };
+  }
+  if (action === 'next' || action === 'previous') {
+    return { status: 'success', action, app, message: track ? `Now playing ${track}.` : `${action === 'next' ? 'Next' : 'Previous'} track in ${app}.` };
+  }
+  return playing
+    ? { status: 'error', message: `${app} is still playing.` }
+    : { status: 'success', action, app, message: `Paused ${app}.` };
+}
+
 /**
  * Pause whatever is playing, in any app, through Windows' own media controls
  * (the sessions the volume flyout shows). Unlike the play/pause key this only
@@ -286,12 +402,7 @@ export function mediaAppName(aumid) {
  */
 export async function pauseAllMedia() {
   const script = `
-try {
-  Add-Type -AssemblyName System.Runtime.WindowsRuntime
-  $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
-  function AbleAwait($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op)); $task.Wait(3000) | Out-Null; $task.Result }
-  [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime] | Out-Null
-  $mgr = AbleAwait ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+try {${MEDIA_SESSIONS}
   $paused = @()
   foreach ($s in $mgr.GetSessions()) {
     if ([string]$s.GetPlaybackInfo().PlaybackStatus -eq 'Playing') {
@@ -312,7 +423,7 @@ try {
 }
 
 export async function systemMediaControl(action, appName) {
-  const validActions = ['play_pause', 'next', 'previous', 'stop'];
+  const validActions = ['play', 'pause', 'play_pause', 'next', 'previous', 'stop'];
   if (!validActions.includes(action)) {
     return { status: 'error', message: `Unknown media action: ${action}. Use: ${validActions.join(', ')}` };
   }
@@ -322,12 +433,18 @@ export async function systemMediaControl(action, appName) {
     const safe = sanitizeForPS(appName).toLowerCase();
     if (!safe) return { status: 'error', message: 'Invalid application name' };
 
+    // Its Windows media session first ("Spotify Premium" → the Spotify session)
+    const session = await sessionMediaControl(action, mediaSessionName(safe));
+    if (session.status === 'success') return sessionReply(action, session);
+    if (session.status === 'error') console.warn('[Media] Windows media session failed:', session.message);
+    // No session (the app never played since it opened): its own shortcut keys
+
     // In-app shortcuts per known player (SendKeys syntax)
     const APP_KEYS = {
       spotify: { play_pause: ' ', next: '^{RIGHT}', previous: '^{LEFT}', stop: ' ' },
       vlc:     { play_pause: ' ', next: 'n',        previous: 'p',       stop: 's' },
     };
-    const keys = (APP_KEYS[safe] || APP_KEYS.spotify)[action];
+    const keys = (APP_KEYS[safe] || APP_KEYS.spotify)[action === 'play' || action === 'pause' ? 'play_pause' : action];
 
     const script = `
 $proc = Get-Process -Name "*${safe}*" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
@@ -378,14 +495,25 @@ Write-Output ("STATE|" + $before + "|" + $after)
     return { status: 'success', action, app: appName, message: `${action} sent to ${appName}` };
   }
 
-  // ── Global mode: Windows media key (goes to the most recent media app) ──
+  // ── Global mode ──
+  // Play and pause go to Windows' media sessions, so they never toggle the wrong way
+  if (action === 'pause') {
+    const paused = await pauseAllMedia();
+    if (paused.status === 'success') return { status: 'success', action, message: `Paused ${paused.apps.join(' and ')}.` };
+    if (paused.status === 'none') return { status: 'success', action, message: 'Nothing is playing.' };
+  }
+  if (action === 'play') {
+    const session = await sessionMediaControl('play', '');
+    if (session.status === 'success') return sessionReply('play', session);
+  }
+  // Otherwise the Windows media key (goes to the most recent media app)
   const keyMap = {
     play_pause: '0xB3',  // VK_MEDIA_PLAY_PAUSE
     next:       '0xB0',  // VK_MEDIA_NEXT_TRACK
     previous:   '0xB1',  // VK_MEDIA_PREV_TRACK
     stop:       '0xB2',  // VK_MEDIA_STOP
   };
-  const vk = keyMap[action];
+  const vk = keyMap[action] || keyMap.play_pause;
 
   const script = `
 try {
@@ -522,11 +650,226 @@ foreach ($line in [WindowList]::Visible()) {
     Write-Output ($parts[0] + "\`t" + $names[$parts[1]] + "\`t" + $parts[2])
 }
 `;
-  const output = await psScript(script);
+  const output = await psRead(script);
   return output.split(/\r?\n/)
     .map(line => line.split('\t'))
     .filter(parts => parts.length === 3 && /^\d+$/.test(parts[0]))
     .map(([hwnd, process, title]) => ({ hwnd, process, title: title.trim() }));
+}
+
+// ── Opening a file shown in a File Explorer window ──
+
+/**
+ * Which of a folder's entries a spoken file name means: by the full name,
+ * else by the name without its extension (Explorer hides extensions, so
+ * "ablespeak-eval" is shown for both ablespeak-eval.txt and .pdf; agent eval,
+ * 24 Oct 2026). Returns { name } for one match, { ambiguous: [names] } for
+ * several, or null. Exported for tests.
+ */
+export function matchFileInFolder(entries, wanted) {
+  const lower = String(wanted || '').trim().toLowerCase();
+  if (!lower) return null;
+  let matches = entries.filter(n => n.toLowerCase() === lower);
+  if (!matches.length) matches = entries.filter(n => parse(n).name.toLowerCase() === lower);
+  if (!matches.length) return null;
+  return matches.length === 1 ? { name: matches[0] } : { ambiguous: matches };
+}
+
+/** The folder a File Explorer window shows (Shell.Application knows each folder window by its hwnd), or null. */
+export async function explorerFolderOf(hwnd) {
+  if (!/^\d+$/.test(String(hwnd))) return null;
+  const out = await psScript(`
+$s = New-Object -ComObject Shell.Application
+foreach ($w in @($s.Windows())) { if ($w.HWND -eq ${Number(hwnd)}) { try { Write-Output $w.Document.Folder.Self.Path } catch {} } }
+`).catch(() => '');
+  const path = String(out || '').trim().split(/\r?\n/)[0];
+  return path && /^[a-z]:\\/i.test(path) ? path : null;
+}
+
+/**
+ * "Open <file>" in the File Explorer window the person is using: the file is
+ * opened by its path with its default app, so it needs no clicking and the
+ * hidden extension does not matter. Returns null when the window is not a
+ * folder or nothing there has that name; an error that asks which one when
+ * several do.
+ */
+export async function openFileInFolderWindow(name, appName) {
+  const windows = await listVisibleWindows();
+  const win = appName
+    ? pickWindow(windows, appName)
+    : windows.find(w => !OWN_TITLE.test(String(w.title || '').trim()) && !NOT_AN_APP.test(String(w.title || '').trim()));
+  if (!win || String(win.process).toLowerCase() !== 'explorer') return null;
+  const folder = await explorerFolderOf(win.hwnd);
+  if (!folder) return null;
+  let entries;
+  try { entries = readdirSync(folder); } catch { return null; }
+  const match = matchFileInFolder(entries, name);
+  console.log(`[SystemTools] Open "${name}" in "${win.title}" (${folder}): ${match ? (match.name || `${match.ambiguous.length} matches`) : 'no such file'}`);
+  if (!match) return null;
+  if (match.ambiguous) {
+    return { status: 'error', message: `There are ${match.ambiguous.length} items called "${name}" in ${win.title.replace(/ - File Explorer$/, '')}: ${match.ambiguous.join(', ')}. Say which one.`, ambiguous: match.ambiguous };
+  }
+  const target = join(folder, match.name);
+  const before = new Set(windows.map(w => String(w.hwnd)));
+  const foregroundBefore = String(await psScript('[Win32Input]::GetForegroundWindow().ToInt64()').catch(() => '')).trim();
+  const quoted = `'${target.replace(/'/g, "''")}'`;
+  await psScript(`Invoke-Item -LiteralPath ${quoted}`);
+
+  // No default app for this kind of file: Windows shows its "Open With"
+  // chooser, an untitled window that keeps the keyboard until it is answered
+  // and blocks every other window from coming forward (24 Oct 2026). It is
+  // found by its process, as it is not always the foreground window. Plain
+  // text then opens in Notepad; anything else is asked about.
+  let chooser = false;
+  for (let waited = 0; !chooser && waited < 3000; waited += 500) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    chooser = String(await psScript('@(Get-Process OpenWith -ErrorAction SilentlyContinue).Count').catch(() => '0')).trim() !== '0';
+  }
+  if (chooser) {
+    console.log(`[SystemTools] Windows asked which app should open ${match.name}`);
+    await psScript('Get-Process OpenWith -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue').catch(() => {});
+    if (/\.(?:txt|md|log|csv|ini|json)$/i.test(match.name)) {
+      // By full path: Git's "notepad" script comes first on PATH here
+      await psScript(`Start-Process -FilePath "$env:WINDIR\\notepad.exe" -ArgumentList ${quoted}`);
+    } else {
+      return { status: 'error', message: `Windows asked which app should open ${match.name}, as none is set for ${parse(match.name).ext} files. Say which app to use, or set a default app in Settings.` };
+    }
+  }
+
+  // Bring the app that opened it to the front: a new window, an existing one
+  // that now shows the file (a PDF opened as a tab in the Edge window already
+  // open, which stayed behind Explorer), or whichever window Windows
+  // activated for it (an editor that already had the file open; agent eval,
+  // 24 Oct 2026).
+  const stem = parse(match.name).name.toLowerCase();
+  const started = Date.now();
+  let shown = null;
+  while (!shown && Date.now() - started < 8000) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const now = await listVisibleWindows().catch(() => []);
+    const notExplorer = w => String(w.process).toLowerCase() !== 'explorer';
+    const foreground = String(await psScript('[Win32Input]::GetForegroundWindow().ToInt64()').catch(() => '')).trim();
+    shown = now.find(w => !before.has(String(w.hwnd)) && notExplorer(w))
+      || now.find(w => String(w.title).toLowerCase().includes(stem) && notExplorer(w))
+      || (foreground && foreground !== foregroundBefore ? now.find(w => String(w.hwnd) === foreground && notExplorer(w)) : null);
+  }
+  if (shown) {
+    await psScript(`
+$h = [IntPtr]${Number(shown.hwnd)}
+${bringToFront('$h')}
+`).catch(() => {});
+  }
+  console.log(`[SystemTools] ${match.name} ${shown ? `shown in "${shown.title}"` : 'opened, but no window for it was found'}`);
+  return { status: 'success', message: `Opened ${match.name}${shown ? ` in ${shown.title}` : ''}`, path: target, ...(shown ? { window: shown.title } : {}) };
+}
+
+// ── Saving the document in front under a name ──
+
+const SAVE_FOLDERS = { documents: 'shell:Personal', 'my documents': 'shell:Personal', downloads: 'shell:Downloads', desktop: 'shell:Desktop', pictures: 'shell:My Pictures', music: 'shell:My Music', videos: 'shell:My Video' };
+
+/** Where "in Documents" is: a shell: folder name, a full path as given, or null for "wherever the dialog is". Exported for tests. */
+export function saveFolderSpec(folder) {
+  const said = String(folder || '').trim().replace(/^(?:my |the )/i, '').replace(/ folder$/i, '').toLowerCase();
+  if (!said) return null;
+  if (/^[a-z]:\\/i.test(folder)) return { path: String(folder).trim() };
+  return SAVE_FOLDERS[said] ? { shell: SAVE_FOLDERS[said] } : null;
+}
+
+const windowTitled = (windows, re) => windows.find(w => re.test(String(w.title || '').trim()));
+
+async function waitForWindow(re, maxMs) {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    const hit = windowTitled(await listVisibleWindows().catch(() => []), re);
+    if (hit) return hit;
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  return null;
+}
+
+/**
+ * Save the document in the app in front under `name`, through the app's own
+ * Save As dialog: Ctrl+Shift+S, the full path into the "File name" box,
+ * Enter, and a check that the file exists. The dialog is driven here rather
+ * than step by step by the AI, which typed into the label, browsed the folder
+ * tree (which reset the name) and answered "replace?" with yes (24 Oct
+ * 2026). An existing file is never replaced unless `replace` is true.
+ */
+export async function saveDocumentAs({ name, folder, replace = false } = {}) {
+  const fileName = String(name || '').trim().replace(/[\\/:*?"<>|]+/g, ' ').trim();
+  if (!fileName) return { status: 'error', message: 'Say what to call the file.' };
+  const spec = saveFolderSpec(folder);
+  if (folder && !spec) return { status: 'error', message: `I don't know a folder called "${folder}". Say Documents, Downloads, Desktop, Pictures, Music or Videos.` };
+
+  const front = await ensureUserAppInFront();
+  if (front.status !== 'success') return { status: 'error', message: front.message };
+  const app = front.title;
+
+  // The dialog, unless it is already open
+  let dialog = windowTitled(await listVisibleWindows().catch(() => []), /^save as$/i);
+  if (!dialog) {
+    await sendKeys('Ctrl+Shift+S');
+    dialog = await waitForWindow(/^save as$/i, 8000);
+  }
+  if (!dialog) return { status: 'error', message: `I couldn't open the Save As dialog in ${app}.` };
+
+  // Where to save: the folder's real path, so the dialog needs no browsing
+  let folderPath = null;
+  if (spec?.path) folderPath = spec.path;
+  else if (spec?.shell) {
+    folderPath = String(await psScript(`(New-Object -ComObject Shell.Application).NameSpace('${spec.shell}').Self.Path`).catch(() => '')).trim();
+    if (!/^[a-z]:\\/i.test(folderPath)) return { status: 'error', message: `I couldn't find your ${folder} folder.` };
+  }
+  const target = folderPath ? join(folderPath, fileName) : fileName;
+
+  // Typed, not set: setting the box's value through accessibility reported
+  // success but the dialog kept the old name and asked to replace that file
+  const { getScreenModel, findElement, actOnElement } = await import('./screen-model.js');
+  const model = await getScreenModel({ fresh: true, maxElements: 300 });
+  const field = model.status === 'success' ? findElement(model, 'File name', { action: 'set_value' }) : null;
+  if (!field) return { status: 'error', message: "I couldn't find the file name box in the Save As dialog." };
+  if (!field.focused) {
+    const focused = await actOnElement({ ref: field.ref, action: 'focus', log: false }).catch(() => ({ status: 'error' }));
+    if (focused.status !== 'success' && field.rect) {
+      const [x, y, w, h] = field.rect;
+      await mouseClick(x + w / 2, y + h / 2);
+    }
+  }
+  await sendKeys('Ctrl+A');
+  const typed = await typeTextSystem(target);
+  if (typed.status !== 'success') return { status: 'error', message: `I couldn't put the name into the Save As dialog: ${typed.message}` };
+  await new Promise(resolve => setTimeout(resolve, 300));
+  await sendKeys('Enter');
+
+  // Either the dialog closes, or Windows asks about replacing an existing file
+  const started = Date.now();
+  while (Date.now() - started < 6000) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const windows = await listVisibleWindows().catch(() => []);
+    const confirm = windowTitled(windows, /^confirm save as$/i);
+    if (confirm) {
+      if (!replace) {
+        await actOnElement({ name: 'No', action: 'invoke', log: false }).catch(() => {});
+        await sendKeys('Escape');
+        return { status: 'error', message: `A file called ${fileName} already exists there, so I didn't replace it. Say "replace it" if you want to.` };
+      }
+      await actOnElement({ name: 'Yes', action: 'invoke', log: false }).catch(() => {});
+      continue;
+    }
+    if (!windowTitled(windows, /^save as$/i)) break;
+  }
+  if (windowTitled(await listVisibleWindows().catch(() => []), /^save as$/i)) {
+    // Still open: Windows refused the name (a message box with OK)
+    await actOnElement({ name: 'OK', action: 'invoke', log: false }).catch(() => {});
+    await sendKeys('Escape');
+    return { status: 'error', message: `Windows did not accept "${fileName}" as a file name.` };
+  }
+  if (folderPath) {
+    const saved = [target, `${target}.txt`].find(p => existsSync(p));
+    if (!saved) return { status: 'error', message: `The Save As dialog closed, but ${fileName} is not in ${folder}.` };
+    return { status: 'success', message: `Saved as ${parse(saved).base} in ${folder}`, path: saved };
+  }
+  return { status: 'success', message: `Saved as ${fileName}` };
 }
 
 // ── The student's app, never AbleSpeak's own windows ──
@@ -566,7 +909,17 @@ foreach ($line in [WindowList]::Visible()) { Write-Output $line }
 /** The app the student is using, without changing what is in front. */
 async function userWindow() {
   const { front, windows } = await readWindows();
-  return front && !isOwnWindow(front) ? front : pickUserWindow(windows);
+  return front && front.title && !isOwnWindow(front) ? front : pickUserWindow(windows);
+}
+
+/**
+ * The app a key press would go to (ensureUserAppInFront's choice), without
+ * changing what is in front: { process, title }, or null. For the safety
+ * gate; the window list's first window can be an always-on-top bar (Voice Access).
+ */
+export async function keyTargetApp() {
+  const win = await userWindow();
+  return win ? { process: await processNameOf(win), title: win.title } : null;
 }
 
 /** "winword", "excel", "notepad"… for a window. */
@@ -583,22 +936,42 @@ async function processNameOf(win) {
  *
  * Returns { status, hwnd, title, switched } or { status: 'error', message }.
  */
+/**
+ * PowerShell that brings a window to the front and waits until Windows says
+ * it is there: checked every 15 ms, so usually a few ms instead of the fixed
+ * 200 ms (350 ms when the first try was refused) it used to sleep. Retries
+ * once if Windows refuses. `$h` is the PowerShell variable holding the hwnd.
+ */
+export function bringToFront(h) {
+  return `[Win32Input]::ForceFocus(${h}) | Out-Null
+for ($i = 0; $i -lt 14 -and [Win32Input]::GetForegroundWindow() -ne ${h}; $i++) { Start-Sleep -Milliseconds 15 }
+if ([Win32Input]::GetForegroundWindow() -ne ${h}) {
+    [Win32Input]::ForceFocus(${h}) | Out-Null
+    for ($i = 0; $i -lt 10 -and [Win32Input]::GetForegroundWindow() -ne ${h}; $i++) { Start-Sleep -Milliseconds 15 }
+}`;
+}
+
 export async function ensureUserAppInFront() {
   const { front, windows } = await readWindows();
-  if (front && !isOwnWindow(front)) {
+  // An untitled foreground window (one not in the visible list) is not the
+  // app: keys sent to it went nowhere, so Ctrl+Shift+S opened Save As only
+  // sometimes (24 Oct 2026). The app's own window is brought forward instead.
+  if (front && front.title && !isOwnWindow(front)) {
     return { status: 'success', hwnd: front.hwnd, title: front.title, switched: false };
   }
 
   const target = pickUserWindow(windows);
   if (!target) return { status: 'error', message: 'There is no app open to use. Open one first.' };
+  // A moment to settle after it comes forward: keys or clicks follow
   const result = await psScript(`
 $h = [IntPtr]${Number(target.hwnd)}
-[Win32Input]::ForceFocus($h) | Out-Null
-Start-Sleep -Milliseconds 200
-if ([Win32Input]::GetForegroundWindow() -ne $h) { [Win32Input]::ForceFocus($h) | Out-Null; Start-Sleep -Milliseconds 150 }
-if ([Win32Input]::GetForegroundWindow() -eq $h) { 'FOCUSED' } else { 'FOCUS_FAILED' }
+${bringToFront('$h')}
+if ([Win32Input]::GetForegroundWindow() -eq $h) { Start-Sleep -Milliseconds 40; 'FOCUSED' } else { 'FOCUS_FAILED' }
 `);
   if (String(result).trim() !== 'FOCUSED') {
+    // What is holding the foreground (an "Open With" chooser did, 24 Oct 2026)
+    const holder = front ? `${await processNameOf(front) || 'pid ' + front.pid} "${front.title}"` : 'nothing';
+    console.warn(`[SystemTools] Could not bring "${target.title}" forward; the foreground is ${holder}`);
     return { status: 'error', message: `I couldn't bring "${target.title}" to the front.` };
   }
   console.log(`[SystemTools] AbleSpeak was in front; switched back to "${target.title}"`);
@@ -624,13 +997,7 @@ export async function focusApplication(appName) {
   // focus-stealing prevention. hwnd is digits only (checked when listed).
   const script = `
 $hWnd = [IntPtr]${target.hwnd}
-[Win32Input]::ForceFocus($hWnd) | Out-Null
-Start-Sleep -Milliseconds 200
-# Verify focus landed; retry once if Windows denied it
-if ([Win32Input]::GetForegroundWindow() -ne $hWnd) {
-    [Win32Input]::ForceFocus($hWnd) | Out-Null
-    Start-Sleep -Milliseconds 150
-}
+${bringToFront('$hWnd')}
 if ([Win32Input]::GetForegroundWindow() -eq $hWnd) { Write-Output "FOCUSED" } else { Write-Output "FOCUS_FAILED" }
 `;
 
@@ -642,6 +1009,39 @@ if ([Win32Input]::GetForegroundWindow() -eq $hWnd) { Write-Output "FOCUSED" } el
 }
 
 // ── Open Application ──
+
+/**
+ * The window an app just opened: one of its windows that wasn't open before
+ * (`before` = the hwnds then), or null.
+ */
+export function pickLaunchedWindow(before, windows, appName) {
+  return pickWindow(windows.filter(w => !before.has(String(w.hwnd))), appName);
+}
+
+/**
+ * After starting an app, wait for its window and bring it to the front:
+ * Windows can open it behind the app in use (23 Oct 2026: Notepad opened
+ * behind Chrome, and the next step typed into Chrome). An app that was
+ * already open may reuse its window (Settings, Spotify), so after a short
+ * wait that one is brought forward instead. Returns the window's title, or
+ * null if no window showed up in time.
+ */
+async function showLaunchedWindow(appName, before, hadWindow) {
+  const started = Date.now();
+  const maxMs = hadWindow ? 1500 : 6000;
+  let target = null;
+  while (!target && Date.now() - started < maxMs) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    target = pickLaunchedWindow(before, await listVisibleWindows().catch(() => []), appName);
+  }
+  if (!target && hadWindow) target = pickWindow(await listVisibleWindows().catch(() => []), appName);
+  if (!target) return null;
+  await psScript(`
+$h = [IntPtr]${Number(target.hwnd)}
+${bringToFront('$h')}
+`).catch(() => {});
+  return target.title;
+}
 
 export async function openApplication(appName) {
   const appMap = {
@@ -675,24 +1075,37 @@ export async function openApplication(appName) {
   // "open my Word document" launches Word, like "open Word"
   const command = appMap[lower] || resolveAppName(appName).launch;
 
+  // The windows open now, to find the one the app opens and bring it forward
+  const windowsBefore = await listVisibleWindows().catch(() => []);
+  const before = new Set(windowsBefore.map(w => String(w.hwnd)));
+  const hadWindow = !!pickWindow(windowsBefore, appName);
+  const opened = async () => {
+    const title = await showLaunchedWindow(appName, before, hadWindow);
+    return { status: 'success', message: `Opened ${appName}`, ...(title ? { window: title } : { starting: true }) };
+  };
+
   // Only allow whitelisted apps or sanitized names — never raw user input in shell
   if (!command) {
     const safe = sanitizeForPS(appName);
     if (!safe) return { status: 'error', message: 'Invalid application name' };
     try {
       await psScript(`Start-Process "${safe}"`, 5000);
-      return { status: 'success', message: `Opened ${appName}` };
+      return await opened();
     } catch (err) {
       return { status: 'error', message: `Could not open "${appName}": ${err.message}` };
     }
   }
 
+  // Through "start", so cmd returns once the app is launched. Run directly,
+  // Windows 11's Notepad launcher stays open with the window, the 5 s wait
+  // ran out, and "open Notepad" was reported as failed although it opened.
+  const launch = /^start\s/i.test(command) ? command : `start "" ${command}`;
   try {
-    await execAsync(command, { shell: 'cmd.exe', timeout: 5000 });
-    return { status: 'success', message: `Opened ${appName}` };
+    await execAsync(launch, { shell: 'cmd.exe', timeout: 5000 });
   } catch (err) {
     return { status: 'error', message: `Could not open "${appName}": ${err.message}` };
   }
+  return opened();
 }
 
 // ── Close Application ──
@@ -728,7 +1141,18 @@ if (-not $closed) { Write-Output "NOT_FOUND" }
 
 // ── Send Keyboard Shortcut ──
 
-export async function sendKeys(keys) {
+// The Windows key, as the AI or a person may name it. SendKeys has no such
+// key, so it is pressed through keybd_event, as windowControl's snapping
+// already does: a tap on its own opens the Start menu.
+const WIN_KEY_RE = /^(?:l|r)?win(?:dows)?(?:\s*key)?$|^(?:super|meta|start)$/;
+const VK = { left: 0x25, up: 0x26, right: 0x27, down: 0x28, tab: 0x09, enter: 0x0d, space: 0x20, home: 0x24, end: 0x23 };
+
+/**
+ * How to press a shortcut: { sendKeys } text for SendKeys, { vk } key codes
+ * to press with the Windows key held, or { error } for one that can't be
+ * pressed. Exported for tests.
+ */
+export function keyPlan(keys) {
   const keyMap = {
     'ctrl': '^', 'alt': '%', 'shift': '+',
     'enter': '{ENTER}', 'tab': '{TAB}',
@@ -743,10 +1167,17 @@ export async function sendKeys(keys) {
     'space': ' ',
   };
 
-  const parts = keys.split('+').map(k => k.trim().toLowerCase());
-  let sendKeysStr = '';
-  let regularKeys = [];
+  const parts = String(keys || '').split('+').map(k => k.trim().toLowerCase()).filter(Boolean);
+  if (parts.some(p => WIN_KEY_RE.test(p))) {
+    const rest = parts.filter(p => !WIN_KEY_RE.test(p));
+    if (!rest.length) return { vk: [] }; // a tap of the Windows key alone: the Start menu ("press the Windows key" did nothing, 24 Oct 2026)
+    const codes = rest.map(p => (/^[a-z0-9]$/.test(p) ? p.toUpperCase().charCodeAt(0) : VK[p]));
+    if (codes.some(c => !c)) return { error: `I can't press Windows+${rest.join('+')} yet.` };
+    return { vk: codes };
+  }
 
+  let sendKeysStr = '';
+  const regularKeys = [];
   for (const part of parts) {
     if (keyMap[part] && ['ctrl', 'alt', 'shift'].includes(part)) {
       sendKeysStr += keyMap[part];
@@ -762,16 +1193,30 @@ export async function sendKeys(keys) {
       if (safe) regularKeys.push(safe);
     }
   }
+  return { sendKeys: sendKeysStr + regularKeys.join('') };
+}
 
-  sendKeysStr += regularKeys.join('');
+export async function sendKeys(keys) {
+  const plan = keyPlan(keys);
+  if (plan.error) return { status: 'error', keys, message: plan.error };
 
   const front = await ensureUserAppInFront();
   if (front.status !== 'success') return { status: 'error', keys, message: front.message };
+  // Which window the keys go to, for working out a shortcut that did nothing
+  console.log(`[SystemTools] Keys ${keys} → "${String(front.title || '').slice(0, 60)}"${front.switched ? ' (brought forward)' : ''}`);
 
-  const script = `
+  const script = plan.vk
+    ? `
+[Win32Input]::keybd_event(0x5B, 0, 0, 0)        # LWIN down
+${plan.vk.map(c => `[Win32Input]::keybd_event(${c}, 0, 0, 0)`).join('\n')}
+Start-Sleep -Milliseconds 30
+${plan.vk.map(c => `[Win32Input]::keybd_event(${c}, 0, 2, 0)`).join('\n')}
+[Win32Input]::keybd_event(0x5B, 0, 2, 0)        # LWIN up
+`
+    : `
 $wshell = New-Object -ComObject wscript.shell
 Start-Sleep -Milliseconds 100
-$wshell.SendKeys("${sendKeysStr}")
+$wshell.SendKeys("${plan.sendKeys}")
 `;
 
   await psScript(script);
@@ -1067,18 +1512,32 @@ public class WindowList {
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
     // Visible, titled top-level windows, front to back, as "hwnd<TAB>pid<TAB>title".
-    // Skips owned windows (dialogs, tool palettes) and cloaked ones (suspended
-    // Store apps, other virtual desktops), which Windows reports as visible.
+    // Skips owned windows (tool palettes, popups) unless one is in front: a
+    // dialog (Save As, Open, "Save your changes?") is an owned window, and
+    // while it is in front it is what the person sees and must act on. Before
+    // this the agent pressed Ctrl+Shift+S and saw "nothing changed" (24 Oct
+    // 2026). Also skips cloaked windows (suspended Store apps, other virtual
+    // desktops), which Windows reports as visible.
     public static string[] Visible() {
         var found = new System.Collections.Generic.List<string>();
+        IntPtr front = GetForegroundWindow();
         EnumWindows(delegate (IntPtr h, IntPtr l) {
-            if (!IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true;
+            if (!IsWindowVisible(h) || (GetWindow(h, 4) != IntPtr.Zero && h != front)) return true;
             int cloaked;
             if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
             var text = new System.Text.StringBuilder(512);
-            if (GetWindowText(h, text, 512) == 0) return true;
+            if (GetWindowText(h, text, 512) == 0) {
+                // An untitled window in front (Windows' "Open With" chooser)
+                // holds the keyboard and must be seen: its class stands in
+                // for its title (24 Oct 2026).
+                if (h != front) return true;
+                GetClassName(h, text, 512);
+                if (text.Length == 0) return true;
+            }
             uint pid;
             GetWindowThreadProcessId(h, out pid);
             found.Add(h.ToInt64() + "\\t" + pid + "\\t" + text.ToString().Replace("\\t", " "));

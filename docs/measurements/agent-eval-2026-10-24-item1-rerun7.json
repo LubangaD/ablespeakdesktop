@@ -1,0 +1,285 @@
+{
+  "date": "2026-10-24 01:25",
+  "label": "item1-rerun7",
+  "model": "gemini-2.5-flash",
+  "tasks": 2,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 4,
+      "median": 4,
+      "max": 4
+    },
+    "medianSeconds": {
+      "min": 84,
+      "median": 84,
+      "max": 84
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:25:22.121Z",
+      "tasks": 2,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 2,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 4,
+      "medianSeconds": 84,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "I couldn't finish: The step intended to open 'ablespeak-eval.txt' in Notepad, but the screen remained on 'Documents - File Explorer' and a 'Pick an application' window appeared, indicating the file was not opened as exp. I did 3 of 4 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": false,
+              "why": "The step intended to open 'Documents' in File Explorer, but the screen shows 'ablespeak - Antigravity IDE - Google/artemis repository' (Antigravity IDE) instead."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The screen now shows the 'Documents - File Explorer' window, and the 'Items View' lists the contents of Documents, which matches the expected outcome."
+            },
+            {
+              "do": "Open ablespeak-eval.txt",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "The step was to open 'ablespeak-eval.txt' in Notepad, but the screen still shows 'Documents - File Explorer' and no new window appeared."
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'Items View' list scrolled down, as evidenced by new list items appearing and old ones disappearing, and the scrollbar value changing from 0 to 99."
+            },
+            {
+              "do": "Open \"ablespeak-eval.txt\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "The step intended to open 'ablespeak-eval.txt' in Notepad, but the screen remained on 'Documents - File Explorer' and a 'Pick an application' window appeared, indicating the file was not opened as exp"
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 83825,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"Documents - File Explorer\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The 'Save As' window did not appear, and nothing visible changed on the screen.. I did 2 of 7 steps.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'notepad-check.txt - Notepad', indicating Notepad was opened, even though it opened a specific file instead of an empty document."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": null,
+              "ok": true,
+              "why": "the screen already showed it"
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'Save As' window did not appear, and nothing visible changed on the screen."
+            },
+            {
+              "do": "Press Alt+F",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'File' menu is still collapsed, indicating that Alt+F did not expand it."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'Save As' window did not appear, and nothing visible changed on the screen."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 38246,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:25:22.121Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 2,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 4,
+  "medianSeconds": 84,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "I couldn't finish: The step intended to open 'ablespeak-eval.txt' in Notepad, but the screen remained on 'Documents - File Explorer' and a 'Pick an application' window appeared, indicating the file was not opened as exp. I did 3 of 4 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer', indicating that File Explorer was successfully opened."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": false,
+          "why": "The step intended to open 'Documents' in File Explorer, but the screen shows 'ablespeak - Antigravity IDE - Google/artemis repository' (Antigravity IDE) instead."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The screen now shows the 'Documents - File Explorer' window, and the 'Items View' lists the contents of Documents, which matches the expected outcome."
+        },
+        {
+          "do": "Open ablespeak-eval.txt",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "The step was to open 'ablespeak-eval.txt' in Notepad, but the screen still shows 'Documents - File Explorer' and no new window appeared."
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Items View' list scrolled down, as evidenced by new list items appearing and old ones disappearing, and the scrollbar value changing from 0 to 99."
+        },
+        {
+          "do": "Open \"ablespeak-eval.txt\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "The step intended to open 'ablespeak-eval.txt' in Notepad, but the screen remained on 'Documents - File Explorer' and a 'Pick an application' window appeared, indicating the file was not opened as exp"
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 83825,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"Documents - File Explorer\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The 'Save As' window did not appear, and nothing visible changed on the screen.. I did 2 of 7 steps.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'notepad-check.txt - Notepad', indicating Notepad was opened, even though it opened a specific file instead of an empty document."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": null,
+          "ok": true,
+          "why": "the screen already showed it"
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'Save As' window did not appear, and nothing visible changed on the screen."
+        },
+        {
+          "do": "Press Alt+F",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'File' menu is still collapsed, indicating that Alt+F did not expand it."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'Save As' window did not appear, and nothing visible changed on the screen."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 38246,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

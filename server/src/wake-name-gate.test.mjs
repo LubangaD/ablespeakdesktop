@@ -61,12 +61,12 @@ test('the answer to a yes/no question needs no name', async () => {
   assert.deepEqual(handled, ['yes']);
 });
 
-test('the name is added to speech recognition, only when it is needed', async () => {
+test('the name is always added to speech recognition, so it is written right', async () => {
   const on = makeProxy({ needsName: true });
   await on.say('AbleSpeak, scroll down');
   assert.ok(on.vocabularies[0].includes('AbleSpeak'));
   const off = makeProxy({ needsName: false });
   await off.say('open Word');
-  assert.ok(!off.vocabularies[0].includes('AbleSpeak'));
+  assert.ok(off.vocabularies[0].includes('AbleSpeak'), '"I will speak" was heard for it when it was left out');
   assert.deepEqual(off.handled, ['open Word'], 'with the option off, everything is heard as before');
 });

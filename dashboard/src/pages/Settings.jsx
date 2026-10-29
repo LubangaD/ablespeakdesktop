@@ -18,7 +18,7 @@ const KEY_HINT = { openai: 'sk-...', anthropic: 'sk-ant-...', gemini: 'AIza...' 
 const RESULT_TONE = { success: 'ok', warn: 'warn', error: 'bad' };
 
 // Notices: a quiet strip with a coloured left edge
-const NOTICE_EDGE = { warning: 'border-[#ffc880]', success: 'border-[#68d9c3]', error: 'border-[#ffb4ab]' };
+const NOTICE_EDGE = { warning: 'border-[var(--accent-soft)]', success: 'border-[var(--ok)]', error: 'border-[var(--bad)]' };
 
 /** A Material Symbols icon, hidden from screen readers. */
 function Icon({ name, className = '', filled = false }) {
@@ -36,7 +36,7 @@ function Icon({ name, className = '', filled = false }) {
 /** A quiet strip with a coloured left edge, for things worth knowing. */
 function NoticeBox({ tone = 'warning', role, children }) {
   return (
-    <div role={role} className={`rounded-lg bg-[#18202d] border-l-2 ${NOTICE_EDGE[tone]} px-4 py-3 text-[14px] leading-5 text-[#dae3f4]`}>
+    <div role={role} className={`rounded-lg bg-[var(--sunken)] border-l-2 ${NOTICE_EDGE[tone]} px-4 py-3 text-[14px] leading-5 text-[var(--ink)]`}>
       {children}
     </div>
   );
@@ -133,6 +133,8 @@ export default function Settings() {
         <AdminAccountSection />
 
         <ApiKeysSection onChanged={refreshAi} />
+
+        <AnalyticsSection />
 
         {/* Language model */}
         <section aria-labelledby="language-model-heading" className="flex flex-col gap-4">
@@ -249,10 +251,10 @@ function SharedComputerSection() {
             type="button" role="switch" aria-checked={shared}
             aria-labelledby="shared-computer-label" aria-describedby="shared-computer-help"
             onClick={toggle} disabled={busy || !data}
-            className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[#18202d] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[var(--sunken)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${shared ? 'bg-[#f5a623] justify-end' : 'bg-[#2d3543] justify-start'}`} aria-hidden="true">
-              <span className={`w-5 h-5 rounded-full ${shared ? 'bg-[#3d2600]' : 'bg-[#c9b8a5]'}`} />
+            <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${shared ? 'bg-[#1f9c89] justify-end' : 'bg-white/[0.13] justify-start'}`} aria-hidden="true">
+              <span className={`w-5 h-5 rounded-full ${shared ? 'bg-[#04201c]' : 'bg-[#d8c7b3]'}`} />
             </span>
             <span className={BODY}>{shared ? 'On' : 'Off'}</span>
           </button>
@@ -310,10 +312,10 @@ function AdminAccountSection() {
             type="button" role="switch" aria-checked={on}
             aria-labelledby="admin-account-label" aria-describedby="admin-account-help"
             onClick={toggle} disabled={busy || !!account.blocked}
-            className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[#18202d] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="shrink-0 min-h-[44px] inline-flex items-center gap-2 px-2 rounded-lg hover:bg-[var(--sunken)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${on ? 'bg-[#f5a623] justify-end' : 'bg-[#2d3543] justify-start'}`} aria-hidden="true">
-              <span className={`w-5 h-5 rounded-full ${on ? 'bg-[#3d2600]' : 'bg-[#c9b8a5]'}`} />
+            <span className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors ${on ? 'bg-[#1f9c89] justify-end' : 'bg-white/[0.13] justify-start'}`} aria-hidden="true">
+              <span className={`w-5 h-5 rounded-full ${on ? 'bg-[#04201c]' : 'bg-[#d8c7b3]'}`} />
             </span>
             <span className={BODY}>{on ? 'On' : 'Off'}</span>
           </button>
@@ -387,6 +389,86 @@ function HelperPinSection() {
   );
 }
 
+/**
+ * Google Analytics: where AbleSpeak counts its use, for accounts whose person
+ * agreed in their profile (server/src/analytics.js). The API secret is shown
+ * masked once saved.
+ */
+function AnalyticsSection() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({ queryKey: ['analyticsSettings'], queryFn: api.getAnalyticsSettings });
+  const [measurementId, setMeasurementId] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const run = async (call) => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const answer = await call();
+      queryClient.setQueryData(['analyticsSettings'], answer);
+      setMeasurementId('');
+      setApiSecret('');
+      setResult({ tone: 'success', text: answer.message });
+    } catch (err) {
+      setResult({ tone: 'error', text: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submit = (e) => {
+    e.preventDefault();
+    run(() => api.saveAnalyticsSettings(measurementId || data?.measurementId || '', apiSecret));
+  };
+
+  return (
+    <section aria-labelledby="analytics-heading" className="flex flex-col gap-4">
+      <SectionHeading id="analytics-heading">Usage analytics</SectionHeading>
+      <div className={`${CARD} p-5 flex flex-col gap-4`}>
+        <div className="flex items-start justify-between gap-6">
+          <p id="analytics-help" className={`${MUTED} max-w-[680px]`}>
+            AbleSpeak counts how it is used in your Google Analytics 4 property: when it opens, and each command’s kind,
+            result, time and feature, with the person’s role, age group, county and school. Only for accounts whose person
+            agreed in their profile (a parent or guardian under 18). Never names, emails or what was said. Find the
+            Measurement ID and create an API secret in Google Analytics › Admin › Data streams › your stream.
+          </p>
+          {data?.configured ? <Status tone="ok">On</Status> : <Status tone="idle">Not set up</Status>}
+        </div>
+        {data?.configured && (
+          <dl className="divide-y divide-[var(--line-soft)]">
+            <Row label="Measurement ID">{data.measurementId}</Row>
+            <Row label="API secret">{data.secretMasked}</Row>
+          </dl>
+        )}
+        <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+          <label className={`${LABEL} flex flex-col gap-1.5`}>
+            Measurement ID
+            <input
+              value={measurementId} onChange={e => setMeasurementId(e.target.value.trim())}
+              placeholder={data?.measurementId || 'G-XXXXXXXXXX'} aria-describedby="analytics-help"
+              autoComplete="off" spellCheck={false} className={`${INPUT} w-[220px]`}
+            />
+          </label>
+          <label className={`${LABEL} flex flex-col gap-1.5`}>
+            API secret
+            <input
+              type="password" value={apiSecret} onChange={e => setApiSecret(e.target.value.trim())}
+              placeholder={data?.configured ? 'Leave empty to keep it' : ''} autoComplete="new-password"
+              className={`${INPUT} w-[260px]`}
+            />
+          </label>
+          <button type="submit" disabled={busy || (!measurementId && !apiSecret)} className={PRIMARY}>{data?.configured ? 'Change' : 'Save'}</button>
+          {data?.configured && (
+            <button type="button" disabled={busy} onClick={() => run(api.removeAnalyticsSettings)} className={DANGER}>Turn off</button>
+          )}
+        </form>
+        <ResultLine result={result} />
+      </div>
+    </section>
+  );
+}
+
 function Clients({ count = 0 }) {
   return (
     <span className="inline-flex items-center gap-2 tabular-nums">
@@ -436,7 +518,7 @@ function ApiKeysSection({ onChanged }) {
             {data?.envPath && (
               <span className="block mt-0.5">
                 They are saved in{' '}
-                <code className="font-mono text-[12px] text-[#dae3f4] [overflow-wrap:anywhere]" data-private>{data.envPath}</code>.
+                <code className="font-mono text-[12px] text-[var(--ink)] [overflow-wrap:anywhere]" data-private>{data.envPath}</code>.
               </span>
             )}
           </p>
@@ -582,7 +664,7 @@ function ApiKeyCard({ provider, onChanged, wide }) {
           type="button"
           onClick={clearKey}
           aria-label={`Clear the ${provider.name} key field`}
-          className="absolute right-1 top-1/2 -translate-y-1/2 size-9 flex items-center justify-center text-[#c9b8a5] hover:text-[#dae3f4] rounded-md hover:bg-[#222a37] transition-colors"
+          className="absolute right-1 top-1/2 -translate-y-1/2 size-9 flex items-center justify-center text-[var(--ink-quiet)] hover:text-[var(--ink)] rounded-md hover:bg-[var(--raised)] transition-colors"
         >
           <Icon name="close" className="text-[18px]" />
         </button>
@@ -612,7 +694,7 @@ function ApiKeyCard({ provider, onChanged, wide }) {
           {provider.configured && maskedTail && (
             <p className={MUTED}>
               Saved key ends{' '}
-              <span className="font-mono text-[13px] text-[#dae3f4]">
+              <span className="font-mono text-[13px] text-[var(--ink)]">
                 <span aria-hidden="true">····</span><span data-private>{maskedTail}</span>
               </span>
             </p>
@@ -668,7 +750,7 @@ function ApiKeyCard({ provider, onChanged, wide }) {
               href={provider.keyPage}
               target="_blank"
               rel="noreferrer"
-              className={`${ROW_ACTION} !text-[#ffc880] hover:underline`}
+              className={`${ROW_ACTION} !text-[var(--accent-soft)] hover:underline`}
             >
               <span>Get a key</span>
               <Icon name="open_in_new" className="text-[16px]" />
@@ -735,7 +817,7 @@ function ProviderCard({ id, provider, currentModel, onSwitch, switching, shouldF
   const modelChanged = Boolean(isActive && currentModel && selectedModel !== currentModel);
 
   let badge;
-  if (isActive) badge = <Status tone="warn" dot="bg-[#f5a623]">In use</Status>;
+  if (isActive) badge = <Status tone="warn" dot="bg-[var(--accent)]">In use</Status>;
   else if (!ready) badge = <Status tone="idle">Unconfigured</Status>;
   else badge = <Status tone="ok">Ready</Status>;
 
@@ -744,7 +826,7 @@ function ProviderCard({ id, provider, currentModel, onSwitch, switching, shouldF
       ref={cardRef}
       tabIndex={-1}
       aria-labelledby={titleId}
-      className={`bg-[#141c28] rounded-xl border p-5 flex flex-col justify-between gap-4 focus:outline-none ${
+      className={`bg-[var(--card)] rounded-xl border p-5 flex flex-col justify-between gap-4 focus:outline-none ${
         isActive ? 'border-[#f5a623]/60' : 'border-white/[0.06]'
       }${wide ? ' lg:col-span-2' : ''}`}
     >

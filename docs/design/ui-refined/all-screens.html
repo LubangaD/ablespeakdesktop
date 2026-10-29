@@ -1,0 +1,3512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak Tier 2 — all ten screens</title>
+<!--
+  Every screen in one file: nothing to serve, nothing to miss.
+
+  The separate files in this folder need a static server, because a browser will
+  not run shell.js from file://. This bundle inlines the stylesheet, every
+  screen's markup and the frame, so it opens by double-clicking and the menu
+  works. It is built from those files by the script in README.md — edit them,
+  not this.
+
+  Signed in as the owner's admin account, so every tier is unlocked. That is
+  demo data: no sign-in happens, and the real app still needs the tray-icon PIN.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,GRAD@8..144,100..1000,-200..150&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
+<style>
+/*
+ * AbleSpeak Tier 2 — the refined look.
+ *
+ * A drop-in successor to ../ui/ablespeak-ui.css. Every class name is the same,
+ * so a screen moves over by swapping one <link>. What changes is the system
+ * underneath: the light model, the type scale, the spatial rhythm, and how
+ * rarely the accent is spent.
+ *
+ * ── The constraint that shaped it ──────────────────────────────────────────
+ *
+ * The usual moves that make an interface look expensive — lighter weights,
+ * low-contrast greys, hairline strokes, smaller text, whisper-quiet states —
+ * are all wrong here. This is used by people with motor and visual
+ * impairments, often on a laptop screen in a bright classroom. Nothing below
+ * lowers a contrast ratio, shrinks a target, or softens a state.
+ *
+ * The refinement comes from four things instead:
+ *
+ *   1. A coherent light model. Light falls from above: raised things catch a
+ *      highlight on their top edge and cast a soft shadow; recessed things sink
+ *      and show an inner shadow. ../ui/ had WELL (#18202d) lighter than CARD
+ *      (#141c28), so a "well" rose out of the card it sat in. Here a well sinks.
+ *   2. A real type scale on a 4px baseline, using Roboto Flex's optical-size
+ *      and grade axes. GRAD lifts stroke weight on dark backgrounds without
+ *      widening letters — it is what stops light-on-dark text looking thin.
+ *      More legible AND more refined; the two are not in tension.
+ *   3. Space as hierarchy. Generous at the page level, tight inside a
+ *      component. Uniform 16px gaps everywhere are what made the old screens
+ *      read as a grid of equal grey rectangles.
+ *   4. Spending the accent almost never. Amber was in eight places, so it meant
+ *      nothing. Here it marks the one action a page is for, the page you are
+ *      on, and focus. Nothing else — not the logo, not avatars, not headings.
+ *
+ * The page stays #0d1627 — chosen by the owner on 2026-09-22 (DESIGN.md) and
+ * not ours to change. The ramp is widened around it instead.
+ */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tokens
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surfaces: one ramp, lit from above.
+         sunken sits below the page, card above it, raised above that. ── */
+  --as-page:    #0d1627;   /* the owner's blue, unchanged */
+  --as-sunken:  #0a1220;   /* wells, fields, code — recessed */
+  --as-card:    #151f2e;   /* a section's panel — raised */
+  --as-raised:  #1d2736;   /* hover, the row you are on, the active nav item */
+  --as-well:    #0a1220;
+  --as-field:   #0a1220;
+  --as-sidebar: #111a27;
+  --as-topbar:  rgba(17, 26, 39, 0.72);
+
+  /* ── Lines: an edge, and a quieter divider inside it. ── */
+  --as-line:        rgba(255, 255, 255, 0.07);
+  --as-line-soft:   rgba(255, 255, 255, 0.045);
+  --as-line-strong: rgba(255, 255, 255, 0.11);
+  --as-line-field:  rgba(255, 255, 255, 0.09);
+
+  /* ── Light: what makes a surface read as raised or sunk. ── */
+  --as-sheen:   inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --as-lift:    0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 28px -14px rgba(0, 0, 0, 0.55);
+  --as-lift-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --as-inset:   inset 0 1px 2px rgba(0, 0, 0, 0.35);
+
+  /* ── Ink: cool-blue surfaces, warm text — the pairing this product already
+         had, kept and cleaned up rather than neutralised. ── */
+  --as-ink:       #e8eefa;   /* headings, numbers, anything that must be read */
+  --as-ink-body:  #dbe4f2;   /* running text */
+  --as-ink-quiet: #c6b9a9;   /* labels and secondary text — the warm grey */
+  /* The faintest ink still clears WCAG AAA (7:1) on every surface it lands on:
+     7.74 on a card, 8.16 on the sidebar, 7.03 on a raised row. It was #97a2b4
+     until measurement put that at 6.43 on a card — passing AA, short of the AAA
+     bar DESIGN.md sets for muted text. Nothing here may be "almost" readable. */
+  --as-ink-faint: #a6b2c6;   /* placeholders, axis ticks, menu group headings */
+  --as-ink-warm:  #d8c7b3;
+
+  /* ── The accent: the page's one action, the page you are on, and focus. ── */
+  --as-accent:        #f5a623;
+  --as-accent-bright: #ffb84d;
+  --as-accent-soft:   #ffc880;
+  --as-on-accent:     #2a1a00;
+
+  /* ── Status: a dot and a word always carry these; colour never alone. ── */
+  --as-ok:      #6fdcc6;
+  --as-warn:    #ffc87a;
+  --as-bad:     #ffb3aa;
+  --as-idle:    #6b7689;
+  --as-green:   #5ae8b0;
+  --as-teal-on: #1f9c89;
+
+  /* ── Shape: nested radii stay concentric (inner = outer − padding). ── */
+  --as-r-xs: 6px;
+  --as-r-sm: 8px;
+  --as-r:    10px;
+  --as-r-lg: 14px;
+  --as-r-xl: 18px;
+
+  /* ── Space: 4px baseline. ── */
+  --as-1: 4px;   --as-2: 8px;   --as-3: 12px;  --as-4: 16px;
+  --as-5: 20px;  --as-6: 24px;  --as-8: 32px;  --as-10: 40px;
+  --as-12: 48px; --as-16: 64px;
+
+  /* ── Frame ── */
+  --as-sidebar-w: 256px;
+  --as-topbar-h: 64px;
+  --as-measure: 1180px;  /* content never runs wider than this */
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Base
+   ────────────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  margin: 0;
+  background: var(--as-page);
+  color: var(--as-ink-body);
+  color-scheme: dark;
+  font-family: 'Roboto Flex', Roboto, system-ui, sans-serif;
+  /* GRAD +25 thickens strokes without widening letters — it is what keeps
+     light-on-dark text from looking thin. opsz is set per size below. */
+  font-variation-settings: 'opsz' 14, 'GRAD' 25;
+  font-size: 14px;
+  line-height: 22px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { font-family: inherit; margin: 0; font-weight: 600; }
+p, ul, ol, dl, dd, figure { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+
+/* A fieldset defaults to `min-width: min-content`, so it refuses to shrink and
+   bursts any flex row inside it out of its column. Always reset it. */
+fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+legend { padding: 0; }
+
+/* One focus ring everywhere: 3px amber, never removed, never thinner. */
+:focus-visible {
+  outline: 3px solid var(--as-accent) !important;
+  outline-offset: 2px !important;
+}
+
+.as-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0;
+  margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+.as-mono {
+  font-family: 'Roboto Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.94em;
+  letter-spacing: -0.01em;
+}
+.as-tabular { font-variant-numeric: tabular-nums; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.09); border-radius: 999px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); background-clip: content-box; }
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+  display: inline-block; vertical-align: middle; line-height: 1;
+  flex-shrink: 0; user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Type — a scale on a 4px baseline, optical size matched to each step
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* TITLE — one per page, and the only thing that says what the page is. */
+.as-title {
+  font-size: 28px; line-height: 36px; font-weight: 620;
+  letter-spacing: -0.021em; color: var(--as-ink);
+  font-variation-settings: 'opsz' 32, 'GRAD' 20;
+}
+
+/* SECTION — the heading on a card. Quiet: the content is the point. */
+.as-section {
+  font-size: 15px; line-height: 22px; font-weight: 620;
+  letter-spacing: -0.004em; color: var(--as-ink);
+  font-variation-settings: 'opsz' 16, 'GRAD' 25;
+}
+
+/* LABEL / MUTED — small quiet text. */
+.as-label, .as-muted {
+  font-size: 13px; line-height: 20px; color: var(--as-ink-quiet);
+  font-variation-settings: 'opsz' 13, 'GRAD' 35;
+}
+
+/* BODY — running text. 22px leading, not 20: it reads calmer. */
+.as-body {
+  font-size: 14px; line-height: 22px; color: var(--as-ink-body);
+  font-variation-settings: 'opsz' 14, 'GRAD' 25;
+}
+
+/* NUMBER — numbers are the only large text. Tabular, so a changing value
+   never shifts the layout under someone's eyes. */
+.as-number {
+  font-size: 34px; line-height: 40px; font-weight: 580;
+  letter-spacing: -0.028em; color: var(--as-ink);
+  font-variant-numeric: tabular-nums;
+  font-variation-settings: 'opsz' 36, 'GRAD' 15;
+  display: block;
+}
+
+.as-strong { font-weight: 620; color: var(--as-ink); }
+.as-faint  { color: var(--as-ink-faint); }
+
+/* The one place letterspaced uppercase is allowed: a tier heading in the menu
+   or a table column head. Never a status. */
+.as-overline {
+  font-size: 11px; line-height: 16px; font-weight: 640;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--as-ink-faint);
+  font-variation-settings: 'opsz' 11, 'GRAD' 50;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Surfaces
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-page {
+  min-height: 100%; width: 100%;
+  background: var(--as-page); color: var(--as-ink-body);
+  padding: var(--as-10) var(--as-8) var(--as-16);
+}
+.as-page > .as-stack { max-width: var(--as-measure); }
+.as-page--narrow > .as-stack { max-width: 940px; }
+
+/* CARD — raised: catches light on its top edge, casts a soft shadow. */
+.as-card {
+  background: var(--as-card);
+  border: 1px solid var(--as-line);
+  border-radius: var(--as-r-lg);
+  box-shadow: var(--as-sheen), var(--as-lift);
+}
+
+/* WELL — recessed: sits below the card it is in, with an inner shadow.
+   The old system had this lighter than the card, so it rose instead. */
+.as-well {
+  background: var(--as-sunken);
+  border: 1px solid var(--as-line-soft);
+  border-radius: var(--as-r);
+  box-shadow: var(--as-inset);
+}
+
+.as-divider { border-color: var(--as-line-soft); }
+
+/* Layout */
+.as-stack { display: flex; flex-direction: column; gap: var(--as-8); }
+.as-stack--sm { gap: var(--as-4); }
+.as-stack--xs { gap: var(--as-2); }
+.as-row { display: flex; align-items: center; gap: var(--as-3); }
+.as-row--wrap { flex-wrap: wrap; }
+.as-spacer { flex: 1 1 auto; }
+.as-grid { display: grid; gap: var(--as-4); }
+.as-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.as-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.as-grid--6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.as-p-5 { padding: var(--as-6); }
+.as-p-4 { padding: var(--as-5); }
+.as-mt-1 { margin-top: var(--as-1); }
+.as-mt-3 { margin-top: var(--as-3); }
+.as-mt-5 { margin-top: var(--as-6); }
+
+/* The page's own header, with air under it. */
+.as-page-head .as-title { margin-bottom: var(--as-2); }
+.as-page-head p { max-width: 68ch; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Controls
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Every button is at least 44px tall, for an unsteady hand. Unchanged. */
+.as-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--as-2);
+  min-height: 44px; padding: 0 var(--as-5); border-radius: var(--as-r);
+  font: inherit; font-size: 14px; font-weight: 580; letter-spacing: -0.003em;
+  font-variation-settings: 'opsz' 14, 'GRAD' 25;
+  border: 1px solid transparent; background: none; color: var(--as-ink);
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.as-btn:disabled, .as-btn[aria-disabled='true'] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+
+/* PRIMARY — one per page. This is where the accent is spent. */
+.as-primary {
+  background: linear-gradient(180deg, #ffbe5e 0%, #f3a01c 100%);
+  color: var(--as-on-accent); font-weight: 640;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .34),
+              0 1px 2px rgba(0, 0, 0, .3),
+              0 6px 16px -8px rgba(245, 166, 35, .5);
+}
+.as-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffc978 0%, #ffae2e 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4),
+              0 1px 2px rgba(0, 0, 0, .3),
+              0 8px 20px -8px rgba(245, 166, 35, .6);
+}
+.as-primary:active:not(:disabled) { background: #eb9a16; box-shadow: var(--as-lift-sm); }
+
+/* QUIET */
+.as-quiet {
+  background: rgba(255, 255, 255, .035); color: var(--as-ink);
+  border-color: var(--as-line-strong); box-shadow: var(--as-sheen);
+}
+.as-quiet:hover:not(:disabled) { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .17); }
+.as-quiet:active:not(:disabled) { background: rgba(255, 255, 255, .05); box-shadow: none; }
+
+/* DANGER — never the only warning; the words say it too. */
+.as-danger {
+  background: rgba(255, 179, 170, .07); color: var(--as-bad);
+  border-color: rgba(255, 179, 170, .3);
+}
+.as-danger:hover:not(:disabled) { background: rgba(255, 179, 170, .13); border-color: rgba(255, 179, 170, .45); }
+
+.as-small-quiet {
+  display: inline-flex; align-items: center; gap: var(--as-2);
+  min-height: 36px; padding: 0 var(--as-3); border-radius: var(--as-r-sm);
+  font: inherit; font-size: 13px; font-weight: 580;
+  font-variation-settings: 'opsz' 13, 'GRAD' 30;
+  background: rgba(255, 255, 255, .035); color: var(--as-ink);
+  border: 1px solid var(--as-line-strong); cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease;
+}
+.as-small-quiet:hover:not(:disabled) { background: rgba(255, 255, 255, .07); }
+.as-small-quiet:disabled { opacity: .45; cursor: not-allowed; }
+
+/* A small action at the end of a list row. Quiet until wanted. */
+.as-row-action {
+  display: inline-flex; align-items: center; gap: var(--as-1);
+  min-height: 36px; padding: 0 var(--as-3); border-radius: var(--as-r-sm);
+  font: inherit; font-size: 13px; font-weight: 560; color: var(--as-ink-quiet);
+  background: none; border: 1px solid transparent;
+  cursor: pointer; flex-shrink: 0; text-decoration: none;
+  transition: background-color .16s ease, color .16s ease, border-color .16s ease;
+}
+.as-row-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .06); color: var(--as-ink); border-color: var(--as-line);
+}
+.as-row-action:disabled { opacity: .45; cursor: not-allowed; }
+
+/* FIELD — recessed, like every other sunken surface. */
+.as-field {
+  width: 100%; min-height: 44px; padding: 11px var(--as-3);
+  border-radius: var(--as-r); background: var(--as-sunken);
+  border: 1px solid var(--as-line-field); color: var(--as-ink);
+  font: inherit; font-size: 14px;
+  font-variation-settings: 'opsz' 14, 'GRAD' 25;
+  box-shadow: var(--as-inset);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+.as-field::placeholder { color: var(--as-ink-faint); }
+.as-field:hover:not(:focus) { border-color: rgba(255, 255, 255, .15); }
+.as-field:focus {
+  outline: none; border-color: var(--as-accent);
+  box-shadow: var(--as-inset), 0 0 0 3px rgba(245, 166, 35, .16);
+}
+textarea.as-field { min-height: 92px; resize: vertical; line-height: 22px; }
+
+select.as-field {
+  appearance: none; padding-right: 44px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2397a2b4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; background-size: 18px;
+}
+
+.as-field-label {
+  display: block; font-size: 12.5px; line-height: 18px; font-weight: 560;
+  color: var(--as-ink-quiet); margin-bottom: var(--as-2);
+  font-variation-settings: 'opsz' 13, 'GRAD' 35;
+}
+
+input[type='range'] { accent-color: var(--as-accent); width: 100%; height: 44px; }
+
+/* A switch. The word beside it says which way it is — never colour alone. */
+.as-switch {
+  display: inline-flex; align-items: center; gap: var(--as-2);
+  min-height: 44px; padding: 0 var(--as-3); border-radius: var(--as-r);
+  background: rgba(255, 255, 255, .035); border: 1px solid var(--as-line);
+  cursor: pointer; font: inherit; color: var(--as-ink);
+  transition: background-color .16s ease, border-color .16s ease;
+}
+.as-switch:hover:not(:disabled) { background: rgba(255, 255, 255, .07); }
+.as-switch-track {
+  width: 36px; height: 20px; border-radius: 999px; padding: 2px;
+  display: flex; align-items: center; justify-content: flex-start;
+  background: rgba(255, 255, 255, .13); box-shadow: var(--as-inset);
+  transition: background-color .16s ease;
+}
+.as-switch-knob {
+  width: 16px; height: 16px; border-radius: 999px; background: var(--as-ink-warm);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+}
+.as-switch[aria-checked='true'] .as-switch-track { background: var(--as-teal-on); justify-content: flex-end; }
+.as-switch[aria-checked='true'] .as-switch-knob { background: #04201c; }
+
+/* A chip you can pick. */
+.as-chip {
+  display: inline-flex; align-items: center; gap: var(--as-2);
+  min-height: 36px; padding: 0 var(--as-3); border-radius: 999px;
+  font: inherit; font-size: 13px; font-weight: 560;
+  font-variation-settings: 'opsz' 13, 'GRAD' 30;
+  background: rgba(255, 255, 255, .035); color: var(--as-ink-quiet);
+  border: 1px solid var(--as-line); cursor: pointer;
+  transition: background-color .16s ease, color .16s ease, border-color .16s ease;
+}
+.as-chip:hover { background: rgba(255, 255, 255, .08); color: var(--as-ink); }
+.as-chip[aria-pressed='true'], .as-chip.is-on {
+  background: rgba(255, 255, 255, .1); color: var(--as-ink);
+  border-color: rgba(255, 255, 255, .22); font-weight: 620;
+}
+
+/* Tabs. The marker is one of the three places the accent appears. */
+.as-tabs { display: flex; gap: var(--as-1); border-bottom: 1px solid var(--as-line); }
+.as-tab {
+  min-height: 46px; padding: 0 var(--as-4); background: none; border: 0;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  font: inherit; font-size: 14px; font-weight: 560; color: var(--as-ink-quiet);
+  cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; gap: var(--as-2);
+  transition: color .16s ease, border-color .16s ease;
+}
+.as-tab:hover { color: var(--as-ink); }
+.as-tab[aria-selected='true'] { color: var(--as-ink); font-weight: 640; border-bottom-color: var(--as-accent); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Status — a dot and a word, in sentence case. Never a shouting badge.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-status {
+  display: inline-flex; align-items: center; gap: var(--as-2);
+  font-size: 13px; line-height: 20px; font-weight: 560;
+  font-variation-settings: 'opsz' 13, 'GRAD' 30;
+}
+/* The dot carries a faint halo of its own colour, so it reads as lit rather
+   than printed. The word beside it is what actually carries the meaning. */
+.as-dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.as-dot--lg { width: 10px; height: 10px; }
+
+.as-ok   { color: var(--as-ok); }
+.as-warn { color: var(--as-warn); }
+.as-bad  { color: var(--as-bad); }
+.as-idle { color: var(--as-ink-quiet); }
+
+.as-dot.as-ok   { background: var(--as-ok);   box-shadow: 0 0 0 3px rgba(111, 220, 198, .14); }
+.as-dot.as-warn { background: var(--as-warn); box-shadow: 0 0 0 3px rgba(255, 200, 122, .14); }
+.as-dot.as-bad  { background: var(--as-bad);  box-shadow: 0 0 0 3px rgba(255, 179, 170, .14); }
+.as-dot.as-idle { background: var(--as-idle); box-shadow: 0 0 0 3px rgba(255, 255, 255, .05); }
+
+/* A quiet strip with a coloured left edge, for something worth knowing. */
+.as-notice {
+  border-left: 2px solid var(--as-idle); border-radius: var(--as-r-xs);
+  background: rgba(255, 255, 255, .028);
+  padding: var(--as-3) var(--as-4);
+  font-size: 13px; line-height: 21px; color: var(--as-ink-quiet);
+}
+.as-notice.as-warn-edge { border-left-color: var(--as-warn); background: rgba(255, 200, 122, .05); }
+.as-notice.as-bad-edge  { border-left-color: var(--as-bad);  background: rgba(255, 179, 170, .05); }
+.as-notice.as-ok-edge   { border-left-color: var(--as-ok);   background: rgba(111, 220, 198, .05); }
+.as-notice strong { color: var(--as-ink); font-weight: 620; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   A number on a card
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Label above in small type, number below and dominant, note last. Reading
+   order matches importance, so the eye lands on the number. */
+.as-stat {
+  background: var(--as-card);
+  border: 1px solid var(--as-line);
+  border-radius: var(--as-r-lg);
+  box-shadow: var(--as-sheen), var(--as-lift);
+  padding: var(--as-5) var(--as-5) var(--as-4);
+  display: flex; flex-direction: column;
+}
+.as-stat dt {
+  font-size: 12.5px; line-height: 18px; font-weight: 560;
+  color: var(--as-ink-quiet);
+  font-variation-settings: 'opsz' 13, 'GRAD' 35;
+}
+.as-stat dd { margin: 0; }
+.as-stat .as-number { margin-top: var(--as-1); }
+.as-stat-note {
+  font-size: 12.5px; line-height: 18px; color: var(--as-ink-faint); margin-top: var(--as-1);
+}
+.as-stat-note.as-warn { color: var(--as-warn); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tables — no vertical rules, generous rows, numbers tabular
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-table { width: 100%; border-collapse: collapse; }
+.as-table th {
+  font-weight: 580; padding: var(--as-2) var(--as-3) var(--as-3);
+  font-size: 11px; line-height: 16px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--as-ink-faint); text-align: left; white-space: nowrap;
+  font-variation-settings: 'opsz' 11, 'GRAD' 50;
+}
+.as-table td {
+  padding: var(--as-3); font-size: 14px; line-height: 21px;
+  color: var(--as-ink-body); vertical-align: top;
+}
+.as-table thead tr { border-bottom: 1px solid var(--as-line); }
+.as-table tbody tr { border-bottom: 1px solid var(--as-line-soft); transition: background-color .14s ease; }
+.as-table tbody tr:last-child { border-bottom: 0; }
+.as-table tbody tr:hover { background: rgba(255, 255, 255, .022); }
+.as-table tbody tr.is-picked { background: rgba(255, 255, 255, .05); }
+/* The row you are on is marked by a bar as well as a tint. */
+.as-table tbody tr.is-picked td:first-child { box-shadow: inset 2px 0 0 var(--as-accent); }
+.as-table .as-right { text-align: right; }
+.as-table .as-tabular { font-variant-numeric: tabular-nums; }
+
+/* A list where each row is an item. */
+.as-list > li {
+  padding: var(--as-4) 0; border-top: 1px solid var(--as-line-soft);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--as-2) var(--as-4);
+}
+.as-list > li:first-child { border-top: 0; padding-top: var(--as-2); }
+.as-list-main { min-width: 220px; flex: 1 1 auto; }
+
+/* A pair of values. */
+.as-rows > div {
+  display: flex; flex-wrap: wrap; gap: var(--as-1) var(--as-4); justify-content: space-between;
+  padding: var(--as-3) 0; border-top: 1px solid var(--as-line-soft);
+}
+.as-rows > div:first-child { border-top: 0; }
+.as-rows dt { font-size: 13px; line-height: 20px; color: var(--as-ink-quiet); }
+.as-rows dd { margin: 0; font-size: 14px; line-height: 20px; color: var(--as-ink); font-weight: 560; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The frame
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-shell { height: 100%; display: flex; overflow: hidden; background: var(--as-page); }
+.as-main-col { flex: 1 1 auto; display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; background: var(--as-page); }
+.as-main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+.as-skip { position: absolute; left: -9999px; z-index: 50; }
+.as-skip:focus {
+  left: var(--as-3); top: var(--as-3); position: fixed;
+  padding: var(--as-3) var(--as-4); border-radius: var(--as-r);
+  background: var(--as-accent); color: var(--as-on-accent); font-weight: 700;
+}
+
+/* ── Sidebar ── */
+.as-sidebar {
+  width: var(--as-sidebar-w); flex-shrink: 0; height: 100%;
+  background: var(--as-sidebar); z-index: 20;
+  border-right: 1px solid var(--as-line-soft);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: var(--as-5) var(--as-3) var(--as-3);
+}
+.as-brand { display: flex; align-items: center; gap: var(--as-3); padding: 0 var(--as-3) var(--as-5); }
+/* The mark is ink on a recessed tile — not amber. The accent is for actions. */
+.as-brand img, .as-brand .as-logo {
+  width: 34px; height: 34px; border-radius: var(--as-r-sm); flex-shrink: 0;
+  background: var(--as-sunken); color: var(--as-ink);
+  border: 1px solid var(--as-line-strong); box-shadow: var(--as-inset);
+  display: flex; align-items: center; justify-content: center;
+}
+.as-brand-name {
+  font-size: 16px; line-height: 22px; font-weight: 620; color: var(--as-ink);
+  letter-spacing: -0.015em; font-variation-settings: 'opsz' 16, 'GRAD' 25;
+}
+
+.as-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.as-nav-link {
+  min-height: 42px; padding: 0 var(--as-3); border-radius: var(--as-r-sm);
+  display: flex; align-items: center; gap: var(--as-3);
+  font-size: 13.5px; line-height: 20px; font-weight: 560;
+  font-variation-settings: 'opsz' 14, 'GRAD' 30;
+  color: var(--as-ink-quiet); text-decoration: none; position: relative;
+  transition: background-color .16s ease, color .16s ease;
+}
+.as-nav-link:hover { background: rgba(255, 255, 255, .05); color: var(--as-ink); }
+.as-nav-link .material-symbols-outlined { font-size: 20px; opacity: .85; }
+.as-nav-label { flex: 1 1 auto; }
+/* The page you are on: a bar at the leading edge, a lift, and a filled icon —
+   three signals, so colour is never doing the work alone. */
+.as-nav-link[aria-current='page'] {
+  background: rgba(255, 255, 255, .07); color: var(--as-ink); font-weight: 640;
+  box-shadow: var(--as-sheen);
+}
+.as-nav-link[aria-current='page']::before {
+  content: ''; position: absolute; left: -12px; top: 9px; bottom: 9px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--as-accent);
+}
+.as-nav-link[aria-current='page'] .material-symbols-outlined {
+  opacity: 1; font-variation-settings: 'FILL' 1, 'wght' 400;
+}
+.as-nav-lock { font-size: 15px !important; color: var(--as-ink-faint); opacity: .7 !important; }
+
+.as-nav-group {
+  padding: var(--as-5) var(--as-3) var(--as-2); display: flex;
+  align-items: center; justify-content: space-between; gap: var(--as-2);
+  font-size: 11px; line-height: 16px; color: var(--as-ink-faint);
+}
+.as-nav-group .as-nav-group-name {
+  font-weight: 640; text-transform: uppercase; letter-spacing: 0.09em;
+  font-variation-settings: 'opsz' 11, 'GRAD' 50;
+}
+
+.as-sidebar-foot { display: flex; flex-direction: column; gap: var(--as-2); padding-top: var(--as-3); }
+.as-conn {
+  min-height: 40px; padding: 0 var(--as-3); border-radius: var(--as-r-sm);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.as-label-sm { font-size: 12px; line-height: 16px; font-weight: 580; }
+.as-label-md { font-size: 13.5px; line-height: 18px; font-weight: 580; }
+
+.as-pulse { position: relative; display: flex; width: 8px; height: 8px; }
+.as-pulse i {
+  position: absolute; display: inline-flex; width: 100%; height: 100%;
+  border-radius: 999px; background: var(--as-green); opacity: .7;
+  animation: as-ping 2.4s cubic-bezier(0, 0, .2, 1) infinite;
+}
+.as-pulse b { position: relative; display: inline-flex; width: 8px; height: 8px; border-radius: 999px; background: var(--as-green); }
+@keyframes as-ping { 70%, 100% { transform: scale(2.4); opacity: 0; } }
+
+.as-account-link {
+  min-height: 44px; padding: 0 var(--as-3); border-radius: var(--as-r-sm);
+  display: flex; align-items: center; gap: var(--as-2);
+  font-size: 13px; font-weight: 560; color: var(--as-ink-quiet);
+  background: rgba(255, 255, 255, .03); border: 1px solid var(--as-line-soft);
+  text-decoration: none; transition: background-color .16s ease, color .16s ease;
+}
+.as-account-link:hover { background: rgba(255, 255, 255, .07); color: var(--as-ink); }
+.as-account-link .material-symbols-outlined { font-size: 18px; color: var(--as-ink-faint); }
+.as-account-link .as-account-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.as-whois { display: flex; align-items: center; gap: var(--as-3); padding: var(--as-2) var(--as-3) 0; }
+/* Initials in ink on a recessed tile, not amber on a disc. */
+.as-avatar {
+  width: 32px; height: 32px; border-radius: 999px; flex-shrink: 0;
+  background: var(--as-sunken); color: var(--as-ink-quiet);
+  border: 1px solid var(--as-line-strong);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 640; letter-spacing: .02em;
+}
+.as-whois-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.as-whois-text .as-label-md { color: var(--as-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-whois-sub { font-size: 11.5px; line-height: 16px; color: var(--as-ink-faint); }
+.as-whois-sub .as-role { color: var(--as-ink-quiet); }
+
+/* ── Top bar ── */
+.as-topbar {
+  height: var(--as-topbar-h); flex-shrink: 0;
+  background: var(--as-topbar); z-index: 10;
+  border-bottom: 1px solid var(--as-line-soft);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.as-topbar-inner {
+  height: var(--as-topbar-h); width: 100%; padding: 0 var(--as-8);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--as-4);
+}
+.as-topbar-left { display: flex; align-items: center; gap: var(--as-3); min-width: 0; }
+.as-topbar-right { display: flex; align-items: center; gap: var(--as-3); flex-shrink: 0; }
+
+.as-session {
+  display: flex; align-items: center; gap: var(--as-3);
+  min-height: 40px; padding: 0 var(--as-3); border-radius: var(--as-r-sm);
+  text-decoration: none; min-width: 0; transition: background-color .16s ease;
+}
+.as-session:hover { background: rgba(255, 255, 255, .05); }
+.as-session .material-symbols-outlined { font-size: 20px; color: var(--as-ink-faint); }
+.as-session-name { color: var(--as-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-session-state { font-size: 12px; line-height: 16px; white-space: nowrap; color: var(--as-ok); }
+.as-session-state.is-none { color: var(--as-ink-faint); }
+
+.as-hearing {
+  display: flex; align-items: center; gap: var(--as-2);
+  min-height: 32px; padding: 0 var(--as-3); border-radius: 999px;
+  background: rgba(255, 255, 255, .04); border: 1px solid var(--as-line-soft);
+  color: var(--as-ink-quiet); white-space: nowrap;
+}
+.as-hearing .material-symbols-outlined { font-size: 15px; color: var(--as-ink-faint); }
+
+.as-voice-notice {
+  min-height: 32px; display: inline-flex; align-items: center;
+  padding: 0 var(--as-3); border-radius: 999px;
+  background: rgba(255, 200, 122, .1); border: 1px solid rgba(255, 200, 122, .26);
+  color: var(--as-warn); white-space: nowrap;
+}
+
+@media (max-width: 1279px) { .as-hide-lg { display: none !important; } }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The voice bar, as the dashboard shows its state (never a live microphone)
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-voicebar {
+  display: flex; align-items: center; gap: var(--as-5);
+  padding: var(--as-5) var(--as-6); border-radius: var(--as-r-lg);
+  background: var(--as-card); border: 1px solid var(--as-line);
+  box-shadow: var(--as-sheen), var(--as-lift);
+}
+.as-mic {
+  width: 52px; height: 52px; border-radius: 999px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #ffbe5e 0%, #f3a01c 100%);
+  color: var(--as-on-accent); border: 0; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .34), 0 4px 14px -6px rgba(245, 166, 35, .6);
+}
+.as-mic .material-symbols-outlined { font-size: 26px; font-variation-settings: 'FILL' 1, 'wght' 400; }
+.as-mic.is-off {
+  background: var(--as-sunken); color: var(--as-ink-faint);
+  border: 1px solid var(--as-line-strong); box-shadow: var(--as-inset);
+}
+
+.as-wave { display: flex; align-items: center; gap: 3px; height: 18px; }
+.as-wave i { width: 2.5px; border-radius: 999px; background: var(--as-ok); height: 5px; animation: as-soundwave 1.1s ease-in-out infinite; }
+.as-wave i:nth-child(2) { animation-duration: .8s;  animation-delay: .15s; }
+.as-wave i:nth-child(3) { animation-duration: 1.3s; animation-delay: .3s; }
+.as-wave i:nth-child(4) { animation-duration: .9s;  animation-delay: .1s; }
+.as-wave i:nth-child(5) { animation-duration: 1.2s; animation-delay: .4s; }
+@keyframes as-soundwave { 0%, 100% { height: 5px; } 50% { height: 18px; } }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Charts
+   ────────────────────────────────────────────────────────────────────────── */
+
+.as-bars { display: flex; align-items: flex-end; gap: 5px; height: 164px; padding-top: var(--as-2); }
+.as-bars > div { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; min-width: 0; }
+.as-bar-ok  { background: linear-gradient(180deg, var(--as-ok) 0%, #4cbfa9 100%); border-radius: 2px 2px 0 0; }
+.as-bar-bad { background: var(--as-bad); border-radius: 2px 2px 0 0; }
+.as-bars-axis { display: flex; gap: 5px; margin-top: var(--as-2); }
+.as-bars-axis > span { flex: 1 1 0; text-align: center; font-size: 10.5px; line-height: 16px; color: var(--as-ink-faint); font-variant-numeric: tabular-nums; }
+
+.as-legend { display: flex; flex-wrap: wrap; gap: var(--as-4); }
+.as-legend span { display: inline-flex; align-items: center; gap: var(--as-2); font-size: 12.5px; color: var(--as-ink-quiet); }
+.as-legend i { width: 9px; height: 9px; border-radius: 2px; }
+
+/* Private values are blurred before a screenshot is committed. */
+.as-hide-private [data-private] { filter: blur(5px); }
+
+
+/* ---- 07-exam-screen.html ---- */
+/* One number drives the whole screen. The app holds it in state as `size`
+     and writes it to localStorage as `examTextSize`. */
+  .exam { --exam-size: 28px; max-width: 1100px; }
+
+  .exam-title   { font-size: calc(var(--exam-size) * 0.85); font-weight: 600; color: var(--as-ink); }
+  .exam-clock   { font-size: var(--exam-size); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--as-ink); }
+  .exam-clock.is-low { color: var(--as-bad); }          /* under 5 minutes */
+  .exam-heading { font-size: calc(var(--exam-size) * 0.75); font-weight: 600; }
+  .exam-big     { font-size: var(--exam-size); line-height: 1.45; color: var(--as-ink); white-space: pre-wrap; }
+  .exam-small   { font-size: max(15px, calc(var(--exam-size) * 0.55)); line-height: 1.5; }
+
+  /* The answer sits in a well, so the student can see where their words land
+     even when there are none yet. */
+  .exam-answer {
+    border-radius: var(--as-r-lg); background: var(--as-field);
+    border: 1px solid var(--as-line-field); padding: 20px; min-height: 120px;
+  }
+  .exam-answer.is-empty { color: #8b95a7; }
+
+  .exam-foot {
+    margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--as-line);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  }
+  /* A− / A+ are deliberately large: the student may press them themselves. */
+  .exam-size-btn { min-width: 56px; min-height: 48px; font-size: 16px; font-weight: 600; }
+
+/* ---- 08-test-console.html ---- */
+/* The transcript scrolls on its own; the page never does. */
+  .tc-transcript { max-height: 460px; overflow-y: auto; }
+  .tc-turn { padding: 14px 20px; border-top: 1px solid var(--as-line); }
+  .tc-turn:first-child { border-top: 0; }
+  /* How it was handled, as a small quiet word — not a shouting badge. */
+  .tc-route { font-size: 12px; line-height: 16px; color: var(--as-ink-faint); }
+
+/* ---- 09-developer-hub.html ---- */
+/* A list on the left, the chosen thing on the right — the shape every tab uses. */
+  .dh-split { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .dh-list { max-height: 520px; overflow-y: auto; }
+  .dh-item {
+    display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+    padding: 10px 14px; border: 0; border-radius: var(--as-r);
+    background: none; color: var(--as-ink-quiet);
+  }
+  .dh-item:hover { background: var(--as-well); color: var(--as-ink); }
+  .dh-item[aria-current='true'] { background: var(--as-raised); color: var(--as-ink); box-shadow: inset 3px 0 0 var(--as-amber); }
+  .dh-item code { font-family: 'Roboto Mono', monospace; font-size: 13px; }
+
+  /* Raw JSON and log lines. The one place monospace belongs. */
+  .dh-code {
+    font-family: 'Roboto Mono', monospace; font-size: 13px; line-height: 20px;
+    background: var(--as-field); border: 1px solid var(--as-line-field);
+    border-radius: var(--as-r); padding: 16px; overflow-x: auto;
+    color: var(--as-ink); white-space: pre; margin: 0;
+  }
+  .dh-log { max-height: 300px; overflow-y: auto; }
+  .dh-log-line { display: flex; gap: 12px; padding: 4px 0; font-family: 'Roboto Mono', monospace; font-size: 12px; line-height: 18px; }
+  .dh-log-time { color: var(--as-ink-faint); flex-shrink: 0; }
+  .dh-log-lvl { flex-shrink: 0; width: 44px; font-weight: 500; }
+
+/* ---- 04-sign-in.html ---- */
+/* This screen stands alone, so it centres itself rather than sitting in the frame. */
+  .signin-wrap {
+    height: 100%; overflow-y: auto;
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px 24px;
+  }
+  .signin-col { width: 100%; max-width: 420px; }
+  /* The code boxes: six, each its own target, 64px tall so a shaky hand can hit one. */
+  .code-row { display: flex; gap: 8px; }
+  .code-row input {
+    flex: 1 1 0; min-width: 0; height: 64px;
+    text-align: center; font-size: 24px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: var(--as-field); color: var(--as-ink);
+    border: 1px solid var(--as-line-field); border-radius: var(--as-r);
+  }
+  .code-row input:focus { outline: none; border-color: var(--as-amber); }
+  .signin-why { display: flex; gap: 12px; }
+  .signin-why .material-symbols-outlined { font-size: 20px; color: var(--as-ok); margin-top: 2px; }
+
+/* ---- the bundle's own bits ---- */
+.screen[hidden] { display: none; }
+/* Sign in has no frame in the app; the bundle hides the frame to match. */
+body.is-bare .as-sidebar, body.is-bare .as-topbar { display: none; }
+.bundle-bar {
+  display: flex; align-items: center; gap: var(--as-3); flex-wrap: wrap;
+  padding: var(--as-2) var(--as-8); background: var(--as-sunken);
+  border-bottom: 1px solid var(--as-line-soft);
+  font-size: 12px; color: var(--as-ink-faint);
+}
+.bundle-bar b { color: var(--as-ink-quiet); font-weight: 580; }
+</style>
+</head>
+<body data-route="/">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <aside class="as-sidebar">
+    <div style="display:flex;flex-direction:column;gap:16px;min-height:0">
+      <div class="as-brand">
+        <span class="as-logo" aria-hidden="true"><span class="material-symbols-outlined">record_voice_over</span></span>
+        <span class="as-brand-name">AbleSpeak</span>
+      </div>
+      <nav class="as-nav" aria-label="Main navigation">
+        <a href="#/" class="as-nav-link" data-nav="/">
+            <span class="material-symbols-outlined" aria-hidden="true">grid_view</span>
+            <span class="as-nav-label">Home</span>
+          </a><a href="#/progress" class="as-nav-link" data-nav="/progress">
+            <span class="material-symbols-outlined" aria-hidden="true">insights</span>
+            <span class="as-nav-label">My progress</span>
+          </a><a href="#/speech" class="as-nav-link" data-nav="/speech">
+            <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+            <span class="as-nav-label">Voice & words</span>
+          </a>
+        <p class="as-nav-group"><span class="as-nav-group-name">Helper</span><span>Open</span></p><a href="#/students" class="as-nav-link" data-nav="/students">
+            <span class="material-symbols-outlined" aria-hidden="true">groups</span>
+            <span class="as-nav-label">Users</span>
+          </a><a href="#/exams" class="as-nav-link" data-nav="/exams">
+            <span class="material-symbols-outlined" aria-hidden="true">assignment</span>
+            <span class="as-nav-label">Exams</span>
+          </a><a href="#/exam" class="as-nav-link" data-nav="/exam">
+            <span class="material-symbols-outlined" aria-hidden="true">edit_note</span>
+            <span class="as-nav-label">Exam screen</span>
+          </a>
+        <p class="as-nav-group"><span class="as-nav-group-name">Admin</span><span>Open</span></p><a href="#/test" class="as-nav-link" data-nav="/test">
+            <span class="material-symbols-outlined" aria-hidden="true">forum</span>
+            <span class="as-nav-label">Test console</span>
+          </a><a href="#/developer" class="as-nav-link" data-nav="/developer">
+            <span class="material-symbols-outlined" aria-hidden="true">terminal</span>
+            <span class="as-nav-label">Developer Hub</span>
+          </a><a href="#/settings" class="as-nav-link" data-nav="/settings">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+            <span class="as-nav-label">Settings</span>
+          </a>
+      </nav>
+    </div>
+    <div class="as-sidebar-foot">
+      <div class="as-conn">
+        <div class="as-row" style="gap:6px" role="status">
+          <span class="as-pulse" aria-hidden="true"><i></i><b></b></span>
+          <span class="as-label-sm">Connected</span>
+        </div>
+      </div>
+      <a href="#/sign-in" class="as-account-link" data-nav="/sign-in">
+        <span class="material-symbols-outlined" aria-hidden="true">account_circle</span>
+        <span class="as-account-email" data-private>lderrickn254@gmail.com</span>
+      </a>
+      <div class="as-whois">
+        <span class="as-avatar" aria-hidden="true">AK</span>
+        <span class="as-whois-text">
+          <span class="as-label-md" data-private>Amina Kamau</span>
+          <span class="as-whois-sub">On this computer · <span class="as-role">Admin account</span></span>
+        </span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="as-main-col">
+    <header class="as-topbar" aria-label="Session">
+      <div class="as-topbar-inner">
+        <div class="as-topbar-left">
+          <a href="#/progress" class="as-session" data-nav="/progress">
+            <span class="material-symbols-outlined" aria-hidden="true">account_box</span>
+            <span class="as-row" style="gap:6px;min-width:0">
+              <span class="as-label-md as-session-name" data-private>Amina Kamau</span>
+              <span class="as-label-sm" style="color:var(--as-ink-warm)" aria-hidden="true">•</span>
+              <span class="as-session-state">Signed in</span>
+            </span>
+          </a>
+          <div class="as-hearing as-label-sm as-hide-lg">
+            <span class="material-symbols-outlined" aria-hidden="true">hearing</span>
+            <span>Standard · 1.2 s pause</span>
+          </div>
+        </div>
+        <div class="as-topbar-right">
+          <button type="button" class="as-switch" role="switch" aria-checked="true" aria-label="User overlay shown">
+            <span class="as-label-sm" style="color:var(--as-ink-warm)">Overlay</span>
+            <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+            <span class="as-label-sm">Shown</span>
+          </button>
+          <span class="as-avatar" title="Facilitator console" aria-hidden="true">
+            <span class="material-symbols-outlined" style="font-size:18px">person</span>
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <p class="bundle-bar">
+        <span><b>All ten screens in one file.</b> Use the menu — nothing here needs a server.</span>
+        <span class="as-spacer"></span>
+        <span>Signed in as <b data-private>lderrickn254@gmail.com</b> · Admin account · every tier unlocked</span>
+      </p>
+      <section class="screen" data-route="/" aria-label="Home" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <!-- ── Who is at the computer ── -->
+          <header class="as-page-head">
+            <h1 class="as-title" data-private>Amina Kamau</h1>
+            <p class="as-muted as-mt-1">
+              At the computer for 42 minutes · Standard profile, 1.2 s pause ·
+              <span class="as-status as-ok"><span class="as-dot as-ok"></span>Listening</span>
+            </p>
+          </header>
+
+          <!-- ── What can I do? ──
+               Examples the student can say. Pressing one sends it exactly as
+               if it had been spoken, so a teacher can show what happens. -->
+          <section class="as-card as-p-5" aria-labelledby="can-do-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="can-do-heading" class="as-section" style="font-size:18px;line-height:28px">What can I do?</h2>
+              <span class="as-spacer"></span>
+              <p class="as-muted">Press one to send it as if it were spoken.</p>
+            </div>
+            <div class="as-grid as-grid--3 as-mt-3">
+              <button type="button" class="as-well as-p-4" style="text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span class="as-body as-strong">“Open Chrome”</span>
+                <span class="as-muted" style="display:block;margin-top:2px">Opens an app</span>
+              </button>
+              <button type="button" class="as-well as-p-4" style="text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span class="as-body as-strong">“Read this page”</span>
+                <span class="as-muted" style="display:block;margin-top:2px">Reads the window you are using</span>
+              </button>
+              <button type="button" class="as-well as-p-4" style="text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span class="as-body as-strong">“Click the sign up button”</span>
+                <span class="as-muted" style="display:block;margin-top:2px">Clicks anything on screen</span>
+              </button>
+              <button type="button" class="as-well as-p-4" style="text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span class="as-body as-strong">“Dictate, my name is Amina”</span>
+                <span class="as-muted" style="display:block;margin-top:2px">Types what you say</span>
+              </button>
+              <button type="button" class="as-well as-p-4" style="text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span class="as-body as-strong">“What is the capital of Kenya?”</span>
+                <span class="as-muted" style="display:block;margin-top:2px">Answers out loud</span>
+              </button>
+              <button type="button" class="as-well as-p-4" style="text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span class="as-body as-strong">“Undo that”</span>
+                <span class="as-muted" style="display:block;margin-top:2px">Takes back the last action</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- ── Key numbers ──
+               Six cards: the four counts, then the two connections. Numbers are
+               the only large text on the page. -->
+          <section aria-labelledby="numbers-heading">
+            <h2 id="numbers-heading" class="as-sr">Key numbers</h2>
+            <dl class="as-grid as-grid--3">
+
+              <div class="as-stat">
+                <dt>Commands today</dt>
+                <dd>
+                  <span class="as-number">48</span>
+                  <span class="as-stat-note">+14% vs. 6-day average</span>
+                </dd>
+              </div>
+
+              <div class="as-stat">
+                <dt>Success rate</dt>
+                <dd>
+                  <span class="as-number">91%</span>
+                  <span class="as-stat-note">All time</span>
+                </dd>
+              </div>
+
+              <div class="as-stat">
+                <dt>Average response today</dt>
+                <dd>
+                  <span class="as-number">1.2 s</span>
+                  <span class="as-stat-note">Within the 1.5 s goal</span>
+                </dd>
+              </div>
+
+              <div class="as-stat">
+                <dt>Worked first time</dt>
+                <dd>
+                  <span class="as-number">78%</span>
+                  <span class="as-stat-note">32 of 41 in the last 7 days</span>
+                </dd>
+              </div>
+
+              <!-- A connection card: the value, then a dot and a word for whether it is reachable -->
+              <div class="as-stat">
+                <dt>AI model</dt>
+                <dd>
+                  <span class="as-body as-strong" style="display:block;font-size:16px;line-height:24px;margin-top:4px">Gemini 2.5 Flash</span>
+                  <span class="as-status as-ok as-mt-1"><span class="as-dot as-ok"></span>Connected to Google Gemini</span>
+                </dd>
+              </div>
+
+              <div class="as-stat">
+                <dt>Chrome extension</dt>
+                <dd>
+                  <span class="as-body as-strong" style="display:block;font-size:16px;line-height:24px;margin-top:4px">Connected</span>
+                  <span class="as-status as-ok as-mt-1"><span class="as-dot as-ok"></span>1 tab · Wikipedia</span>
+                </dd>
+              </div>
+
+            </dl>
+          </section>
+
+          <!-- ── Two columns: what has happened, and what the student sees ── -->
+          <div class="as-grid" style="grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);align-items:start">
+
+            <!-- Recent commands -->
+            <section class="as-card" aria-labelledby="commands-heading">
+              <div class="as-row as-row--wrap" style="padding:16px 20px 12px">
+                <h2 id="commands-heading" class="as-section">Recent commands</h2>
+                <span class="as-spacer"></span>
+                <a href="02-my-progress.html" class="as-row-action">See all</a>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="as-table">
+                  <thead>
+                    <tr><th>Time</th><th>What was said</th><th>What happened</th><th class="as-right">Took</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="as-tabular">14:05</td>
+                      <td>“open chrome”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                      <td class="as-right as-tabular">0.4 s</td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:04</td>
+                      <td>“search for photosynthesis”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                      <td class="as-right as-tabular">1.1 s</td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:02</td>
+                      <td>“click the second result”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                      <td class="as-right as-tabular">2.3 s</td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:01</td>
+                      <td>“click the blue thing”</td>
+                      <td>
+                        <span class="as-status as-warn"><span class="as-dot as-warn"></span>Asked again</span>
+                        <span class="as-muted" style="display:block">Two things matched — asked which</span>
+                      </td>
+                      <td class="as-right as-tabular">2.8 s</td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">13:58</td>
+                      <td>“open my email”</td>
+                      <td>
+                        <span class="as-status as-bad"><span class="as-dot as-bad"></span>Didn’t work</span>
+                        <span class="as-muted" style="display:block">No mail app set on this computer</span>
+                      </td>
+                      <td class="as-right as-tabular">3.1 s</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style="padding:12px 20px 16px">
+                <button type="button" class="as-small-quiet">Show more</button>
+              </div>
+            </section>
+
+            <div class="as-stack as-stack--sm">
+
+              <!-- The student's screen, drawn from what AbleSpeak reads in the
+                   front window, with the real voice bar state on top. It is not
+                   a screenshot, and the dashboard never opens the microphone. -->
+              <section class="as-card as-p-5" aria-labelledby="preview-heading">
+                <div class="as-row as-row--wrap">
+                  <h2 id="preview-heading" class="as-section">User’s screen</h2>
+                  <span class="as-spacer"></span>
+                  <span class="as-muted">Chrome · Wikipedia</span>
+                </div>
+
+                <!-- The controls AbleSpeak can act on in that window -->
+                <div class="as-well as-p-4 as-mt-3">
+                  <p class="as-muted">17 controls AbleSpeak can use here</p>
+                  <div class="as-row as-row--wrap as-mt-3" style="gap:6px">
+                    <span class="as-chip" aria-hidden="true">Search Wikipedia</span>
+                    <span class="as-chip" aria-hidden="true">Main page</span>
+                    <span class="as-chip" aria-hidden="true">Contents</span>
+                    <span class="as-chip" aria-hidden="true">Photosynthesis</span>
+                    <span class="as-chip as-faint" aria-hidden="true">+13 more</span>
+                  </div>
+                </div>
+
+                <!-- The voice bar as the student sees it, in its current state -->
+                <div class="as-voicebar as-mt-3">
+                  <span class="as-mic" aria-hidden="true"><span class="material-symbols-outlined">mic</span></span>
+                  <div style="min-width:0">
+                    <div class="as-row" style="gap:8px">
+                      <span class="as-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                      <span class="as-body as-strong as-ok">Listening</span>
+                    </div>
+                    <p class="as-muted as-mt-1">Say a command</p>
+                  </div>
+                </div>
+                <p class="as-mt-3">
+                  <a href="09-developer-hub.html" class="as-row-action" style="padding-left:0">Screen details (admin PIN needed)</a>
+                </p>
+              </section>
+
+              <!-- ── System status ──
+                   One row per part of AbleSpeak, each with a dot, a word and the
+                   one action that fixes it. -->
+              <section class="as-card as-p-5" aria-labelledby="system-heading">
+                <h2 id="system-heading" class="as-section">System status</h2>
+                <ul class="as-list as-mt-3">
+                  <li>
+                    <span class="as-list-main">
+                      <span class="as-body">Voice bar</span>
+                      <span class="as-muted" style="display:block">Shown at the bottom of the screen</span>
+                    </span>
+                    <span class="as-status as-ok"><span class="as-dot as-ok"></span>On</span>
+                    <button type="button" class="as-row-action">Hide</button>
+                  </li>
+                  <li>
+                    <span class="as-list-main">
+                      <span class="as-body">Speech recognition</span>
+                      <span class="as-muted" style="display:block">Google Gemini</span>
+                    </span>
+                    <span class="as-status as-ok"><span class="as-dot as-ok"></span>Ready</span>
+                  </li>
+                  <li>
+                    <span class="as-list-main">
+                      <span class="as-body">Chrome extension</span>
+                      <span class="as-muted" style="display:block">1 tab connected</span>
+                    </span>
+                    <span class="as-status as-ok"><span class="as-dot as-ok"></span>Connected</span>
+                  </li>
+                  <li>
+                    <span class="as-list-main">
+                      <span class="as-body">Screen reading</span>
+                      <span class="as-muted" style="display:block">Windows accessibility · 94% found without guessing</span>
+                    </span>
+                    <span class="as-status as-ok"><span class="as-dot as-ok"></span>Reading</span>
+                  </li>
+                  <li>
+                    <span class="as-list-main">
+                      <span class="as-body">Web tools</span>
+                      <span class="as-muted" style="display:block">Needs the admin PIN to check</span>
+                    </span>
+                    <span class="as-status as-idle"><span class="as-dot as-idle"></span>Not checked</span>
+                    <a href="10-settings.html" class="as-row-action">Unlock</a>
+                  </li>
+                </ul>
+              </section>
+
+            </div>
+          </div>
+
+          <!-- ── Listening settings ──
+               The same three settings as Voice & words, so a teacher can change
+               them without leaving the page they are watching. -->
+          <section class="as-card as-p-5" aria-labelledby="speech-controls-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="speech-controls-heading" class="as-section">Listening settings</h2>
+              <span class="as-spacer"></span>
+              <a href="03-voice-and-words.html" class="as-row-action">All of Amina’s settings</a>
+            </div>
+
+            <div class="as-grid as-grid--3 as-mt-3">
+              <div>
+                <label class="as-field-label" for="home-sensitivity">How sensitive the microphone is</label>
+                <select class="as-field" id="home-sensitivity">
+                  <option selected>Standard</option>
+                  <option>Quiet voice — for a soft speaker</option>
+                  <option>Noisy room — ignores other voices</option>
+                </select>
+              </div>
+              <div>
+                <label class="as-field-label" for="home-pause">The pause that ends a command</label>
+                <div class="as-row">
+                  <input type="range" id="home-pause" min="0.4" max="3" step="0.1" value="1.2">
+                  <span class="as-body as-tabular" style="min-width:48px">1.2 s</span>
+                </div>
+                <p class="as-muted as-mt-1">Longer for someone who speaks slowly.</p>
+              </div>
+              <div>
+                <span class="as-field-label" id="wake-label">Say “AbleSpeak” first</span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false" aria-labelledby="wake-label">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+                <p class="as-muted as-mt-1">For a busy room: AbleSpeak only acts when you start with its name.</p>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/progress" aria-label="My progress" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">My progress</h1>
+            <p class="as-muted as-mt-1">
+              How you have been using AbleSpeak. Only you see this.
+            </p>
+          </header>
+
+          <!-- ── Your numbers ── -->
+          <section aria-labelledby="my-numbers-heading">
+            <h2 id="my-numbers-heading" class="as-sr">Your numbers</h2>
+            <dl class="as-grid as-grid--3">
+              <div class="as-stat">
+                <dt>Commands this week</dt>
+                <dd>
+                  <span class="as-number">214</span>
+                  <span class="as-stat-note">48 today</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Worked</dt>
+                <dd>
+                  <span class="as-number">91%</span>
+                  <span class="as-stat-note">195 of 214 this week</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Days in a row</dt>
+                <dd>
+                  <span class="as-number">7</span>
+                  <span class="as-stat-note">Since 7 Oct</span>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <!-- ── Commands per day ──
+               One bar per day, oldest first, with a gap for days with none.
+               Worked sits below, didn't work above, so the whole bar is the
+               day's total and the green part is what went right. -->
+          <section class="as-card as-p-5" aria-labelledby="per-day-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="per-day-heading" class="as-section">Commands per day</h2>
+              <span class="as-spacer"></span>
+              <div class="as-legend">
+                <span><i class="as-bar-ok"></i>Worked</span>
+                <span><i class="as-bar-bad"></i>Didn’t work</span>
+              </div>
+            </div>
+
+            <!-- The heights are the share of the tallest day, so the chart needs
+                 no axis: the day numbers run beneath it and the text below says
+                 what the gaps mean. -->
+            <div class="as-bars as-mt-3" role="img"
+                 aria-label="Commands per day for the last fourteen days. The busiest day was 11 October with 52 commands, of which 48 worked.">
+              <div><span class="as-bar-bad" style="height:6px"></span><span class="as-bar-ok" style="height:54px"></span></div>
+              <div><span class="as-bar-bad" style="height:9px"></span><span class="as-bar-ok" style="height:71px"></span></div>
+              <div><span class="as-bar-bad" style="height:4px"></span><span class="as-bar-ok" style="height:40px"></span></div>
+              <div><span class="as-bar-ok" style="height:0"></span></div>
+              <div><span class="as-bar-bad" style="height:11px"></span><span class="as-bar-ok" style="height:83px"></span></div>
+              <div><span class="as-bar-bad" style="height:7px"></span><span class="as-bar-ok" style="height:66px"></span></div>
+              <div><span class="as-bar-bad" style="height:5px"></span><span class="as-bar-ok" style="height:48px"></span></div>
+              <div><span class="as-bar-bad" style="height:13px"></span><span class="as-bar-ok" style="height:95px"></span></div>
+              <div><span class="as-bar-bad" style="height:8px"></span><span class="as-bar-ok" style="height:112px"></span></div>
+              <div><span class="as-bar-bad" style="height:12px"></span><span class="as-bar-ok" style="height:140px"></span></div>
+              <div><span class="as-bar-bad" style="height:6px"></span><span class="as-bar-ok" style="height:88px"></span></div>
+              <div><span class="as-bar-ok" style="height:0"></span></div>
+              <div><span class="as-bar-bad" style="height:9px"></span><span class="as-bar-ok" style="height:104px"></span></div>
+              <div><span class="as-bar-bad" style="height:5px"></span><span class="as-bar-ok" style="height:126px"></span></div>
+            </div>
+            <div class="as-bars-axis" aria-hidden="true">
+              <span>30</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span>
+              <span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span>
+            </div>
+            <p class="as-muted as-mt-3">
+              Nothing on 3 and 12 October — AbleSpeak was not used those days.
+            </p>
+          </section>
+
+          <div class="as-grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);align-items:start">
+
+            <!-- ── What you say most ──
+                 Counts, not a ranking: each bar is the share of the top phrase. -->
+            <section class="as-card as-p-5" aria-labelledby="top-heading">
+              <h2 id="top-heading" class="as-section">What you say most</h2>
+              <ul class="as-stack as-stack--xs as-mt-3">
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“scroll down”</span>
+                    <span class="as-body as-tabular as-strong">61</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:100%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“open chrome”</span>
+                    <span class="as-body as-tabular as-strong">34</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:56%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“read this page”</span>
+                    <span class="as-body as-tabular as-strong">28</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:46%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“go back”</span>
+                    <span class="as-body as-tabular as-strong">22</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:36%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+                <li>
+                  <div class="as-row" style="gap:8px">
+                    <span class="as-body" style="flex:1 1 auto">“pause”</span>
+                    <span class="as-body as-tabular as-strong">19</span>
+                  </div>
+                  <div style="height:4px;border-radius:9999px;background:var(--as-well);margin-top:4px">
+                    <div style="height:4px;width:31%;border-radius:9999px;background:var(--as-amber)"></div>
+                  </div>
+                </li>
+              </ul>
+              <p class="as-muted as-mt-3">
+                A phrase you say often can become a shortcut on
+                <a href="03-voice-and-words.html" class="as-ok" style="text-decoration:underline">Voice &amp; words</a>.
+              </p>
+            </section>
+
+            <!-- ── Your recent commands ── -->
+            <section class="as-card" aria-labelledby="mine-heading">
+              <h2 id="mine-heading" class="as-section" style="padding:16px 20px 12px">Your recent commands</h2>
+              <div style="overflow-x:auto">
+                <table class="as-table">
+                  <thead>
+                    <tr><th>When</th><th>What you said</th><th>What happened</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="as-tabular">14:05</td>
+                      <td>“open chrome”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:04</td>
+                      <td>“search for photosynthesis”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:02</td>
+                      <td>“click the second result”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">14:01</td>
+                      <td>“click the blue thing”</td>
+                      <td><span class="as-status as-warn"><span class="as-dot as-warn"></span>Asked again</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">13:58</td>
+                      <td>“open my email”</td>
+                      <td><span class="as-status as-bad"><span class="as-dot as-bad"></span>Didn’t work</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">13:55</td>
+                      <td>“dictate, photosynthesis happens in the leaf”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                    <tr>
+                      <td class="as-tabular">12 Oct, 16:20</td>
+                      <td>“pause spotify”</td>
+                      <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Worked</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style="padding:12px 20px 16px">
+                <button type="button" class="as-small-quiet">Show more</button>
+              </div>
+            </section>
+
+          </div>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/speech" aria-label="Voice & words" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <div class="as-row as-row--wrap">
+              <div>
+                <h1 class="as-title" id="page-title">Voice &amp; words</h1>
+                <p class="as-muted as-mt-1">
+                  How AbleSpeak listens to you, and the words it knows.
+                </p>
+              </div>
+              <span class="as-spacer"></span>
+              <!-- Only with the admin pages unlocked can another person be chosen -->
+              <div>
+                <label class="as-field-label" for="whose">Whose settings</label>
+                <select class="as-field" id="whose" style="min-width:220px">
+                  <option selected>Amina Kamau (you)</option>
+                  <option>Brian Otieno</option>
+                  <option>Faith Wanjiru</option>
+                </select>
+              </div>
+            </div>
+          </header>
+
+          <!-- ── How well AbleSpeak hears you ── -->
+          <section aria-labelledby="hearing-heading">
+            <h2 id="hearing-heading" class="as-section" style="margin-bottom:16px">How well AbleSpeak hears you</h2>
+            <dl class="as-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+              <div class="as-stat">
+                <dt>Understood</dt>
+                <dd>
+                  <span class="as-number">94%</span>
+                  <span class="as-stat-note">186 of 198 in the last 7 days</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Worked first time</dt>
+                <dd>
+                  <span class="as-number">78%</span>
+                  <span class="as-stat-note">32 of 41 tasks</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Tried again</dt>
+                <dd>
+                  <span class="as-number">9</span>
+                  <span class="as-stat-note">Said a second time</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Set aside as noise</dt>
+                <dd>
+                  <span class="as-number">23</span>
+                  <span class="as-stat-note as-warn">Try the Quiet voice profile</span>
+                </dd>
+              </div>
+            </dl>
+            <p class="as-notice as-warn-edge as-mt-3">
+              <strong>23 clips were set aside as background noise this week.</strong>
+              When that number is high, a soft speaker may be going unheard at the
+              standard setting. Try <em>Quiet voice</em> below and watch the number for a day.
+            </p>
+          </section>
+
+          <!-- ── Listening ── -->
+          <section class="as-card as-p-5" aria-labelledby="listening-heading">
+            <h2 id="listening-heading" class="as-section">Listening</h2>
+            <div class="as-grid as-grid--3 as-mt-3">
+              <div>
+                <label class="as-field-label" for="sensitivity">Listening profile</label>
+                <select class="as-field" id="sensitivity">
+                  <option selected>Standard</option>
+                  <option>Quiet voice — for a soft speaker</option>
+                  <option>Noisy room — ignores other voices</option>
+                </select>
+                <p class="as-muted as-mt-1">Standard suits most people. Change one thing at a time.</p>
+              </div>
+              <div>
+                <label class="as-field-label" for="pause">The pause that ends a command</label>
+                <div class="as-row">
+                  <input type="range" id="pause" min="0.4" max="3" step="0.1" value="1.2">
+                  <span class="as-body as-tabular" style="min-width:48px">1.2 s</span>
+                </div>
+                <p class="as-muted as-mt-1">Longer for someone who speaks slowly, so they are not cut off.</p>
+              </div>
+              <div>
+                <span class="as-field-label" id="wake-label">Say “AbleSpeak” first</span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false" aria-labelledby="wake-label">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+                <p class="as-muted as-mt-1">
+                  For a busy room: AbleSpeak only acts when you start with its name,
+                  and ignores other people, TV and music.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <div class="as-grid as-grid--2" style="align-items:start">
+
+            <!-- ── Your own words ── -->
+            <section class="as-card as-p-5" aria-labelledby="words-heading">
+              <h2 id="words-heading" class="as-section">Your own words</h2>
+              <p class="as-muted as-mt-1">
+                Names, subjects and places, so they are spelled right when you say them.
+              </p>
+              <form class="as-row as-mt-3" style="gap:8px">
+                <label class="as-sr" for="new-word">A word to add</label>
+                <input class="as-field" id="new-word" placeholder="Mitochondria" style="flex:1 1 auto">
+                <button type="submit" class="as-btn as-quiet">Add</button>
+              </form>
+              <ul class="as-list as-mt-3">
+                <li>
+                  <span class="as-list-main as-body">Mitochondria</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main as-body">Kiswahili</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main as-body">Nyeri</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main as-body">Mrs Achieng</span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+              </ul>
+            </section>
+
+            <!-- ── Shortcuts ──
+                 Ones AbleSpeak learned from a correction said twice are marked,
+                 so a teacher can see what the student taught it. -->
+            <section class="as-card as-p-5" aria-labelledby="shortcuts-heading">
+              <h2 id="shortcuts-heading" class="as-section">Shortcuts</h2>
+              <p class="as-muted as-mt-1">
+                Your words for something AbleSpeak already does.
+              </p>
+              <form class="as-row as-row--wrap as-mt-3" style="gap:8px">
+                <label class="as-sr" for="alias-from">When you say</label>
+                <input class="as-field" id="alias-from" placeholder="my music" style="flex:1 1 140px">
+                <span class="as-muted" aria-hidden="true">→</span>
+                <label class="as-sr" for="alias-to">Do this</label>
+                <input class="as-field" id="alias-to" placeholder="open Spotify" style="flex:1 1 140px">
+                <button type="submit" class="as-btn as-quiet">Add</button>
+              </form>
+              <ul class="as-list as-mt-3">
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body">“my music” → open Spotify</span>
+                  </span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body">“my homework folder” → open Documents\School</span>
+                    <span class="as-status as-ok" style="display:flex;margin-top:2px">
+                      <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">auto_awesome</span>
+                      Learned from your correction
+                    </span>
+                  </span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body">“the science page” → open Wikipedia photosynthesis</span>
+                    <span class="as-status as-ok" style="display:flex;margin-top:2px">
+                      <span class="material-symbols-outlined" style="font-size:14px" aria-hidden="true">auto_awesome</span>
+                      Learned from your correction
+                    </span>
+                  </span>
+                  <button type="button" class="as-row-action">Remove</button>
+                </li>
+              </ul>
+            </section>
+
+          </div>
+
+          <!-- ── Routines ── -->
+          <section class="as-card as-p-5" aria-labelledby="routines-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="routines-heading" class="as-section">Routines</h2>
+              <span class="as-spacer"></span>
+              <button type="button" class="as-small-quiet">
+                <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">add</span>
+                New routine
+              </button>
+            </div>
+            <p class="as-muted as-mt-1">
+              A named list of steps, done in order when you say its name.
+            </p>
+            <ul class="as-list as-mt-3">
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong">“Start my homework”</span>
+                  <span class="as-muted" style="display:block">
+                    Open Chrome · Go to Google Classroom · Open Word · New document
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Edit</button>
+                <button type="button" class="as-row-action">Remove</button>
+              </li>
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong">“Pack up”</span>
+                  <span class="as-muted" style="display:block">Save · Close the window · Pause music</span>
+                </span>
+                <button type="button" class="as-row-action">Edit</button>
+                <button type="button" class="as-row-action">Remove</button>
+              </li>
+            </ul>
+          </section>
+
+          <!-- ── Carry your settings ──
+               A file for now; syncing to the account is next (Documentation.md,
+               "What AbleSpeak cannot do yet"). -->
+          <section class="as-card as-p-5" aria-labelledby="portable-heading">
+            <h2 id="portable-heading" class="as-section">Carry your settings to another computer</h2>
+            <p class="as-muted as-mt-1">
+              Saves your listening settings, your words, shortcuts and routines as
+              one file. Your commands and progress stay on this computer.
+            </p>
+            <div class="as-row as-row--wrap as-mt-3">
+              <button type="button" class="as-btn as-quiet">
+                <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">download</span>
+                Save to a file
+              </button>
+              <button type="button" class="as-btn as-quiet">
+                <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">upload</span>
+                Load from a file
+              </button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/students" aria-label="Users" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Users</h1>
+            <p class="as-muted as-mt-1">
+              Who uses this computer, how well AbleSpeak hears them, and their
+              progress towards each goal.
+            </p>
+          </header>
+
+          <!-- ── 1. Who is using this computer ──
+               Starting a session is what makes everything else attribute to the
+               right person, so it is the first thing on the page. -->
+          <section class="as-card as-p-5" aria-labelledby="who-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="who-heading" class="as-section">Who is using this computer</h2>
+              <span class="as-spacer"></span>
+              <span class="as-status as-ok"><span class="as-dot as-ok"></span>Amina Kamau, for 42 minutes</span>
+            </div>
+
+            <div class="as-well as-p-4 as-mt-3">
+              <div class="as-row as-row--wrap">
+                <div>
+                  <label class="as-field-label" for="session-who">At the computer now</label>
+                  <select class="as-field" id="session-who" style="min-width:240px">
+                    <option selected>Amina Kamau</option>
+                    <option>Brian Otieno</option>
+                    <option>Faith Wanjiru</option>
+                    <option>Joseph Mwangi</option>
+                  </select>
+                </div>
+                <div style="align-self:flex-end" class="as-row">
+                  <button type="button" class="as-btn as-quiet">End this session</button>
+                </div>
+                <span class="as-spacer"></span>
+                <form class="as-row as-row--wrap" style="gap:8px;align-self:flex-end">
+                  <div>
+                    <label class="as-field-label" for="new-user">Add someone</label>
+                    <input class="as-field" id="new-user" placeholder="Their name" style="min-width:200px">
+                  </div>
+                  <button type="submit" class="as-btn as-primary" style="align-self:flex-end">Add</button>
+                </form>
+              </div>
+              <p class="as-muted as-mt-3">
+                AbleSpeak remembers who was here after a restart — unless this is
+                marked a shared computer in Settings.
+              </p>
+            </div>
+          </section>
+
+          <!-- ── 2. The class as a whole ── -->
+          <section aria-labelledby="class-summary-heading">
+            <h2 id="class-summary-heading" class="as-section" style="margin-bottom:16px">Success rate, all users</h2>
+            <dl class="as-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+              <div class="as-stat">
+                <dt>Success rate</dt>
+                <dd><span class="as-number">89%</span><span class="as-stat-note">All users, all time</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Total commands</dt>
+                <dd><span class="as-number">4,182</span><span class="as-stat-note">Since 2 Sep</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Today</dt>
+                <dd><span class="as-number">126</span><span class="as-stat-note">Across 3 users</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Average response</dt>
+                <dd><span class="as-number">1.4 s</span><span class="as-stat-note">Within the 1.5 s goal</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Users</dt>
+                <dd><span class="as-number">4</span><span class="as-stat-note">1 at the computer now</span></dd>
+              </div>
+            </dl>
+          </section>
+
+          <!-- ── 3. Each person ──
+               Picking a row changes whose progress is shown below. -->
+          <section class="as-card" aria-labelledby="roster-heading">
+            <h2 id="roster-heading" class="as-section" style="padding:16px 20px 12px">Usage by user</h2>
+            <div style="overflow-x:auto">
+              <table class="as-table">
+                <caption class="as-sr">Every user on this computer. Choosing a row shows that person’s progress below.</caption>
+                <thead>
+                  <tr>
+                    <th>User</th><th>Understood</th><th>Worked first time</th>
+                    <th>Commands</th><th>Last used</th><th><span class="as-sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="is-picked" aria-current="true">
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">AK</span>
+                        <span>
+                          <span class="as-body as-strong" data-private>Amina Kamau</span>
+                          <span class="as-status as-ok" style="display:flex"><span class="as-dot as-ok"></span>At the computer</span>
+                        </span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">94%</td>
+                    <td class="as-tabular">78%</td>
+                    <td class="as-tabular">1,842</td>
+                    <td>Now</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">BO</span>
+                        <span class="as-body as-strong" data-private>Brian Otieno</span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">81%</td>
+                    <td class="as-tabular">62%</td>
+                    <td class="as-tabular">1,109</td>
+                    <td>Today, 11:20</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">FW</span>
+                        <span class="as-body as-strong" data-private>Faith Wanjiru</span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">96%</td>
+                    <td class="as-tabular">84%</td>
+                    <td class="as-tabular">903</td>
+                    <td>Today, 09:05</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">JM</span>
+                        <span class="as-body as-strong" data-private>Joseph Mwangi</span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">72%</td>
+                    <td class="as-tabular">48%</td>
+                    <td class="as-tabular">328</td>
+                    <td>9 Oct</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="as-muted" style="padding:12px 20px 16px">
+              Removing someone deletes all of their data from this computer, including
+              their exam sittings and audit trails.
+            </p>
+          </section>
+
+          <!-- ── 4. Progress for the chosen person ── -->
+          <section class="as-card as-p-5" aria-labelledby="progress-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="progress-heading" class="as-section">Progress — Amina Kamau</h2>
+              <span class="as-spacer"></span>
+              <span class="as-muted">Independent commands per session · 14 Sep to 13 Oct</span>
+            </div>
+
+            <!-- A decision flag: the KPI engine says whether a review is due, and
+                 why. It is a statement about the data, not advice about the person. -->
+            <p class="as-notice as-ok-edge as-mt-3">
+              <strong>On track to meet the target.</strong>
+              The trend is +1.4 commands per session per week against an aim line of
+              +0.9. Four of the last four points sit above the aim line, so a
+              decision is not due yet.
+            </p>
+
+            <!-- The chart, drawn as an SVG so it carries its own labels. The app
+                 draws the same series from the KPI engine. -->
+            <figure class="as-well as-p-4" style="margin:12px 0 0">
+              <svg viewBox="0 0 720 240" width="100%" height="240" role="img"
+                   aria-labelledby="chart-title chart-desc" style="display:block">
+                <title id="chart-title">Independent commands per session, 14 September to 13 October</title>
+                <desc id="chart-desc">
+                  Starting at 4 commands per session and rising to 19. The aim line runs
+                  from 4 to 17 over the same period. A phase change is marked on
+                  28 September, when the Quiet voice profile was switched on. The
+                  measured points sit above the aim line from 17 September onwards.
+                </desc>
+
+                <!-- grid -->
+                <g stroke="rgba(255,255,255,0.06)" stroke-width="1">
+                  <line x1="48" y1="20" x2="700" y2="20"/>
+                  <line x1="48" y1="70" x2="700" y2="70"/>
+                  <line x1="48" y1="120" x2="700" y2="120"/>
+                  <line x1="48" y1="170" x2="700" y2="170"/>
+                  <line x1="48" y1="200" x2="700" y2="200"/>
+                </g>
+                <!-- y labels -->
+                <g fill="#8b95a7" font-size="11" text-anchor="end" font-family="Roboto Mono, monospace">
+                  <text x="40" y="24">24</text>
+                  <text x="40" y="74">18</text>
+                  <text x="40" y="124">12</text>
+                  <text x="40" y="174">6</text>
+                  <text x="40" y="204">0</text>
+                </g>
+
+                <!-- the phase change: when something was deliberately changed -->
+                <line x1="392" y1="20" x2="392" y2="200" stroke="#ffc880" stroke-width="1.5" stroke-dasharray="4 4"/>
+                <text x="398" y="34" fill="#ffc880" font-size="11">Quiet voice on · 28 Sep</text>
+
+                <!-- the aim line: where they should be by now -->
+                <line x1="60" y1="167" x2="688" y2="59" stroke="#c9b8a5" stroke-width="1.5" stroke-dasharray="6 4"/>
+                <text x="592" y="54" fill="#c9b8a5" font-size="11">Aim line</text>
+
+                <!-- the trend through the measured points (Theil–Sen) -->
+                <line x1="60" y1="170" x2="688" y2="42" stroke="#68d9c3" stroke-width="2"/>
+                <text x="604" y="36" fill="#68d9c3" font-size="11">Trend</text>
+
+                <!-- the measured points -->
+                <g fill="#dae3f4">
+                  <circle cx="60"  cy="170" r="4"/>
+                  <circle cx="143" cy="162" r="4"/>
+                  <circle cx="226" cy="150" r="4"/>
+                  <circle cx="309" cy="155" r="4"/>
+                  <circle cx="392" cy="137" r="4"/>
+                  <circle cx="475" cy="112" r="4"/>
+                  <circle cx="558" cy="95"  r="4"/>
+                  <circle cx="641" cy="62"  r="4"/>
+                  <circle cx="688" cy="45"  r="5" fill="#f5a623"/>
+                </g>
+                <text x="660" y="36" fill="#f5a623" font-size="11" text-anchor="end">Today</text>
+
+                <!-- x labels -->
+                <g fill="#8b95a7" font-size="11" text-anchor="middle">
+                  <text x="60"  y="222">14 Sep</text>
+                  <text x="226" y="222">21 Sep</text>
+                  <text x="392" y="222">28 Sep</text>
+                  <text x="558" y="222">6 Oct</text>
+                  <text x="688" y="222">13 Oct</text>
+                </g>
+              </svg>
+              <figcaption class="as-muted as-mt-3">
+                Each point is one session, from Amina’s own saved commands.
+                The aim line is set by the goal below; the trend is fitted to the points.
+              </figcaption>
+            </figure>
+
+            <!-- The table behind the chart, for a screen reader and for copying
+                 into a review. The chart is never the only way to the numbers. -->
+            <details class="as-mt-3">
+              <summary class="as-small-quiet" style="display:inline-flex">Show the numbers</summary>
+              <div class="as-mt-3" style="overflow-x:auto">
+                <table class="as-table" aria-label="Progress data table">
+                  <thead><tr><th>Session</th><th>Independent commands</th><th>Aim line</th><th>Above the aim line</th></tr></thead>
+                  <tbody>
+                    <tr><td>14 Sep</td><td class="as-tabular">4</td><td class="as-tabular">4.0</td><td>No</td></tr>
+                    <tr><td>17 Sep</td><td class="as-tabular">5</td><td class="as-tabular">4.4</td><td>Yes</td></tr>
+                    <tr><td>21 Sep</td><td class="as-tabular">6</td><td class="as-tabular">5.0</td><td>Yes</td></tr>
+                    <tr><td>24 Sep</td><td class="as-tabular">6</td><td class="as-tabular">5.6</td><td>Yes</td></tr>
+                    <tr><td>28 Sep</td><td class="as-tabular">8</td><td class="as-tabular">6.6</td><td>Yes</td></tr>
+                    <tr><td>1 Oct</td><td class="as-tabular">11</td><td class="as-tabular">8.1</td><td>Yes</td></tr>
+                    <tr><td>6 Oct</td><td class="as-tabular">13</td><td class="as-tabular">10.3</td><td>Yes</td></tr>
+                    <tr><td>10 Oct</td><td class="as-tabular">17</td><td class="as-tabular">13.6</td><td>Yes</td></tr>
+                    <tr><td>13 Oct</td><td class="as-tabular">19</td><td class="as-tabular">17.0</td><td>Yes</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+
+            <div class="as-row as-row--wrap as-mt-5">
+              <button type="button" class="as-btn as-primary">Mark the goal met</button>
+              <button type="button" class="as-btn as-quiet">Discontinue this goal</button>
+              <span class="as-spacer"></span>
+              <button type="button" class="as-small-quiet">
+                <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">flag</span>
+                Mark a phase change
+              </button>
+            </div>
+          </section>
+
+          <!-- ── 5. Goals, and the new-goal form ── -->
+          <div class="as-grid" style="grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);align-items:start">
+
+            <section class="as-card as-p-5" aria-labelledby="goals-heading">
+              <h3 id="goals-heading" class="as-section">Goals</h3>
+              <ul class="as-list as-mt-3">
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body as-strong">Independent commands per session</span>
+                    <span class="as-muted" style="display:block">
+                      From 4 to 24 by 10 Nov · started 14 Sep
+                    </span>
+                  </span>
+                  <span class="as-status as-ok"><span class="as-dot as-ok"></span>On track</span>
+                  <button type="button" class="as-row-action">Open</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body as-strong">Dictates a sentence without help</span>
+                    <span class="as-muted" style="display:block">
+                      From 0 to 5 by 1 Dec · started 1 Oct
+                    </span>
+                  </span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>Decision due</span>
+                  <button type="button" class="as-row-action">Open</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body as-strong">Recovers from a failed command alone</span>
+                    <span class="as-muted" style="display:block">Met on 28 Sep</span>
+                  </span>
+                  <span class="as-status as-idle"><span class="as-dot as-idle"></span>Met</span>
+                  <button type="button" class="as-row-action">Open</button>
+                </li>
+              </ul>
+            </section>
+
+            <section class="as-card as-p-5" aria-labelledby="create-goal-heading">
+              <h3 id="create-goal-heading" class="as-section">Create a goal</h3>
+              <form class="as-stack as-stack--sm as-mt-3">
+                <div>
+                  <label class="as-field-label" for="goal-what">What is being measured</label>
+                  <select class="as-field" id="goal-what">
+                    <option>Independent commands per session</option>
+                    <option>Commands that worked first time</option>
+                    <option>Tasks finished without adult help</option>
+                    <option>Recoveries without adult help</option>
+                  </select>
+                </div>
+                <div class="as-grid as-grid--2">
+                  <div>
+                    <label class="as-field-label" for="goal-from">Starting point</label>
+                    <input class="as-field as-tabular" id="goal-from" inputmode="numeric" value="4">
+                  </div>
+                  <div>
+                    <label class="as-field-label" for="goal-to">Target</label>
+                    <input class="as-field as-tabular" id="goal-to" inputmode="numeric" value="24">
+                  </div>
+                </div>
+                <div>
+                  <label class="as-field-label" for="goal-by">Target date</label>
+                  <input class="as-field" id="goal-by" type="date" value="2026-11-10">
+                </div>
+                <button type="submit" class="as-btn as-primary">Create the goal</button>
+              </form>
+              <p class="as-muted as-mt-3">
+                The starting point is the average of the sessions before today, so the
+                aim line begins where the person actually is.
+              </p>
+            </section>
+
+          </div>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/exams" aria-label="Exams" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Exams</h1>
+            <p class="as-muted as-mt-1">
+              AbleSpeak reads each question aloud and writes down the student’s spoken
+              answers exactly as said. During an exam the AI assistant, the web and
+              every other tool are switched off. Afterwards, download the script for marking.
+            </p>
+          </header>
+
+          <!-- ── An exam running now ──
+               Only one exam runs on a computer at a time, so this is a single
+               banner, and the one action is to open the screen the student sees. -->
+          <div class="as-card as-p-4 as-row as-row--wrap" role="status">
+            <span class="as-dot as-dot--lg as-ok"></span>
+            <span class="as-body">
+              <strong data-private>Amina Kamau</strong> is sitting
+              Form 2 Biology — End of Term 2 — 7 of 12 answered.
+            </span>
+            <span class="as-spacer"></span>
+            <a href="07-exam-screen.html" class="as-btn as-primary">Open the exam screen</a>
+          </div>
+
+          <!-- ── The exam folder ──
+               Papers saved here are picked up without an upload, which is how a
+               teacher who cannot find the dashboard still gets a paper in. -->
+          <section class="as-card as-p-5" aria-labelledby="folder-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="folder-heading" class="as-section">Exam folder</h2>
+              <span class="as-spacer"></span>
+              <button type="button" class="as-small-quiet">
+                <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">folder_open</span>
+                Open the folder
+              </button>
+            </div>
+            <p class="as-muted as-mt-1">
+              Save a paper into <span class="as-mono" data-private>Documents\AbleSpeak Exams</span>
+              and it appears here by itself. A file is read once per version of its contents.
+            </p>
+
+            <!-- Files that could not be read, with what to do instead -->
+            <div class="as-well as-p-4 as-mt-3" aria-label="Files that could not be read">
+              <p class="as-body as-strong">2 files could not be read</p>
+              <ul class="as-stack as-stack--xs as-mt-3">
+                <li class="as-row as-row--wrap" style="gap:8px">
+                  <span class="material-symbols-outlined as-warn" style="font-size:18px" aria-hidden="true">description</span>
+                  <span class="as-body as-mono" style="flex:1 1 220px" data-private>Chemistry-Paper1-scan.pdf</span>
+                  <span class="as-muted">A scanned picture, with no text — upload a Word file, or a PDF made from one</span>
+                </li>
+                <li class="as-row as-row--wrap" style="gap:8px">
+                  <span class="material-symbols-outlined as-warn" style="font-size:18px" aria-hidden="true">description</span>
+                  <span class="as-body as-mono" style="flex:1 1 220px" data-private>Maths-Mock-2025.doc</span>
+                  <span class="as-muted">An old Word format — open it in Word and save as .docx</span>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <!-- ── Or upload one here ── -->
+          <section class="as-card as-p-5" aria-labelledby="upload-heading">
+            <h2 id="upload-heading" class="as-section">Or upload a paper here</h2>
+            <p class="as-muted as-mt-1">
+              Word (.docx) or a PDF with real text. Word’s own numbering, tables and
+              equations are kept. The paper is read on this computer and never sent anywhere.
+            </p>
+            <form class="as-row as-row--wrap as-mt-3" style="gap:12px">
+              <div style="flex:1 1 280px">
+                <label class="as-field-label" for="paper">Choose a file</label>
+                <input class="as-field" id="paper" type="file" accept=".docx,.pdf" style="padding:8px 12px">
+              </div>
+              <button type="submit" class="as-btn as-primary" style="align-self:flex-end">Read the paper</button>
+            </form>
+          </section>
+
+          <!-- ── Check the questions ──
+               Shown after an import, and whenever a teacher opens a paper. This is
+               the gate: nothing can be sat until this has been saved once. -->
+          <section class="as-card as-p-5" aria-labelledby="check-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="check-heading" class="as-section">Check the questions</h2>
+              <span class="as-spacer"></span>
+              <span class="as-muted" data-private>Form 2 Biology — End of Term 2</span>
+            </div>
+            <p class="as-muted as-mt-1">
+              This is exactly what will be read aloud. Fix anything that is wrong
+              before a student sits it.
+            </p>
+
+            <!-- Things to check: stated as questions for a human, not as errors -->
+            <div class="as-notice as-warn-edge as-mt-3" aria-label="Things to check">
+              <p><strong>3 things to check</strong></p>
+              <ul class="as-stack as-stack--xs as-mt-3">
+                <li>· Question 4 has a diagram. AbleSpeak cannot describe a picture — write it in words, or arrange a human reader.</li>
+                <li>· Question 7 has only one option. A multiple-choice question usually has more; check whether options were missed.</li>
+                <li>· Questions jump from 9 to 11. Check whether question 10 is missing from the paper.</li>
+              </ul>
+            </div>
+
+            <!-- The exam's own settings -->
+            <div class="as-grid as-grid--3 as-mt-5">
+              <div>
+                <label class="as-field-label" for="exam-title">Title</label>
+                <input class="as-field" id="exam-title" value="Form 2 Biology — End of Term 2">
+              </div>
+              <div>
+                <label class="as-field-label" for="exam-time">Time limit</label>
+                <div class="as-row">
+                  <input class="as-field as-tabular" id="exam-time" inputmode="numeric" value="90" style="max-width:100px">
+                  <span class="as-muted">minutes</span>
+                </div>
+              </div>
+              <div>
+                <span class="as-field-label" id="readback-label">Read each answer back</span>
+                <button type="button" class="as-switch" role="switch" aria-checked="true" aria-labelledby="readback-label">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">On</span>
+                </button>
+                <p class="as-muted as-mt-1">So a blind student hears what went down.</p>
+              </div>
+            </div>
+
+            <div class="as-mt-5">
+              <label class="as-field-label" for="exam-instructions">Instructions, read before question 1</label>
+              <textarea class="as-field" id="exam-instructions" rows="3">Answer all questions in Section A. Write your answers in full sentences. You have 90 minutes.</textarea>
+            </div>
+
+            <!-- Each question as it will be read -->
+            <h3 class="as-section as-mt-5" style="font-size:14px">Questions found: 12</h3>
+            <ul class="as-stack as-stack--sm as-mt-3">
+
+              <li class="as-well as-p-4">
+                <div class="as-row as-row--wrap">
+                  <span class="as-body as-strong" style="color:var(--as-amber-light)">Question 1</span>
+                  <span class="as-spacer"></span>
+                  <span class="as-muted">2 marks</span>
+                  <button type="button" class="as-row-action">Edit</button>
+                </div>
+                <p class="as-body as-mt-3">Define osmosis.</p>
+              </li>
+
+              <li class="as-well as-p-4">
+                <div class="as-row as-row--wrap">
+                  <span class="as-body as-strong" style="color:var(--as-amber-light)">Question 2 (a)</span>
+                  <span class="as-spacer"></span>
+                  <span class="as-muted">1 mark · multiple choice</span>
+                  <button type="button" class="as-row-action">Edit</button>
+                </div>
+                <p class="as-body as-mt-3">Which part of the cell carries out respiration?</p>
+                <ol class="as-stack as-stack--xs as-mt-3">
+                  <li class="as-body">A — Nucleus</li>
+                  <li class="as-body">B — Mitochondria</li>
+                  <li class="as-body">C — Ribosome</li>
+                  <li class="as-body">D — Cell wall</li>
+                </ol>
+              </li>
+
+              <!-- A question the teacher must act on before the paper can be sat -->
+              <li class="as-well as-p-4" style="border-color:rgba(255,200,128,0.4)">
+                <div class="as-row as-row--wrap">
+                  <span class="as-body as-strong" style="color:var(--as-amber-light)">Question 4</span>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>Has a picture</span>
+                  <button type="button" class="as-row-action">Edit</button>
+                </div>
+                <p class="as-body as-mt-3">Study the diagram below and name the parts labelled X and Y.</p>
+                <div class="as-mt-3">
+                  <label class="as-field-label" for="q4-alt">Describe the picture in words, so it can be read aloud</label>
+                  <textarea class="as-field" id="q4-alt" rows="2"
+                    placeholder="A cross-section of a leaf. X points to the upper layer of cells; Y points to a small opening on the underside."></textarea>
+                </div>
+              </li>
+
+            </ul>
+
+            <div class="as-row as-row--wrap as-mt-5">
+              <button type="button" class="as-btn as-primary">Save — this paper is checked</button>
+              <button type="button" class="as-btn as-quiet">Close without saving</button>
+              <span class="as-spacer"></span>
+              <span class="as-muted">Saving is what allows a student to sit it.</span>
+            </div>
+          </section>
+
+          <!-- ── Exam papers ── -->
+          <section class="as-card as-p-5" aria-labelledby="exams-heading">
+            <h2 id="exams-heading" class="as-section">Exam papers</h2>
+            <ul class="as-list as-mt-3">
+
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong" data-private>Form 2 Biology — End of Term 2</span>
+                  <span class="as-muted" style="display:block">
+                    12 answers · 90 min · added 13 Oct · sat 1 time
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Check questions</button>
+                <button type="button" class="as-row-action">Delete</button>
+                <button type="button" class="as-btn as-quiet" disabled aria-disabled="true"
+                        title="An exam is already running on this computer">Start exam</button>
+              </li>
+
+              <!-- Straight from the folder: cannot be started yet -->
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong" data-private>Form 2 English — Comprehension</span>
+                  <span class="as-status as-warn" style="display:flex">
+                    <span class="as-dot as-warn"></span>
+                    New from the exam folder — check its questions before a student sits it (2 to look at)
+                  </span>
+                  <span class="as-muted" style="display:block">
+                    8 answers · no time limit · added 13 Oct
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Check questions</button>
+                <button type="button" class="as-row-action">Delete</button>
+                <button type="button" class="as-btn as-quiet" disabled aria-disabled="true"
+                        title="Check its questions first">Start exam</button>
+              </li>
+
+              <li>
+                <span class="as-list-main">
+                  <span class="as-body as-strong" data-private>Form 1 Maths — Mock</span>
+                  <span class="as-muted" style="display:block">
+                    20 answers · 120 min · added 9 Oct · sat 3 times
+                  </span>
+                </span>
+                <button type="button" class="as-row-action">Check questions</button>
+                <button type="button" class="as-row-action">Delete</button>
+                <!-- Who sits it is chosen here, so it can never be started for nobody -->
+                <span class="as-row" style="gap:8px">
+                  <label class="as-sr" for="start-who-maths">Who is sitting it</label>
+                  <select class="as-field" id="start-who-maths" style="min-width:160px;min-height:36px;padding:4px 36px 4px 10px;font-size:13px">
+                    <option>Choose a student…</option>
+                    <option>Amina Kamau</option>
+                    <option>Brian Otieno</option>
+                    <option>Faith Wanjiru</option>
+                  </select>
+                  <button type="button" class="as-btn as-quiet" disabled aria-disabled="true"
+                          title="An exam is already running on this computer">Start exam</button>
+                </span>
+              </li>
+
+            </ul>
+          </section>
+
+          <!-- ── Sittings and scripts ── -->
+          <section class="as-card as-p-5" aria-labelledby="sittings-heading">
+            <h2 id="sittings-heading" class="as-section">Sittings and scripts</h2>
+            <div class="as-mt-3" style="overflow-x:auto">
+              <table class="as-table">
+                <thead>
+                  <tr>
+                    <th>Student</th><th>Exam</th><th>Started</th>
+                    <th>Answered</th><th>Status</th><th><span class="as-sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td data-private>Amina Kamau</td>
+                    <td data-private>Form 2 Biology — End of Term 2</td>
+                    <td>13 Oct, 13:40</td>
+                    <td class="as-tabular">7 of 12</td>
+                    <td><span class="as-status as-ok"><span class="as-dot as-ok"></span>Being sat now</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td data-private>Brian Otieno</td>
+                    <td data-private>Form 1 Maths — Mock</td>
+                    <td>12 Oct, 09:15</td>
+                    <td class="as-tabular">20 of 20</td>
+                    <td><span class="as-status as-idle"><span class="as-dot as-idle"></span>Finished by the student</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td data-private>Faith Wanjiru</td>
+                    <td data-private>Form 1 Maths — Mock</td>
+                    <td>12 Oct, 09:15</td>
+                    <td class="as-tabular">18 of 20</td>
+                    <td><span class="as-status as-warn"><span class="as-dot as-warn"></span>Time ran out</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                  <!-- A sitting interrupted by a crash or restart can be carried on;
+                       the time the app was closed is not counted. -->
+                  <tr>
+                    <td data-private>Joseph Mwangi</td>
+                    <td data-private>Form 1 Maths — Mock</td>
+                    <td>9 Oct, 14:02</td>
+                    <td class="as-tabular">11 of 20</td>
+                    <td><span class="as-status as-warn"><span class="as-dot as-warn"></span>Stopped part-way</span></td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <button type="button" class="as-row-action">Carry on</button>
+                      <button type="button" class="as-row-action">Script (Word)</button>
+                      <button type="button" class="as-row-action">Audit trail</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="as-muted as-mt-3">
+              Every script states whether its audit trail passed the integrity check,
+              and carries an invigilator signature line.
+            </p>
+          </section>
+
+          <!-- ── What the student can say ──
+               Kept on the teacher's page so an invigilator can prompt a student
+               without leaving the screen. -->
+          <section class="as-card as-p-5" aria-labelledby="say-heading">
+            <h2 id="say-heading" class="as-section">What the student can say</h2>
+            <div class="as-grid as-grid--2 as-mt-3">
+              <div class="as-well as-p-4">
+                <p class="as-body as-strong">Moving and hearing</p>
+                <p class="as-muted as-mt-1">
+                  “Read the question”, “read the options”, “next”, “previous”,
+                  “go to question 5”, “go to question 2 b”, “slower”, “faster”,
+                  “how much time is left”, “where am I”, “unanswered questions”,
+                  “read the instructions”, “help”, “finish exam”.
+                </p>
+              </div>
+              <div class="as-well as-p-4">
+                <p class="as-body as-strong">Answering</p>
+                <p class="as-muted as-mt-1">
+                  “Answer B” for a choice. “Answer” to start writing: everything said
+                  is written until “done”. “Full stop”, “comma”, “new paragraph”;
+                  “delete the last word”, “delete the last sentence”, “undo”,
+                  “read my answer”, “spell m i t o” to write a word letter by letter;
+                  “maths on” for symbols.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── What this is not ready for ──
+               Last on the page, and never hidden: a teacher deciding whether to
+               use this for a real exam needs to read it. -->
+          <section class="as-notice as-bad-edge" aria-labelledby="not-ready-heading">
+            <p id="not-ready-heading"><strong>For practice and mock exams only.</strong></p>
+            <p class="as-mt-1">
+              Turning speech into text needs the internet, and the student’s voice goes
+              to Google Gemini — outside Kenya. For a formal exam that needs parental
+              consent and a data protection assessment, and KNEC has published no rule
+              yet on speech-to-text. Recognition on this computer, with no audio leaving
+              it, is the next step. See <span class="as-mono">docs/AbleSpeak-Exam-Mode.md</span>.
+            </p>
+          </section>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/exam" aria-label="Exam screen" hidden>
+      <div class="as-page exam">
+
+        <!-- ── Who, what, and how long is left ── -->
+        <header class="as-row as-row--wrap" style="gap:8px 24px">
+          <h1 class="exam-title" data-private>Form 2 Biology — End of Term 2</h1>
+          <span class="as-spacer"></span>
+          <p class="exam-clock" aria-label="Time left 41 minutes 18 seconds">41:18</p>
+        </header>
+        <p class="as-muted exam-small as-mt-1">
+          <span data-private>Amina Kamau</span> · 7 of 12 answered
+        </p>
+
+        <!-- ── The question, as it is read aloud ──
+             The number is shown above, so it is not read twice. -->
+        <section class="as-card as-p-5 as-mt-5" aria-labelledby="question-label">
+          <p id="question-label" class="exam-heading" style="color:var(--as-amber)">
+            Question 2 (a)
+            <span style="color:var(--as-ink-quiet);font-weight:400">— 8 of 12</span>
+          </p>
+          <p class="exam-big as-mt-3">Which part of the cell carries out respiration?</p>
+
+          <!-- Options are listed so a sighted student can follow along while they
+               are read; the student answers by saying the letter. -->
+          <ol class="as-stack as-stack--xs as-mt-5">
+            <li class="exam-big">A — Nucleus</li>
+            <li class="exam-big">B — Mitochondria</li>
+            <li class="exam-big">C — Ribosome</li>
+            <li class="exam-big">D — Cell wall</li>
+          </ol>
+        </section>
+
+        <!-- ── The answer as it stands ──
+             What AbleSpeak is waiting for is a dot and words, never a colour or
+             a blinking cursor: a blind student is told it aloud, and a sighted
+             one reads it here. -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-labelledby="answer-label">
+          <div class="as-row as-row--wrap">
+            <h2 id="answer-label" class="exam-heading">Answer</h2>
+            <span class="as-status as-ok exam-small">
+              <span class="as-dot as-dot--lg as-ok"></span>Writing the answer — say “done” to finish
+            </span>
+            <span class="as-muted exam-small">· Maths on</span>
+          </div>
+
+          <div class="exam-answer as-mt-3">
+            <p class="exam-big">Mitochondria carry out respiration. They release energy from glucose.</p>
+          </div>
+
+          <!-- The last thing heard, so a wrong word is caught at once -->
+          <p class="as-muted exam-small as-mt-3">Heard: “they release energy from glucose full stop”</p>
+        </section>
+
+        <!-- ── The student's controls, then the invigilator's ──
+             Separated by the rule, and labelled, so nobody presses the wrong one. -->
+        <footer class="exam-foot">
+          <span class="as-muted exam-small">Text size</span>
+          <button type="button" class="as-btn as-quiet exam-size-btn" aria-label="Smaller text">A−</button>
+          <button type="button" class="as-btn as-quiet exam-size-btn" aria-label="Larger text">A+</button>
+
+          <span class="as-spacer"></span>
+
+          <span class="as-muted exam-small">Invigilator:</span>
+          <button type="button" class="as-btn as-quiet">Pause</button>
+          <button type="button" class="as-btn as-danger">End exam</button>
+        </footer>
+
+        <!-- ─────────────────────────────────────────────────────────────────
+             The screen's other states. Kept in this file so the port covers
+             all of them; in the app each replaces the two cards above.
+             ───────────────────────────────────────────────────────────────── -->
+
+        <h2 class="as-section" style="margin-top:56px;padding-top:24px;border-top:1px solid var(--as-line)">
+          The screen’s other states
+        </h2>
+        <p class="as-muted as-mt-1">Reference for the port — not shown at the same time as the above.</p>
+
+        <!-- Paused: the clock has stopped, and the one way back is obvious -->
+        <section class="as-card as-p-5 as-mt-5" aria-label="Paused">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Answer</h3>
+            <span class="as-status as-warn exam-small">
+              <span class="as-dot as-dot--lg as-warn"></span>Paused — the clock has stopped
+            </span>
+            <span class="as-spacer"></span>
+            <button type="button" class="as-btn as-primary">Carry on</button>
+          </div>
+          <div class="exam-answer as-mt-3">
+            <p class="exam-big">Mitochondria carry out respiration.</p>
+          </div>
+        </section>
+
+        <!-- Waiting for a plain yes: "okay, wait…" carries on, by design -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-label="Waiting for yes or no">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Finish the exam?</h3>
+            <span class="as-status as-warn exam-small">
+              <span class="as-dot as-dot--lg as-warn"></span>Waiting for yes or no
+            </span>
+          </div>
+          <p class="exam-big as-mt-3">
+            You have 5 questions with no answer. Say “yes” to finish, or anything else to carry on.
+          </p>
+        </section>
+
+        <!-- The clock under five minutes, in coral — with the words beside it,
+             so the colour is never the only warning. -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-label="Little time left">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Time</h3>
+            <span class="as-spacer"></span>
+            <p class="exam-clock is-low" aria-label="Time left 4 minutes 12 seconds">04:12</p>
+          </div>
+          <p class="as-bad exam-small as-mt-3">
+            Said aloud at 30, 15, 5 and 1 minutes left.
+          </p>
+        </section>
+
+        <!-- Ended: says how it ended, and that the answers are safe -->
+        <section class="as-card as-p-5" style="margin-top:16px" role="status" aria-label="The exam has ended">
+          <p class="exam-big">The exam has ended. The student finished the exam.</p>
+          <p class="as-muted exam-small as-mt-3">
+            The answers are saved. The teacher can download the script from the Exams page.
+          </p>
+          <a href="06-exams.html" class="as-btn as-primary as-mt-5">Go to Exams</a>
+        </section>
+
+        <!-- Nothing running on this computer -->
+        <section class="as-card as-p-5" style="margin-top:16px" aria-label="No exam is running">
+          <p class="exam-big">No exam is running on this computer.</p>
+          <a href="06-exams.html" class="as-btn as-quiet as-mt-5">Go to Exams</a>
+        </section>
+
+        <!-- A clip that could not be made out. Nothing is ever dropped quietly
+             in an exam: the phrase filters used outside exams are off. -->
+        <section class="as-card as-p-5" style="margin-top:16px" role="alert" aria-label="Not caught">
+          <div class="as-row as-row--wrap">
+            <h3 class="exam-heading">Answer</h3>
+            <span class="as-status as-bad exam-small">
+              <span class="as-dot as-dot--lg as-bad"></span>I did not catch that clearly. Please say it again.
+            </span>
+          </div>
+          <div class="exam-answer is-empty as-mt-3">
+            <p class="exam-big">No answer yet</p>
+          </div>
+        </section>
+
+      </div>
+    </section><section class="screen" data-route="/test" aria-label="Test console" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Test console</h1>
+            <p class="as-muted as-mt-1">
+              Type a command and see exactly what the same words would do if spoken.
+              A typed command takes the same path as speech — there is no second
+              behaviour to test.
+            </p>
+          </header>
+
+          <!-- ── What the voice is doing ──
+               The state the server reports, not a live microphone: the dashboard
+               never opens one. Pressing Speak below uses this page's own mic. -->
+          <section class="as-voicebar" aria-label="Voice state">
+            <span class="as-mic" aria-hidden="true"><span class="material-symbols-outlined">mic</span></span>
+            <div style="min-width:0">
+              <div class="as-row" style="gap:8px">
+                <span class="as-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="as-body as-strong as-ok">Listening</span>
+              </div>
+              <p class="as-muted as-mt-1">
+                Amina’s voice bar is on and waiting for a command.
+              </p>
+            </div>
+            <span class="as-spacer"></span>
+            <div style="text-align:right">
+              <p class="as-muted">Front window</p>
+              <p class="as-body">Chrome — Wikipedia</p>
+            </div>
+          </section>
+
+          <div class="as-grid" style="grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);align-items:start">
+
+            <!-- ── What happened ── -->
+            <section class="as-card" aria-labelledby="transcript-heading">
+              <div class="as-row as-row--wrap" style="padding:16px 20px 12px">
+                <h2 id="transcript-heading" class="as-section" style="white-space:nowrap">What happened</h2>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-row-action">Clear chat history</button>
+              </div>
+
+              <div class="tc-transcript" aria-label="Transcript" role="log">
+
+                <div class="tc-turn">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <span class="as-body">“open chrome”</span>
+                    <span class="as-spacer"></span>
+                    <span class="tc-route">Quick command · 0.4 s</span>
+                  </div>
+                  <p class="as-status as-ok as-mt-1">
+                    <span class="as-dot as-ok"></span>Opened Chrome
+                  </p>
+                </div>
+
+                <div class="tc-turn">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <span class="as-body">“what’s on my screen?”</span>
+                    <span class="as-spacer"></span>
+                    <span class="tc-route">AI · Gemini 2.5 Flash · 2.1 s</span>
+                  </div>
+                  <p class="as-status as-ok as-mt-1">
+                    <span class="as-dot as-ok"></span>Read the window aloud
+                  </p>
+                  <p class="as-muted as-mt-1">
+                    “You are on the Wikipedia article for photosynthesis. There is a
+                    search box at the top and a contents list on the left.”
+                  </p>
+                </div>
+
+                <!-- A multi-step task: the steps are what the voice bar showed -->
+                <div class="tc-turn">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <span class="as-body">“open notepad, type my name, then save it”</span>
+                    <span class="as-spacer"></span>
+                    <span class="tc-route">Task · 3 steps · 6.8 s</span>
+                  </div>
+                  <ol class="as-stack as-stack--xs as-mt-3">
+                    <li class="as-status as-ok"><span class="as-dot as-ok"></span>Opened Notepad</li>
+                    <li class="as-status as-ok"><span class="as-dot as-ok"></span>Typed “Amina Kamau”</li>
+                    <li class="as-status as-ok"><span class="as-dot as-ok"></span>Saved the file</li>
+                  </ol>
+                </div>
+
+                <!-- A failure, with what went wrong and what to try -->
+                <div class="tc-turn">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <span class="as-body">“open my email”</span>
+                    <span class="as-spacer"></span>
+                    <span class="tc-route">AI · Gemini 2.5 Flash · 3.1 s</span>
+                  </div>
+                  <p class="as-status as-bad as-mt-1">
+                    <span class="as-dot as-bad"></span>Didn’t work — no mail app is set on this computer
+                  </p>
+                  <p class="as-muted as-mt-1">
+                    Say “open Gmail” to use the web instead, or set a default mail app in Windows.
+                  </p>
+                </div>
+
+                <!-- A question AbleSpeak asked back, because it could not be undone -->
+                <div class="tc-turn">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <span class="as-body">“close the window”</span>
+                    <span class="as-spacer"></span>
+                    <span class="tc-route">Quick command · asked first</span>
+                  </div>
+                  <p class="as-status as-warn as-mt-1">
+                    <span class="as-dot as-warn"></span>Asked “Close Word? There may be unsaved work.”
+                  </p>
+                  <p class="as-muted as-mt-1">Answered “no” — nothing was closed.</p>
+                </div>
+
+              </div>
+            </section>
+
+            <div class="as-stack as-stack--sm">
+
+              <!-- ── Try a command ── -->
+              <section class="as-card as-p-5" aria-labelledby="try-heading">
+                <h2 id="try-heading" class="as-section">Try a command</h2>
+                <form class="as-mt-3">
+                  <label class="as-sr" for="command">The command to send</label>
+                  <textarea class="as-field" id="command" rows="2"
+                            placeholder="open Word and type my name"></textarea>
+                  <div class="as-row as-row--wrap as-mt-3">
+                    <button type="submit" class="as-btn as-primary">Send a command</button>
+                    <button type="button" class="as-btn as-quiet">
+                      <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">mic</span>
+                      Speak
+                    </button>
+                    <button type="button" class="as-row-action" aria-label="Clear the text">Clear</button>
+                  </div>
+                </form>
+                <p class="as-notice as-mt-5">
+                  Replies are spoken by the voice bar, not by this page, so two voices
+                  never talk at once. <strong>Speak</strong> uses this page’s own
+                  microphone, and only while it is held.
+                </p>
+              </section>
+
+              <!-- ── One press each ──
+                   The commands worth checking after setting a computer up. -->
+              <section class="as-card as-p-5" aria-labelledby="quick-heading">
+                <h2 id="quick-heading" class="as-section">One press each</h2>
+                <p class="as-muted as-mt-1">Sent exactly as if spoken.</p>
+                <div class="as-row as-row--wrap as-mt-3" style="gap:8px">
+                  <button type="button" class="as-chip">“what’s on my screen?”</button>
+                  <button type="button" class="as-chip">“scroll down”</button>
+                  <button type="button" class="as-chip">“open Chrome”</button>
+                  <button type="button" class="as-chip">“go back”</button>
+                  <button type="button" class="as-chip">“pause”</button>
+                  <button type="button" class="as-chip">“read this page”</button>
+                  <button type="button" class="as-chip">“volume up”</button>
+                  <button type="button" class="as-chip">“undo that”</button>
+                  <button type="button" class="as-chip">“who am I?”</button>
+                  <button type="button" class="as-chip">“go to sleep”</button>
+                </div>
+              </section>
+
+              <!-- Text typed here is refused while an exam runs, like everything
+                   else that could help a candidate. -->
+              <p class="as-notice as-warn-edge">
+                While an exam is being sat, this page is switched off with the rest of
+                the AI and tools. Nothing typed here can reach a candidate.
+              </p>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/developer" aria-label="Developer Hub" hidden>
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Developer</h1>
+            <p class="as-muted as-mt-1">
+              What the AI is told, the tools it can call, what it knows about this
+              computer, and what the engine is doing.
+            </p>
+          </header>
+
+          <!-- ── The four tabs ──
+               Each has its own address, so "open the logs" can go straight there. -->
+          <div class="as-tabs" role="tablist" aria-label="Developer hub sections">
+            <a class="as-tab" role="tab" aria-selected="true" href="#tools">
+              <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">build</span>Tools
+            </a>
+            <a class="as-tab" role="tab" aria-selected="false" href="#prompt">
+              <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">article</span>Prompt
+            </a>
+            <a class="as-tab" role="tab" aria-selected="false" href="#context">
+              <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">desktop_windows</span>Context
+            </a>
+            <a class="as-tab" role="tab" aria-selected="false" href="#logs">
+              <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">terminal</span>Logs
+            </a>
+          </div>
+
+          <!-- ════════════════ TOOLS — /developer/tools ════════════════ -->
+          <section id="tools" role="tabpanel" aria-label="Tools" class="as-stack as-stack--sm">
+
+            <div class="as-row as-row--wrap">
+              <div class="as-row as-row--wrap" style="gap:6px" aria-label="Filter by category">
+                <button type="button" class="as-chip is-on">All 38</button>
+                <button type="button" class="as-chip">Browser 11</button>
+                <button type="button" class="as-chip">Windows 9</button>
+                <button type="button" class="as-chip">Screen 7</button>
+                <button type="button" class="as-chip">Media 5</button>
+                <button type="button" class="as-chip">Keyboard 4</button>
+                <button type="button" class="as-chip">System 2</button>
+              </div>
+              <span class="as-spacer"></span>
+              <div style="min-width:220px">
+                <label class="as-sr" for="tool-search">Search the tools</label>
+                <input class="as-field" id="tool-search" type="search" placeholder="Search tools…"
+                       style="min-height:36px;font-size:13px">
+              </div>
+            </div>
+
+            <div class="dh-split">
+              <!-- every tool the registry reports -->
+              <div class="as-card as-p-4 dh-list">
+                <button type="button" class="dh-item" aria-current="true">
+                  <code>uia_act</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Screen</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>click_element</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Screen</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>read_screen</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Screen</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>open_app</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Windows</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>switch_window</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Windows</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>type_text</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Keyboard</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>browser_scroll</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Browser</span>
+                </button>
+                <button type="button" class="dh-item">
+                  <code>pause_media</code>
+                  <span class="as-muted" style="display:block;font-size:12px">Media</span>
+                </button>
+              </div>
+
+              <!-- the chosen tool -->
+              <div class="as-card as-p-5" aria-label="Tool details">
+                <div class="as-row as-row--wrap">
+                  <h2 class="as-section as-mono">uia_act</h2>
+                  <span class="as-chip" aria-hidden="true">Screen</span>
+                  <span class="as-spacer"></span>
+                  <a href="08-test-console.html" class="as-small-quiet">Try in Test console</a>
+                </div>
+
+                <h3 class="as-section as-mt-5" style="font-size:14px">Description</h3>
+                <p class="as-body as-mt-1">
+                  Act on a control in the front window through Windows UI Automation,
+                  using the pattern the control itself supports — Invoke, Value,
+                  Scroll, ExpandCollapse or SelectionItem. Does not move the mouse,
+                  so it cannot miss, and costs nothing per call.
+                </p>
+
+                <h3 class="as-section as-mt-5" style="font-size:14px">Parameters</h3>
+                <dl class="as-rows as-mt-1">
+                  <div>
+                    <dt class="as-mono">target <span class="as-bad">required</span></dt>
+                    <dd>The control’s name or automation id, as <code class="as-mono">read_screen</code> reported it</dd>
+                  </div>
+                  <div>
+                    <dt class="as-mono">pattern <span class="as-bad">required</span></dt>
+                    <dd>One of <code class="as-mono">Invoke</code>, <code class="as-mono">Value</code>,
+                        <code class="as-mono">Scroll</code>, <code class="as-mono">ExpandCollapse</code>,
+                        <code class="as-mono">SelectionItem</code></dd>
+                  </div>
+                  <div>
+                    <dt class="as-mono">value</dt>
+                    <dd>The text to set, for the <code class="as-mono">Value</code> pattern</dd>
+                  </div>
+                </dl>
+
+                <h3 class="as-section as-mt-5" style="font-size:14px">Function schema</h3>
+                <pre class="dh-code as-mt-1">{
+  "name": "uia_act",
+  "description": "Act on a control in the front window through its own UI Automation pattern.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "target":  { "type": "string", "description": "Name or automation id" },
+      "pattern": { "type": "string",
+                   "enum": ["Invoke","Value","Scroll","ExpandCollapse","SelectionItem"] },
+      "value":   { "type": "string", "description": "For the Value pattern" }
+    },
+    "required": ["target", "pattern"]
+  }
+}</pre>
+              </div>
+            </div>
+          </section>
+
+          <!-- ════════════════ PROMPT — /developer/prompt ════════════════ -->
+          <section id="prompt" role="tabpanel" aria-label="Prompt" class="as-stack as-stack--sm"
+                   style="padding-top:24px;border-top:1px solid var(--as-line)">
+            <h2 class="as-section">Prompt <span class="as-muted" style="font-weight:400">— /developer/prompt</span></h2>
+
+            <!-- Said first, because a reader would otherwise assume this is live -->
+            <p class="as-notice as-warn-edge">
+              <strong>This is sample text, not the live prompt.</strong>
+              The server writes the real prompt for every request
+              (<span class="as-mono">ai-engine.js</span>, <span class="as-mono">_buildSystemPrompt</span>)
+              and does not share it with the dashboard. These outlines describe what
+              it is told in each mode.
+            </p>
+
+            <div class="dh-split">
+              <div class="as-card as-p-4 dh-list">
+                <button type="button" class="dh-item" aria-current="true">Command mode</button>
+                <button type="button" class="dh-item">Task mode (planner)</button>
+                <button type="button" class="dh-item">Dictation mode</button>
+                <button type="button" class="dh-item">Exam transcription</button>
+                <button type="button" class="dh-item">Safety rules</button>
+              </div>
+
+              <div class="as-card as-p-5">
+                <div class="as-row as-row--wrap">
+                  <h3 class="as-section">Command mode</h3>
+                  <span class="as-spacer"></span>
+                  <span class="as-muted">Outline · not the live text</span>
+                </div>
+                <pre class="dh-code as-mt-3">You control a Windows computer for someone who cannot use a
+keyboard or mouse. You are given the front window's controls,
+read through Windows accessibility.
+
+· Act through the named control, never a guessed coordinate.
+· Ask before anything that cannot be undone: deleting,
+  sending, submitting, closing unsaved work.
+· Say what you did in plain words. Never read out a web
+  address — say what is opening.
+· If you cannot do it, say so and say what to try.</pre>
+
+                <h4 class="as-section as-mt-5" style="font-size:14px">About this text</h4>
+                <p class="as-muted as-mt-1">
+                  Kept in the dashboard so a developer can read what each mode is for.
+                  To see what was actually sent, use the Logs tab.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- ════════════════ CONTEXT — /developer/context ════════════════ -->
+          <section id="context" role="tabpanel" aria-label="Context" class="as-stack as-stack--sm"
+                   style="padding-top:24px;border-top:1px solid var(--as-line)">
+            <h2 class="as-section">Context <span class="as-muted" style="font-weight:400">— /developer/context</span></h2>
+            <p class="as-muted">
+              What AbleSpeak knows about this computer right now. Only what the server
+              returns is shown; nothing is filled in.
+            </p>
+
+            <!-- The number that decides the Tier 2 architecture: how often a
+                 control was found semantically rather than by guessing a pixel. -->
+            <dl class="as-grid as-grid--3">
+              <div class="as-stat">
+                <dt>Found without guessing</dt>
+                <dd>
+                  <span class="as-number">94%</span>
+                  <span class="as-stat-note">1,204 of 1,281 targets · last 7 days</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Tree read time</dt>
+                <dd>
+                  <span class="as-number">38 ms</span>
+                  <span class="as-stat-note">Median, front window</span>
+                </dd>
+              </div>
+              <div class="as-stat">
+                <dt>Fell back to pixels</dt>
+                <dd>
+                  <span class="as-number">77</span>
+                  <span class="as-stat-note as-warn">Canvas-drawn or inaccessible UI</span>
+                </dd>
+              </div>
+            </dl>
+
+            <div class="as-grid as-grid--2" style="align-items:start">
+              <section class="as-card as-p-5">
+                <h3 class="as-section">The front window</h3>
+                <p class="as-muted as-mt-1">Read through Windows accessibility · GET /api/screen</p>
+                <dl class="as-rows as-mt-3">
+                  <div><dt>Application</dt><dd>chrome.exe</dd></div>
+                  <div><dt>Window title</dt><dd data-private>Photosynthesis — Wikipedia</dd></div>
+                  <div><dt>Controls found</dt><dd class="as-tabular">17</dd></div>
+                  <div><dt>Patterns available</dt><dd class="as-mono">Invoke, Value, Scroll</dd></div>
+                  <div><dt>Read at</dt><dd>14:05:12</dd></div>
+                </dl>
+              </section>
+
+              <section class="as-card as-p-5">
+                <h3 class="as-section">The browser</h3>
+                <p class="as-muted as-mt-1">Last update from the Chrome extension · GET /api/context</p>
+                <dl class="as-rows as-mt-3">
+                  <div><dt>Extension</dt><dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>Connected</span></dd></div>
+                  <div><dt>Tabs</dt><dd class="as-tabular">1</dd></div>
+                  <div><dt>Tab in front</dt><dd data-private>Photosynthesis — Wikipedia</dd></div>
+                  <div><dt>Updated</dt><dd>14:05:09</dd></div>
+                </dl>
+              </section>
+            </div>
+
+            <section class="as-card as-p-5">
+              <h3 id="context-value-label" class="as-section">Context value</h3>
+              <p class="as-muted as-mt-1">Exactly what would be given to the AI with the next command.</p>
+              <pre class="dh-code as-mt-3" aria-labelledby="context-value-label">{
+  "window": { "app": "chrome.exe", "title": "Photosynthesis — Wikipedia" },
+  "controls": [
+    { "name": "Search Wikipedia", "type": "Edit",   "patterns": ["Value"] },
+    { "name": "Main page",        "type": "Button", "patterns": ["Invoke"] },
+    { "name": "Contents",         "type": "List",   "patterns": ["Scroll"] }
+  ],
+  "privacyMode": false,
+  "screenshot": null
+}</pre>
+              <p class="as-muted as-mt-3">
+                <code class="as-mono">screenshot</code> is null unless the AI asks for one.
+                With <strong>Screen privacy</strong> on, <code class="as-mono">controls</code> is empty too.
+              </p>
+            </section>
+          </section>
+
+          <!-- ════════════════ LOGS — /developer/logs ════════════════ -->
+          <section id="logs" role="tabpanel" aria-label="Logs" class="as-stack as-stack--sm"
+                   style="padding-top:24px;border-top:1px solid var(--as-line)">
+            <h2 class="as-section">Logs <span class="as-muted" style="font-weight:400">— /developer/logs</span></h2>
+
+            <section class="as-card">
+              <div class="as-row as-row--wrap" style="padding:16px 20px 12px">
+                <h3 class="as-section">What the engine is doing</h3>
+                <span class="as-spacer"></span>
+                <div class="as-row" style="gap:6px" aria-label="Filter by log level">
+                  <button type="button" class="as-chip is-on">All</button>
+                  <button type="button" class="as-chip">Info</button>
+                  <button type="button" class="as-chip">Warn</button>
+                  <button type="button" class="as-chip">Error</button>
+                </div>
+                <button type="button" class="as-row-action">Open server log</button>
+              </div>
+
+              <!-- The last lines come from GET /api/logs/recent, then new ones
+                   arrive over the dashboard WebSocket as log_event. -->
+              <div class="dh-log" style="padding:0 20px 16px" role="log" aria-live="polite">
+                <div class="dh-log-line"><span class="dh-log-time">14:05:12</span><span class="dh-log-lvl as-idle">info</span><span>voice: clip 1.8 s → transcribe</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:13</span><span class="dh-log-lvl as-idle">info</span><span>asr: “open chrome” (gemini, 920 ms)</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:13</span><span class="dh-log-lvl as-idle">info</span><span>router: matched quick command open_app</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:13</span><span class="dh-log-lvl as-ok">ok</span><span>open_app: chrome.exe started (410 ms)</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:14</span><span class="dh-log-lvl as-idle">info</span><span>screen: tree read, 17 controls (38 ms)</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:22</span><span class="dh-log-lvl as-warn">warn</span><span>uia_act: “the blue thing” matched 2 controls — asked which</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:41</span><span class="dh-log-lvl as-bad">error</span><span>open_app: no default mail client registered</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:05:41</span><span class="dh-log-lvl as-idle">info</span><span>voice: spoke “I couldn’t find a mail app on this computer.”</span></div>
+                <div class="dh-log-line"><span class="dh-log-time">14:06:02</span><span class="dh-log-lvl as-idle">info</span><span>exam: lock on — ai + tools refusing (attempt 41)</span></div>
+              </div>
+            </section>
+          </section>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/settings" aria-label="Settings" hidden>
+      <div class="as-page as-page--narrow">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Settings</h1>
+            <p class="as-muted as-mt-1">
+              Keys and the language model AbleSpeak uses on this computer.
+            </p>
+          </header>
+
+          <!-- ── Shared computer ──
+               First, because it changes how every other page behaves. -->
+          <section class="as-stack as-stack--sm" aria-labelledby="shared-heading">
+            <h2 id="shared-heading" class="as-section">This computer</h2>
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Several people use this computer</p>
+                  <p class="as-muted as-mt-1">
+                    When on, nobody’s profile opens by itself from the Windows account,
+                    and the last person’s session never carries over to the next.
+                    For a lab or a shared classroom machine.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false" aria-label="Several people use this computer">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── The two PINs ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="pins-heading">
+            <h2 id="pins-heading" class="as-section">Who can open what</h2>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Admin PIN</p>
+                  <p class="as-muted as-mt-1">
+                    Opens Test console, Developer Hub and Settings. An unlock lasts
+                    15 minutes. Five wrong tries pause unlocking for five minutes.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-ok"><span class="as-dot as-ok"></span>Set</span>
+                <button type="button" class="as-btn as-quiet">Change the PIN</button>
+              </div>
+
+              <!-- Stated, not offered: this is what stops a student making
+                   themselves admin by voice. -->
+              <p class="as-notice as-mt-5">
+                The <strong>first</strong> admin PIN can only be set from the tray icon
+                (<strong>Set admin PIN…</strong>), within 10 minutes of choosing it there.
+                It cannot be set from this page.
+              </p>
+            </div>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Helper PIN</p>
+                  <p class="as-muted as-mt-1">
+                    Opens Users and Exams, and nothing else — no keys, no logs, no
+                    Developer Hub. For a teacher or aide who only manages people and
+                    their progress. Optional, and it cannot be the same as the admin PIN.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-idle"><span class="as-dot as-idle"></span>Not set</span>
+              </div>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 180px">
+                  <label class="as-field-label" for="helper-pin">A new helper PIN (4–8 digits)</label>
+                  <input class="as-field as-tabular" id="helper-pin" type="password" inputmode="numeric"
+                         autocomplete="new-password" placeholder="••••">
+                </div>
+                <button type="submit" class="as-btn as-primary" style="align-self:flex-end">Set the helper PIN</button>
+              </form>
+            </div>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 320px">
+                  <p class="as-body as-strong">Admin pages without a PIN, on this Windows account</p>
+                  <p class="as-muted as-mt-1">
+                    Lets this one Windows account open every page with no PIN. Refused on
+                    shared computers and guest accounts.
+                  </p>
+                </div>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-switch" role="switch" aria-checked="false"
+                        aria-label="Admin pages without a PIN on this Windows account">
+                  <span class="as-switch-track" aria-hidden="true"><span class="as-switch-knob"></span></span>
+                  <span class="as-body">Off</span>
+                </button>
+              </div>
+              <p class="as-muted as-mt-3" data-private>This Windows account: LAB-03\teacher</p>
+            </div>
+          </section>
+
+          <!-- ── API keys ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="keys-heading">
+            <h2 id="keys-heading" class="as-section">API keys</h2>
+            <p class="as-muted">
+              Saved on this computer only, and never shown again once saved.
+              Speech is always turned into text by Google Gemini, so a Gemini key is required.
+            </p>
+
+            <!-- A saved key: how it ends, and when. Never a reveal button. -->
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 280px">
+                  <p class="as-body as-strong">Google Gemini</p>
+                  <p class="as-muted as-mt-1">Speech recognition, and the AI if chosen below</p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-ok"><span class="as-dot as-ok"></span>Saved · ends&nbsp;<span class="as-mono" data-private>…4f2a</span></span>
+              </div>
+              <dl class="as-rows as-mt-3">
+                <div><dt>Saved</dt><dd>2 Sep 2026</dd></div>
+                <div><dt>Read from</dt><dd class="as-mono" data-private>server\.env</dd></div>
+              </dl>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 260px">
+                  <label class="as-field-label" for="gemini-key">Replace it with a new key</label>
+                  <input class="as-field as-mono" id="gemini-key" type="password" autocomplete="off"
+                         placeholder="AIza…">
+                </div>
+                <button type="submit" class="as-btn as-quiet" style="align-self:flex-end">Save key</button>
+                <span class="as-spacer"></span>
+                <button type="button" class="as-btn as-danger" style="align-self:flex-end">Remove</button>
+              </form>
+              <!-- Asking first, with focus on the safe answer -->
+              <div class="as-notice as-bad-edge as-mt-3" role="alertdialog" aria-label="Remove the Gemini key?">
+                <p><strong>Remove the Gemini key?</strong></p>
+                <p class="as-mt-1">
+                  Speech recognition will stop working until another is saved —
+                  AbleSpeak will not hear anyone on this computer.
+                </p>
+                <div class="as-row as-row--wrap as-mt-3">
+                  <button type="button" class="as-btn as-quiet">Keep it</button>
+                  <button type="button" class="as-btn as-danger">Yes, remove it</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- An empty key card -->
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 280px">
+                  <p class="as-body as-strong">OpenAI</p>
+                  <p class="as-muted as-mt-1">Optional — only for the AI, never for speech</p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-idle"><span class="as-dot as-idle"></span>No key</span>
+              </div>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 260px">
+                  <label class="as-field-label" for="openai-key">OpenAI key</label>
+                  <input class="as-field as-mono" id="openai-key" type="password" autocomplete="off"
+                         placeholder="sk-…">
+                </div>
+                <button type="submit" class="as-btn as-quiet" style="align-self:flex-end">Save key</button>
+              </form>
+            </div>
+
+            <div class="as-card as-p-5">
+              <div class="as-row as-row--wrap">
+                <div style="flex:1 1 280px">
+                  <p class="as-body as-strong">Anthropic</p>
+                  <p class="as-muted as-mt-1">Optional — only for the AI, never for speech</p>
+                </div>
+                <span class="as-spacer"></span>
+                <span class="as-status as-idle"><span class="as-dot as-idle"></span>No key</span>
+              </div>
+              <form class="as-row as-row--wrap as-mt-5" style="gap:8px">
+                <div style="flex:1 1 260px">
+                  <label class="as-field-label" for="anthropic-key">Anthropic key</label>
+                  <input class="as-field as-mono" id="anthropic-key" type="password" autocomplete="off"
+                         placeholder="sk-ant-…">
+                </div>
+                <button type="submit" class="as-btn as-quiet" style="align-self:flex-end">Save key</button>
+              </form>
+            </div>
+          </section>
+
+          <!-- ── Language model ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="language-model-heading">
+            <h2 id="language-model-heading" class="as-section">Language model</h2>
+
+            <!-- What is in use, before any alternative -->
+            <div class="as-card as-p-5">
+              <h3 class="as-section" style="font-size:14px">Current provider</h3>
+              <dl class="as-rows as-mt-3">
+                <div><dt>Provider</dt><dd>Google Gemini</dd></div>
+                <div><dt>Model</dt><dd class="as-mono">gemini-2.5-flash</dd></div>
+                <div><dt>Temperature</dt><dd class="as-tabular">0.2</dd></div>
+                <div><dt>Conversation history</dt><dd class="as-tabular">8 turns</dd></div>
+                <div>
+                  <dt>Reachable</dt>
+                  <dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>Answering normally</span></dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="as-grid as-grid--2" style="align-items:start">
+
+              <!-- In use first -->
+              <div class="as-card as-p-5" style="border-color:rgba(245,166,35,0.4)">
+                <div class="as-row as-row--wrap">
+                  <p class="as-body as-strong">Google Gemini</p>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-ok"><span class="as-dot as-ok"></span>In use</span>
+                </div>
+                <div class="as-mt-3">
+                  <div class="as-row as-row--wrap" style="gap:8px">
+                    <label class="as-sr" for="gemini-model">Gemini model</label>
+                    <select class="as-field" id="gemini-model" style="flex:1 1 180px">
+                      <option selected>gemini-2.5-flash</option>
+                      <option>gemini-2.5-pro</option>
+                      <option>gemini-2.0-flash</option>
+                    </select>
+                    <button type="button" class="as-small-quiet" title="Refresh model list">
+                      <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">refresh</span>
+                      Refresh
+                    </button>
+                  </div>
+                  <p class="as-muted as-mt-3">Read live from the provider.</p>
+                </div>
+              </div>
+
+              <!-- Then the ones ready to switch to -->
+              <div class="as-card as-p-5">
+                <div class="as-row as-row--wrap">
+                  <p class="as-body as-strong">OpenAI</p>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>No key</span>
+                </div>
+                <p class="as-muted as-mt-3">Save an OpenAI key above to switch to it.</p>
+                <button type="button" class="as-btn as-quiet as-mt-3" disabled aria-disabled="true">Switch</button>
+              </div>
+
+              <div class="as-card as-p-5">
+                <div class="as-row as-row--wrap">
+                  <p class="as-body as-strong">Anthropic</p>
+                  <span class="as-spacer"></span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>No key</span>
+                </div>
+                <p class="as-muted as-mt-3">Save an Anthropic key above to switch to it.</p>
+                <button type="button" class="as-btn as-quiet as-mt-3" disabled aria-disabled="true">Switch</button>
+              </div>
+
+            </div>
+
+            <p class="as-notice">
+              Switching the provider changes only how harder commands are worked out.
+              Speech is always turned into text by Google Gemini.
+              Switching by voice is refused — it needs the PIN.
+            </p>
+          </section>
+
+          <!-- ── The gateway ── -->
+          <section class="as-stack as-stack--sm" aria-labelledby="gateway-heading">
+            <h2 id="gateway-heading" class="as-section">AbleSpeak gateway</h2>
+            <div class="as-card" style="padding:8px 20px">
+              <dl class="as-rows">
+                <div><dt>Agent version</dt><dd class="as-mono" style="font-size:13px">2.4.1</dd></div>
+                <div><dt>Mode</dt><dd>Standalone AI agent</dd></div>
+                <div><dt>Active prompt</dt><dd class="as-mono" style="font-size:13px">command-mode</dd></div>
+                <div>
+                  <dt>Extension clients</dt>
+                  <dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>1</span></dd>
+                </div>
+                <div>
+                  <dt>Dashboard clients</dt>
+                  <dd><span class="as-status as-ok"><span class="as-dot as-ok"></span>1</span></dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </section><section class="screen" data-route="/sign-in" aria-label="Sign in" hidden>
+
+    <!-- ── Who this is ── -->
+    <div class="as-row" style="gap:12px;margin-bottom:28px">
+      <span aria-hidden="true" style="width:48px;height:48px;border-radius:9999px;background:var(--as-amber-light);color:var(--as-on-amber-avatar);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span class="material-symbols-outlined" style="font-size:26px">record_voice_over</span>
+      </span>
+      <div>
+        <h1 class="as-title" id="sign-in-heading" style="font-size:24px;line-height:30px">Sign in to AbleSpeak</h1>
+        <p class="as-muted">Your words and progress follow you to any computer.</p>
+      </div>
+    </div>
+
+    <!-- ── Step 1: the email address ──
+         Shown first; once a code is sent this card is replaced by step 2. -->
+    <section class="as-card as-p-5" aria-labelledby="email-step">
+      <h2 id="email-step" class="as-section">Your email address</h2>
+      <p class="as-muted as-mt-1">
+        AbleSpeak will email a six-digit code. There is no password to remember.
+      </p>
+      <form class="as-stack as-stack--sm as-mt-3">
+        <div>
+          <label class="as-field-label" for="email">Email address</label>
+          <input class="as-field" id="email" type="email" inputmode="email" autocomplete="email"
+                 placeholder="you@school.ac.ke" style="min-height:56px">
+        </div>
+        <button type="submit" class="as-btn as-primary" style="min-height:56px;width:100%">
+          Email me a code
+        </button>
+      </form>
+
+      <!-- The other way in -->
+      <div class="as-row as-mt-3" style="gap:12px">
+        <span style="flex:1 1 auto;height:1px;background:var(--as-line)"></span>
+        <span class="as-muted">or</span>
+        <span style="flex:1 1 auto;height:1px;background:var(--as-line)"></span>
+      </div>
+      <button type="button" class="as-btn as-quiet as-mt-3" style="min-height:56px;width:100%">
+        <span class="material-symbols-outlined" style="font-size:20px" aria-hidden="true">login</span>
+        Sign in with Google
+      </button>
+      <p class="as-muted as-mt-3">
+        Your browser opens, you sign in there, and AbleSpeak comes back to the front.
+      </p>
+    </section>
+
+    <!-- ── Step 2: the code ──
+         Kept in the file so the screen shows both halves of the flow. In the app
+         this replaces the card above once the code has been sent. -->
+    <section class="as-card as-p-5 as-mt-5" aria-labelledby="code-step">
+      <div class="as-row as-row--wrap">
+        <h2 id="code-step" class="as-section">Type or say the code</h2>
+        <span class="as-spacer"></span>
+        <span class="as-status as-ok"><span class="as-dot as-ok"></span>Listening</span>
+      </div>
+      <p class="as-muted as-mt-1">
+        Sent to <span class="as-body" data-private>a.kamau@school.ac.ke</span>.
+        You can read it out: “four two nine one six three”.
+      </p>
+
+      <form class="as-mt-3">
+        <fieldset style="border:0;padding:0;margin:0">
+          <legend class="as-sr">The six-digit code from your email</legend>
+          <div class="code-row">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 1 of 6" value="4">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 2 of 6" value="2">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 3 of 6" value="9">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 4 of 6" value="1">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 5 of 6">
+            <input inputmode="numeric" maxlength="1" aria-label="Digit 6 of 6">
+          </div>
+        </fieldset>
+        <button type="submit" class="as-btn as-primary as-mt-3" style="min-height:56px;width:100%">Sign in</button>
+      </form>
+
+      <div class="as-row as-row--wrap as-mt-3">
+        <button type="button" class="as-row-action" style="padding-left:0">Send another code</button>
+        <span class="as-spacer"></span>
+        <span class="as-muted">The code lasts 10 minutes</span>
+      </div>
+    </section>
+
+    <!-- ── Not now ──
+         An equal choice, not a grudging link: nobody is locked out of their own
+         computer because the internet is down. -->
+    <section class="as-card as-p-5 as-mt-5" aria-labelledby="skip-heading">
+      <h2 id="skip-heading" class="as-section">Don’t want to sign in?</h2>
+      <p class="as-muted as-mt-1">
+        AbleSpeak works without an account. Your settings and progress stay on this
+        computer, and you can carry them as a file from Voice &amp; words.
+      </p>
+      <button type="button" class="as-btn as-quiet as-mt-3" style="min-height:56px;width:100%">
+        Not now — keep using this computer only
+      </button>
+      <p class="as-muted as-mt-3">You will be asked again the next time AbleSpeak starts.</p>
+    </section>
+
+    <!-- ── Why an account helps ── -->
+    <section class="as-mt-5" aria-labelledby="why-heading">
+      <h2 id="why-heading" class="as-section" style="margin-bottom:12px">Why sign in</h2>
+      <ul class="as-stack as-stack--sm">
+        <li class="signin-why">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <span>
+            <span class="as-body as-strong">Your words and shortcuts go with you</span>
+            <span class="as-muted" style="display:block">The same listening settings on any school computer.</span>
+          </span>
+        </li>
+        <li class="signin-why">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <span>
+            <span class="as-body as-strong">Your progress is kept safe</span>
+            <span class="as-muted" style="display:block">Dated evidence for a progress review, even if this computer is replaced.</span>
+          </span>
+        </li>
+        <li class="signin-why">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <span>
+            <span class="as-body as-strong">Still works without internet</span>
+            <span class="as-muted" style="display:block">Signing in is never needed to use the computer you are at.</span>
+          </span>
+        </li>
+      </ul>
+    </section>
+
+    <!-- What leaves the computer, said plainly on the screen that does it -->
+    <p class="as-notice as-mt-5">
+      Signing in uses Supabase in the EU, and Google if you choose it.
+      Everything else — your settings, commands and progress — stays on this computer.
+    </p>
+
+    <!-- ── Signed in ──
+         The same route once an account is in use: who it is, and the way out. -->
+    <section class="as-card as-p-5 as-mt-5" aria-labelledby="signed-in-heading">
+      <div class="as-row as-row--wrap">
+        <span class="as-avatar" aria-hidden="true">AK</span>
+        <div style="min-width:0">
+          <h2 id="signed-in-heading" class="as-section">You’re signed in</h2>
+          <p class="as-muted" data-private>a.kamau@school.ac.ke · Admin</p>
+        </div>
+        <span class="as-spacer"></span>
+        <button type="button" class="as-btn as-quiet">Sign out</button>
+      </div>
+    </section>
+
+  </section>
+    </main>
+  </div>
+</div>
+
+<script>
+// Show one screen at a time. The menu is the only thing that moves.
+const panels = [...document.querySelectorAll('.screen')];
+const links  = [...document.querySelectorAll('[data-nav]')];
+function show(route) {
+  const found = panels.some(p => p.dataset.route === route) ? route : '/';
+  panels.forEach(p => { p.hidden = p.dataset.route !== found; });
+  links.forEach(a => {
+    const on = a.dataset.nav === found && a.classList.contains('as-nav-link');
+    on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
+  });
+  document.body.dataset.route = found;
+  document.body.classList.toggle('is-bare', found === '/sign-in');
+  document.querySelector('.as-main').scrollTop = 0;
+}
+addEventListener('hashchange', () => show(location.hash.slice(1) || '/'));
+show(location.hash.slice(1) || '/');
+</script>
+</body>
+</html>

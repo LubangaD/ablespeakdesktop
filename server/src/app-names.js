@@ -7,12 +7,21 @@
  */
 
 const APPS = [
+  // The person's folders open in File Explorer (shell: names follow OneDrive's
+  // redirection). Before Word's entry: "open Documents" launched Word with a
+  // new document, six times over (agent eval, 24 Oct 2026).
+  { app: 'Documents', processes: ['explorer'], launch: 'explorer shell:Personal', names: /^(?:documents(?: folder)?|documents folder)$/ },
+  { app: 'Downloads', processes: ['explorer'], launch: 'explorer shell:Downloads', names: /^downloads(?: folder)?$/ },
+  { app: 'Desktop', processes: ['explorer'], launch: 'explorer shell:Desktop', names: /^desktop(?: folder)?$/ },
+  { app: 'Pictures', processes: ['explorer'], launch: 'explorer shell:My Pictures', names: /^(?:pictures|photos)(?: folder)?$/ },
+  { app: 'Music', processes: ['explorer'], launch: 'explorer shell:My Music', names: /^music folder$/ },
+  { app: 'Videos', processes: ['explorer'], launch: 'explorer shell:My Video', names: /^videos(?: folder)?$/ },
   {
     // /w opens a blank document straight away. Without it Word lands on its
     // Start screen, and the student has to click the "Blank document" tile —
     // a surface we do not navigate.
     app: 'Word', processes: ['winword'], launch: 'start winword /w',
-    names: /^(?:microsoft |ms )?(?:word|one)(?: documents?| docs?| files?)?$|^(?:documents?|docs?)$/,
+    names: /^(?:microsoft |ms )?(?:word|one)(?: documents?| docs?| files?)?$|^(?:document|docs?)$/,
   },
   {
     // Excel has no switch for "new blank workbook" (/e opens no workbook at
@@ -43,7 +52,10 @@ const APPS = [
 const FILLER_RE = /\b(?:the|my|a|an|on|up|to|app|application|program|window)\b/g;
 
 // Windows that are never what a student means by "bring X to the front".
-const IGNORED_TITLES = /^(?:Program Manager|Windows Input Experience|AbleSpeak.*)$/i;
+// AbleSpeak's own windows are "AbleSpeak", "AbleSpeak Overlay" and
+// "AbleSpeak — …" (as in system-tools.js): a browser tab or document merely
+// starting with "AbleSpeak" is the student's, and was missed before (23 Oct 2026, Edge)
+const IGNORED_TITLES = /^(?:Program Manager|Windows Input Experience|AbleSpeak(?: Overlay| [-—–] .*)?)$/i;
 
 /**
  * Normalise a spoken app name and look it up.

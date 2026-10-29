@@ -4,45 +4,66 @@ let keepAliveIntervalId = null;
 let enabled = false;
 let contextUpdaters = [defaultContextUpdater];
 let contextUpdaterMessageId = 0;
+let connecting = false; // connect() is reading settings or fetching the token
 
+const UPDATER_TIMEOUT_MS = 2500;
 const updaterStats = new Map(); // { updater: { count, totalTime } }
+let contextTickRunning = false;
+
+// Every second AbleSpeak is told what the person is looking at. A slow or
+// broken updater no longer holds up the others (Promise.all used to stall the
+// whole loop on one that never answered), and a tick never overlaps the last.
 setInterval(async () => {
-    if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-        const updaterPromises = contextUpdaters.map(async (updater, index) => {
-            const startTime = performance.now();
-            try {
-                const result = await updater();
-                const endTime = performance.now();
-
-                if (!updaterStats.has(index)) {
-                    updaterStats.set(index, { count: 0, totalTime: 0 });
-                }
-                const stats = updaterStats.get(index);
-                stats.count += 1;
-                stats.totalTime += (endTime - startTime);
-
-                return {
-                    ...result,
-                    debug: {
-                        ...result.debug,
-                        ...stats
-                    }
-                };
-            } catch (err) {
-                console.error("Error in updater:", err);
-                return null;
-            }
-        });
-
-        const results = await Promise.all(updaterPromises);
-        results.forEach(result => {
-            if (result !== null) {
-                //console.log("Sending context update:", result);
-                webSocket.send(JSON.stringify(result));
-            }
-        });
-    }
+    if (contextTickRunning || !webSocket || webSocket.readyState !== WebSocket.OPEN) return;
+    contextTickRunning = true;
+    try { await sendContextUpdates(); } finally { contextTickRunning = false; }
 }, 1000);
+
+async function sendContextUpdates() {
+    const socket = webSocket;
+    const inTime = promise => Promise.race([promise, new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('context updater timed out')), UPDATER_TIMEOUT_MS))]);
+    const results = await Promise.allSettled(contextUpdaters.map(async (updater, index) => {
+        const startTime = performance.now();
+        const result = await inTime(updater());
+        if (!updaterStats.has(index)) updaterStats.set(index, { count: 0, totalTime: 0 });
+        const stats = updaterStats.get(index);
+        stats.count += 1;
+        stats.totalTime += performance.now() - startTime;
+        return { ...result, debug: { ...result?.debug, ...stats } };
+    }));
+    for (const outcome of results) {
+        if (outcome.status === 'rejected') console.warn('Context updater failed:', outcome.reason?.message || outcome.reason);
+        else if (outcome.value && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(outcome.value));
+    }
+}
+
+// Tell AbleSpeak at once when the person switches tab or window, or a page
+// loads, instead of up to a second later (commands used to act on the old tab).
+let pushTimer = null;
+function pushContextSoon() {
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(async () => {
+        const socket = webSocket;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        try { socket.send(JSON.stringify(await defaultContextUpdater())); }
+        catch (err) { console.warn('Context push failed:', err.message); }
+    }, 150);
+}
+chrome.tabs.onActivated.addListener(() => pushContextSoon());
+chrome.windows.onFocusChanged.addListener(() => pushContextSoon());
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url || changeInfo.status === 'complete') pushContextSoon();
+});
+
+// Tabs opened before the extension was installed or reloaded have no content
+// script, so page commands there failed. Give them one now.
+chrome.runtime.onInstalled.addListener(async () => {
+    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+    for (const tab of tabs) {
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scripts/content.js'] }).catch(() => {});
+    }
+});
 
 
 async function defaultContextUpdater() {
@@ -61,9 +82,16 @@ async function defaultContextUpdater() {
             host: (() => { try { return new URL(tab.url).host; } catch (_) { return ''; } })(),
             title: tab.title,
             active: tab.active,
+            windowId: tab.windowId,
         };
     });
-    browserInfo['activeTab'] = browserInfo['tabs'].find(tab => tab.active);
+    // The tab commands act on (getActiveTab: the last window the person used),
+    // not the first "active" tab of any window. With two windows those
+    // differed, so AbleSpeak planned for one page and acted on another.
+    const focused = await getActiveTab();
+    browserInfo['activeTab'] = (focused && browserInfo['tabs'].find(tab => tab.id === focused.id))
+        || browserInfo['tabs'].find(tab => tab.active);
+    browserInfo['updatedAt'] = Date.now();
 
     const activeTab = browserInfo['activeTab'];
     if (activeTab && activeTab.id) {
@@ -271,10 +299,13 @@ chrome.action.onClicked.addListener(async () => {
 });
 
 function connect() {
-    if (webSocket && (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING)) {
+    if (connecting || (webSocket && (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING))) {
         console.log("WebSocket is already connected or connecting. Skipping connect.");
         return;
     }
+    // Reading settings and fetching the token take a moment; without this, the
+    // wake-up and the heartbeat alarm could each open a socket.
+    connecting = true;
 
     //console.log('Connecting to WebSocket server...');
     // Try AbleSpeak gateway first, fall back to direct Voqal
@@ -282,6 +313,7 @@ function connect() {
     const directUrl = 'ws://localhost:22171/integration/chrome';
 
     chrome.storage.local.get(['wsUrl', 'wsToken'], async (data) => {
+      try {
         let url = data.wsUrl || gatewayUrl;
         let token = data.wsToken;
 
@@ -293,7 +325,7 @@ function connect() {
         if (!token) {
             try {
                 const tokenUrl = url.replace(/^ws/, 'http').replace(/\/ws\/extension.*$/, '/api/ws-token');
-                const res = await fetch(tokenUrl);
+                const res = await fetch(tokenUrl, { signal: AbortSignal.timeout(3000) });
                 if (res.ok) {
                     const body = await res.json();
                     if (body.token) {
@@ -312,14 +344,21 @@ function connect() {
             url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
         }
         _doConnect(url, directUrl);
+      } catch (err) {
+        console.warn('Could not connect:', err.message);
+      } finally {
+        connecting = false;
+      }
     });
 }
 
 function _doConnect(primaryUrl, fallbackUrl) {
     console.log('Connecting to:', primaryUrl);
-    webSocket = new WebSocket(primaryUrl);
+    const ws = new WebSocket(primaryUrl);
+    webSocket = ws;
 
-    webSocket.onopen = () => {
+    ws.onopen = () => {
+        if (webSocket !== ws) { ws.close(); return; } // replaced while connecting
         chrome.action.setIcon({path: 'icons/socket-active.png'});
         console.log('WebSocket connection established to:', primaryUrl);
         reconnectAttempt = 0; // Reset backoff on successful connection
@@ -334,21 +373,29 @@ function _doConnect(primaryUrl, fallbackUrl) {
         else if (ua.includes('OPR') || ua.includes('Opera')) browserName = 'Opera';
         else if (ua.includes('Chrome')) browserName = 'Chrome';
 
-        webSocket.send(JSON.stringify({
+        ws.send(JSON.stringify({
             type: 'browser_identify',
             browserName,
             userAgent: ua
         }));
         console.log('Identified as:', browserName);
+        pushContextSoon(); // AbleSpeak learns the page straight away, not a second later
     };
 
-    webSocket.onmessage = async (event) => {
+    ws.onmessage = async (event) => {
+        // Answers go back on the connection the request came on, even if a
+        // newer one has opened since
+        const webSocket = ws;
         const data = JSON.parse(event.data);
         //console.log("Event type: ", data.type);
 
         if (data.type === 'open_url') {
             const url = data.payload.url;
-            await chrome.tabs.update({url});
+            // The tab the person is on, not whichever window Chrome focused last
+            // (that could be AbleSpeak's own dashboard)
+            const target = await getActiveTab();
+            if (target) await chrome.tabs.update(target.id, {url});
+            else await chrome.tabs.create({url});
 
             const resp = {
                 result: {
@@ -374,7 +421,10 @@ function _doConnect(primaryUrl, fallbackUrl) {
             console.log(JSON.stringify(data));
             const tabId = data.payload.tab_id
             const tabIdNum = parseInt(tabId);
-            await chrome.tabs.update(tabIdNum, {active: true});
+            const tab = await chrome.tabs.update(tabIdNum, {active: true});
+            // Bring its window forward too, so the person sees it and commands land there
+            if (tab && tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+            pushContextSoon();
 
             //todo: sync with context update?
             const resp = {
@@ -461,35 +511,27 @@ function _doConnect(primaryUrl, fallbackUrl) {
                 code: data.payload,
                 voqal_resp_id: data.replyTo
             }
-            chrome.tabs.sendMessage(tabId, execFunc, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.error("Error:", chrome.runtime.lastError.message);
-                    // Content script not ready — fallback to chrome.scripting.executeScript
-                    chrome.scripting.executeScript({
-                        target: { tabId },
-                        func: (code) => { return eval(code); },
-                        args: [data.payload]
-                    }).then(([result]) => {
-                        webSocket.send(JSON.stringify({
-                            result: { status: 'success', value: result?.result },
-                            replyTo: data.replyTo
-                        }));
-                    }).catch(err => {
-                        webSocket.send(JSON.stringify({
-                            result: { status: 'error', message: err.message },
-                            replyTo: data.replyTo
-                        }));
-                    });
-                } else {
-                    const resp = {
-                        result: response.result,
-                        replyTo: data.replyTo
-                    };
-
-                    //console.log("Sending resp: ", resp);
-                    webSocket.send(JSON.stringify(resp));
+            const ask = () => new Promise(resolve => chrome.tabs.sendMessage(tabId, execFunc,
+                response => resolve({ response, error: chrome.runtime.lastError?.message })));
+            let answer = await ask();
+            // A tab opened before the extension was installed or reloaded has no
+            // content script: add it and ask again. (The old fallback ran the code
+            // here instead, where it either did nothing or was blocked, and could
+            // report success for an action that never happened.)
+            if (answer.error && /Receiving end does not exist|Could not establish connection/i.test(answer.error)) {
+                try {
+                    await chrome.scripting.executeScript({ target: { tabId }, files: ['scripts/content.js'] });
+                    answer = await ask();
+                } catch (err) {
+                    answer = { error: err.message };
                 }
-            });
+            }
+            if (answer.error) {
+                console.error('Page action failed:', answer.error);
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: answer.error }, replyTo: data.replyTo }));
+            } else {
+                webSocket.send(JSON.stringify({ result: answer.response?.result, replyTo: data.replyTo }));
+            }
         } else if (data.type === 'execute_script') {
             // Direct chrome.scripting.executeScript — no content script needed
             const activeTab = await getActiveTab();
@@ -518,6 +560,12 @@ function _doConnect(primaryUrl, fallbackUrl) {
                 }
             }
         } else if (data.type === 'context_updater') {
+            // A page reader to run every second. Without code it would fail every
+            // second (and once held up every other update), so it isn't added.
+            if (typeof data.payload !== 'string' || !data.payload.trim()) {
+                webSocket.send(JSON.stringify({ result: { status: 'error', message: 'context_updater needs code' }, replyTo: data.replyTo }));
+                return;
+            }
             console.log("Adding context updater: " + JSON.stringify(data));
             const contextLibrary = data.library;
             const contextUpdaterName = data.name
@@ -807,6 +855,17 @@ function _doConnect(primaryUrl, fallbackUrl) {
                             function getByXPath(xp) {
                                 return document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                             }
+                            // An ad on YouTube: press its own Skip button. A script string is
+                            // refused there (Trusted Types); this function runs as a script file.
+                            if (action === 'skip_ad') {
+                                const skip = [...document.querySelectorAll('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton')]
+                                    .find(b => b.offsetParent !== null);
+                                if (skip) { skip.click(); return { status: 'success', message: 'Skipped the ad.' }; }
+                                if (document.querySelector('.ad-showing, .ad-interrupting')) {
+                                    return { status: 'error', adShowing: true, message: 'This ad can’t be skipped yet. Try again in a few seconds.' };
+                                }
+                                return { status: 'error', message: 'There’s no ad playing.' };
+                            }
                             // YouTube-specific selector first, then generic
                             const media = (xpath ? getByXPath(xpath) : null)
                                 || document.querySelector('.html5-video-player video')
@@ -838,10 +897,145 @@ function _doConnect(primaryUrl, fallbackUrl) {
                         args: [data.payload.action, data.payload.value ?? null, data.payload.xpath ?? null]
                     });
                     answer = result?.result ?? result;
-                    if (answer?.status === 'success') break; // done; otherwise try the next tab
+                    // Done (or the ad is in this tab, not skippable yet); otherwise try the next tab
+                    if (answer?.status === 'success' || answer?.adShowing) break;
                 } catch (err) {
                     console.warn(`[Media] Tab ${targetTab.id} can't be controlled: ${err.message}`);
                     answer = { status: 'error', message: 'AbleSpeak couldn’t control the video in Chrome.' };
+                }
+            }
+            webSocket.send(JSON.stringify({ result: answer, replyTo: data.replyTo }));
+        } else if (data.type === 'youtube') {
+            // YouTube read and driven by its own page (after the Voqal library's
+            // youtube/context and youtube/tools, Apache-2.0): what is playing, the
+            // videos on screen with their IDs, and opening one by ID, not by a click.
+            const { action, videoId, index, tabId, by, to } = data.payload || {};
+            const onYouTube = t => t && /(^|\.)youtube\.com$/i.test(hostOf(t.url));
+            let tab = tabId != null ? await chrome.tabs.get(Number(tabId)).catch(() => null) : null;
+            if (!tab) {
+                const front = await getActiveTab();
+                const all = (await chrome.tabs.query({})).filter(onYouTube);
+                tab = onYouTube(front) ? front : (all.find(t => t.audible) || all[0] || null);
+            }
+            let answer;
+            if (!tab) {
+                answer = { status: 'error', message: 'YouTube isn’t open in Chrome.' };
+            } else {
+                const read = async () => (await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        const idOf = href => { try { return new URL(href, location.origin).searchParams.get('v'); } catch { return null; } };
+                        const text = el => (el?.textContent || '').replace(/\s+/g, ' ').trim();
+                        // The videos on this page, in order: search results, up next, or the home grid
+                        const boxes = location.pathname === '/results'
+                            ? document.querySelectorAll('ytd-search ytd-video-renderer, ytd-search yt-lockup-view-model')
+                            : location.pathname === '/watch'
+                                ? document.querySelectorAll('#secondary ytd-compact-video-renderer, #secondary yt-lockup-view-model')
+                                : document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer');
+                        const videos = [];
+                        for (const box of boxes) {
+                            const link = box.querySelector('a#video-title, a[href*="/watch?v="]');
+                            const id = link && idOf(link.getAttribute('href'));
+                            if (!id || videos.some(v => v.id === id)) continue;
+                            const title = text(box.querySelector('#video-title, h3, .yt-lockup-metadata-view-model__title')) || link.getAttribute('title') || '';
+                            const channel = text(box.querySelector('ytd-channel-name a, .yt-content-metadata-view-model__metadata-text'));
+                            videos.push({ id, title: title.slice(0, 120), channel: channel.slice(0, 60) });
+                            if (videos.length >= 12) break;
+                        }
+                        const player = document.querySelector('.html5-video-player');
+                        const video = player?.querySelector('video') || document.querySelector('video');
+                        return {
+                            status: 'success',
+                            page: location.pathname === '/watch' ? 'watch' : location.pathname === '/results' ? 'results' : 'other',
+                            videoId: location.pathname === '/watch' ? new URLSearchParams(location.search).get('v') : null,
+                            title: location.pathname === '/watch' ? (text(document.querySelector('h1.ytd-watch-metadata, h1 yt-formatted-string')) || document.title.replace(/ - YouTube$/, '')) : null,
+                            currentTime: video ? Math.round(video.currentTime) : null,
+                            duration: video && Number.isFinite(video.duration) ? Math.round(video.duration) : null,
+                            paused: video ? video.paused : null,
+                            adShowing: !!player?.classList.contains('ad-showing'),
+                            videos,
+                        };
+                    },
+                }))[0]?.result;
+                const open = async (id, title) => {
+                    if (!/^[\w-]{6,20}$/.test(String(id || ''))) return { status: 'error', message: 'That isn’t a YouTube video.' };
+                    await chrome.tabs.update(tab.id, { url: `https://www.youtube.com/watch?v=${id}` });
+                    return { status: 'success', message: title ? `Playing “${title}”.` : 'Opening the video.' };
+                };
+                try {
+                    if (action === 'state') {
+                        answer = await read();
+                    } else if (action === 'open') {
+                        answer = await open(videoId);
+                    } else if (action === 'open_index') {
+                        const state = await read();
+                        const pick = state?.videos?.[Number(index) - 1];
+                        answer = pick ? await open(pick.id, pick.title)
+                            : { status: 'error', message: state?.videos?.length ? `There are only ${state.videos.length} videos here.` : 'There are no videos on this page to pick from.' };
+                    } else if (action === 'next' || action === 'previous') {
+                        const [clicked] = await chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            func: which => {
+                                const button = document.querySelector(which === 'next' ? '.ytp-next-button' : '.ytp-prev-button');
+                                if (!button || button.offsetParent === null || button.getAttribute('aria-disabled') === 'true') return false;
+                                button.click();
+                                return true;
+                            },
+                            args: [action],
+                        });
+                        if (clicked?.result) answer = { status: 'success', message: action === 'next' ? 'Next video.' : 'Previous video.' };
+                        else if (action === 'next') {
+                            const state = await read();
+                            answer = state?.videos?.[0] ? await open(state.videos[0].id, state.videos[0].title) : { status: 'error', message: 'There’s no next video here.' };
+                        } else {
+                            await chrome.tabs.goBack(tab.id);
+                            answer = { status: 'success', message: 'Previous video.' };
+                        }
+                    } else if (action === 'seek') {
+                        // `by` seconds forward (back when negative), or `to` a second of the video
+                        const [moved] = await chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            func: (step, at) => {
+                                const video = document.querySelector('.html5-video-player video') || document.querySelector('video');
+                                if (!video || !Number.isFinite(video.duration)) return null;
+                                const target = at == null ? video.currentTime + step : at;
+                                video.currentTime = Math.max(0, Math.min(video.duration - 1, target));
+                                return { at: Math.round(video.currentTime), duration: Math.round(video.duration) };
+                            },
+                            args: [Number(by) || 0, to == null || !Number.isFinite(Number(to)) ? null : Number(to)],
+                        });
+                        const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+                        answer = moved?.result
+                            ? { status: 'success', message: `Now at ${clock(moved.result.at)}.`, at: moved.result.at, duration: moved.result.duration }
+                            : { status: 'error', message: 'No video is playing on this page.' };
+                    } else {
+                        answer = { status: 'error', message: `Unknown YouTube action: ${action}` };
+                    }
+                } catch (err) {
+                    answer = { status: 'error', message: 'AbleSpeak couldn’t reach the YouTube page.' };
+                }
+            }
+            webSocket.send(JSON.stringify({ result: answer, replyTo: data.replyTo }));
+        } else if (data.type === 'gmail') {
+            // Gmail read and driven by its own page (after the Voqal library's
+            // gmail profile, Apache-2.0): the inbox or the open email, opening,
+            // selecting, marking, deleting and drafting a reply. Never sends.
+            const { action, tabId, ...args } = data.payload || {};
+            const onGmail = t => t && /^mail\.google\.com$/i.test(hostOf(t.url));
+            let tab = tabId != null ? await chrome.tabs.get(Number(tabId)).catch(() => null) : null;
+            if (!tab) {
+                const front = await getActiveTab();
+                tab = onGmail(front) ? front : ((await chrome.tabs.query({})).find(onGmail) || null);
+            }
+            let answer;
+            if (!tab) {
+                answer = { status: 'error', message: 'Gmail isn’t open in Chrome.' };
+            } else {
+                try {
+                    answer = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: gmailPage, args: [action, args] }))[0]?.result
+                        || { status: 'error', message: 'Gmail didn’t answer.' };
+                } catch (err) {
+                    answer = { status: 'error', message: 'AbleSpeak couldn’t reach the Gmail page.' };
                 }
             }
             webSocket.send(JSON.stringify({ result: answer, replyTo: data.replyTo }));
@@ -941,8 +1135,9 @@ function _doConnect(primaryUrl, fallbackUrl) {
         }
     };
 
-    webSocket.onclose = () => {
-        //console.log('WebSocket connection closed');
+    ws.onclose = () => {
+        // An older connection closing must not drop the current one
+        if (webSocket !== ws) return;
         webSocket = null;
         clearKeepAlive();
 
@@ -957,6 +1152,135 @@ function _doConnect(primaryUrl, fallbackUrl) {
 
 // AbleSpeak's own dashboard, when it is open in the browser
 const isAbleSpeakTab = tab => /^https?:\/\/(localhost|127\.0\.0\.1):3001(\/|$)/.test(tab?.url || '');
+// "https://www.youtube.com/watch?v=…" → "www.youtube.com"; '' for anything else
+const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+
+/**
+ * Runs in the Gmail page (the 'gmail' message): its long-standing page
+ * structure (tr.zA rows, zE unread, span[email] senders, h2.hP subject,
+ * div.adn messages, div.a3s bodies), after the Voqal library's gmail profile.
+ * Gmail's buttons need real mouse events, not just click(). Never sends.
+ */
+async function gmailPage(action, args = {}) {
+    const text = el => (el?.textContent || '').replace(/\s+/g, ' ').trim();
+    const shown = el => !!el && el.offsetParent !== null;
+    const press = el => {
+        if (!el) return false;
+        el.scrollIntoView?.({ block: 'center' });
+        for (const type of ['mousedown', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+        return true;
+    };
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const until = async (test, ms = 4000) => {
+        const end = Date.now() + ms;
+        while (Date.now() < end) { const value = test(); if (value) return value; await wait(100); }
+        return test();
+    };
+    const rows = () => [...document.querySelectorAll('tr.zA')].filter(shown);
+    const inEmail = () => shown(document.querySelector('h2.hP'));
+    const rowInfo = row => {
+        const sender = row.querySelector('span[email]');
+        const date = row.querySelector('td.xW span[title], .xW span[title]');
+        return {
+            id: row.id,
+            from: (sender?.getAttribute('name') || text(sender)).slice(0, 60),
+            fromEmail: sender?.getAttribute('email') || '',
+            subject: text(row.querySelector('span.bog, span[data-thread-id]')).slice(0, 120),
+            snippet: text(row.querySelector('span.y2')).replace(/^[-–\s]+/, '').slice(0, 100),
+            date: date?.getAttribute('title') || text(date),
+            unread: row.classList.contains('zE'),
+            starred: !!row.querySelector('[aria-label="Starred"]'),
+            selected: row.querySelector('[role="checkbox"]')?.getAttribute('aria-checked') === 'true',
+        };
+    };
+    const openEmail = () => ({
+        subject: text(document.querySelector('h2.hP')),
+        messages: [...document.querySelectorAll('div.adn')].map(message => {
+            const sender = message.querySelector('span.gD[email], span[email]');
+            const date = message.querySelector('span.g3');
+            return {
+                from: sender?.getAttribute('name') || text(sender),
+                fromEmail: sender?.getAttribute('email') || '',
+                date: date?.getAttribute('title') || text(date),
+                text: (message.querySelector('div.a3s')?.innerText || '').trim().slice(0, 2500),
+            };
+        }).slice(-5),
+    });
+    const account = () => {
+        const label = document.querySelector('a[aria-label^="Google Account"]')?.getAttribute('aria-label') || '';
+        const email = label.match(/[\w.+-]+@[\w.-]+/)?.[0] || '';
+        return { name: label.replace(/^Google Account:\s*/, '').replace(/\(?[\w.+-]+@[\w.-]+\)?/, '').trim(), email };
+    };
+    const button = label => [...document.querySelectorAll(`[role="button"][aria-label="${label}"], [role="button"][data-tooltip="${label}"]`)].find(shown);
+    const findRow = id => rows().find(row => row.id === String(id) || row.id === `:${String(id).replace(/^:/, '')}`);
+    // What the AI reads after opening an email: who wrote what
+    const spoken = email => [`Opened “${email.subject}”.`, ...email.messages.map(m => `From ${m.from || m.fromEmail}${m.date ? ` (${m.date})` : ''}:\n${m.text}`)]
+        .join('\n\n').slice(0, 6000);
+
+    if (action === 'state') {
+        if (inEmail()) return { status: 'success', view: 'email', account: account(), email: openEmail() };
+        const list = rows();
+        return { status: 'success', view: 'inbox', account: account(), unread: list.filter(r => r.classList.contains('zE')).length, emails: list.slice(0, 25).map(rowInfo) };
+    }
+    if (action === 'open') {
+        const row = findRow(args.id);
+        if (!row) return { status: 'error', message: 'That email isn’t in the list on screen.' };
+        press(row.querySelector('span.bog, span[data-thread-id]') || row);
+        if (!(await until(inEmail, 3000))) {
+            // Gmail didn't take the click: open the thread by its address
+            const legacy = row.querySelector('[data-legacy-thread-id]')?.getAttribute('data-legacy-thread-id');
+            if (legacy) { location.hash = `#inbox/${legacy}`; await until(inEmail, 3000); }
+        }
+        if (!inEmail()) return { status: 'error', message: 'The email didn’t open.' };
+        await until(() => openEmail().messages.some(m => m.text), 2000);
+        const email = openEmail();
+        return { status: 'success', message: spoken(email), email };
+    }
+    if (action === 'back') {
+        if (!inEmail()) return { status: 'success', message: 'Already in the inbox.' };
+        if (!press(button('Back to Inbox'))) location.hash = '#inbox';
+        await until(() => !inEmail() && rows().length, 3000);
+        return inEmail() ? { status: 'error', message: 'Gmail didn’t go back to the inbox.' } : { status: 'success', message: 'Back to the inbox.' };
+    }
+    if (action === 'select') {
+        if (inEmail()) return { status: 'error', message: 'Go back to the inbox to select emails.' };
+        const wanted = new Set((args.ids || []).map(id => String(id).replace(/^:/, '')));
+        for (const row of rows()) {
+            const box = row.querySelector('[role="checkbox"]');
+            const on = box?.getAttribute('aria-checked') === 'true';
+            if (box && on !== wanted.has(row.id.replace(/^:/, ''))) press(box);
+        }
+        await wait(150);
+        const chosen = rows().filter(r => r.querySelector('[role="checkbox"]')?.getAttribute('aria-checked') === 'true').length;
+        return chosen ? { status: 'success', message: `Selected ${chosen} ${chosen === 1 ? 'email' : 'emails'}.` }
+            : { status: 'error', message: 'None of those emails are on screen.' };
+    }
+    if (action === 'mark') {
+        const label = { read: 'Mark as read', unread: 'Mark as unread', archive: 'Archive', delete: 'Delete' }[args.as];
+        if (!label) return { status: 'error', message: `Emails can be marked read or unread, archived or deleted, not "${args.as}".` };
+        const count = inEmail() ? 1 : rows().filter(r => r.querySelector('[role="checkbox"]')?.getAttribute('aria-checked') === 'true').length;
+        if (!count) return { status: 'error', message: 'Select the emails first.' };
+        if (!press(button(label))) return { status: 'error', message: `Gmail’s “${label}” button isn’t on screen.` };
+        const what = count === 1 ? 'the email' : `${count} emails`;
+        const done = { read: `Marked ${what} as read.`, unread: `Marked ${what} as unread.`, archive: `Archived ${what}.`, delete: `Deleted ${what}.` };
+        return { status: 'success', message: done[args.as] };
+    }
+    if (action === 'draft_reply') {
+        if (!inEmail()) return { status: 'error', message: 'Open the email first.' };
+        const reply = button('Reply') || [...document.querySelectorAll('span[role="link"]')].find(el => text(el) === 'Reply');
+        let body = [...document.querySelectorAll('div[aria-label="Message Body"][contenteditable="true"]')].find(shown);
+        if (!body) {
+            if (!press(reply)) return { status: 'error', message: 'Gmail’s Reply button isn’t on screen.' };
+            body = await until(() => [...document.querySelectorAll('div[aria-label="Message Body"][contenteditable="true"]')].find(shown), 3000);
+        }
+        if (!body) return { status: 'error', message: 'The reply box didn’t open.' };
+        body.focus();
+        const typed = document.execCommand('insertText', false, String(args.text || ''));
+        if (!typed) body.textContent += String(args.text || '');
+        return { status: 'success', message: 'Wrote the reply. It hasn’t been sent.' };
+    }
+    return { status: 'error', message: `Unknown Gmail action: ${action}` };
+}
 
 /**
  * The tab the person is looking at: the active tab of the last browser
@@ -1079,12 +1403,14 @@ function startReconnectionLoop() {
 
 function scheduleReconnect() {
     clearReconnectInterval();
-    // Exponential backoff: 2s, 4s, 8s, 16s, 30s (max), with random jitter
-    const baseDelay = Math.min(2000 * Math.pow(2, reconnectAttempt), 30000);
-    const jitter = Math.random() * 1000;
-    const delay = baseDelay + jitter;
+    // AbleSpeak runs on this computer, so trying again every 1.5–2 s costs
+    // nothing, and after AbleSpeak restarts the browser is back within two
+    // seconds. (Waiting up to 30 s left voice commands failing with "No Chrome
+    // extension connected", and let Chrome put this worker to sleep in between;
+    // the heartbeat alarm still wakes it once a minute.)
+    const delay = 1500 + Math.random() * 500;
     reconnectAttempt++;
-    console.log(`Next reconnect in ${Math.round(delay)}ms (attempt ${reconnectAttempt})`);
+    if (reconnectAttempt % 20 === 1) console.log(`Reconnecting every 2 s (attempt ${reconnectAttempt})`);
     reconnectIntervalId = setTimeout(() => {
         reconnectIntervalId = null;
         if (enabled && (!webSocket || webSocket.readyState !== WebSocket.OPEN)) {

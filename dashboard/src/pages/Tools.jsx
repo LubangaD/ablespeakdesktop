@@ -43,7 +43,7 @@ function Icon({ name, className = '', style }) {
 
 const JSON_TOKEN = /("(?:\\.|[^"\\])*")(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
 // Values coloured by the key they belong to, as the Stitch schema block does
-const VALUE_COLOUR = { name: 'text-[#ffc880]', description: 'text-[#c9b8a5]' };
+const VALUE_COLOUR = { name: 'text-[var(--accent-soft)]', description: 'text-[var(--ink-quiet)]' };
 
 /** Pretty-printed JSON: keys in soft teal, names amber, descriptions muted, other values sand. */
 export function JsonText({ text }) {
@@ -81,7 +81,7 @@ function DescriptionText({ text, params }) {
   if (!names.length) return text;
   const re = new RegExp(`\\b(${names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'g');
   return text.split(re).map((part, i) => (i % 2
-    ? <code key={i} className="font-mono text-[#ffc880] bg-white/[0.04] px-1 py-0.5 rounded text-[13px]">{part}</code>
+    ? <code key={i} className="font-mono text-[var(--accent-soft)] bg-white/[0.04] px-1 py-0.5 rounded text-[13px]">{part}</code>
     : part));
 }
 
@@ -92,11 +92,11 @@ function CategoryChip({ selected, count, onClick, children }) {
       aria-pressed={selected}
       onClick={onClick}
       className={`min-h-[36px] px-3 rounded-md text-[13px] flex items-center gap-1.5 shrink-0 whitespace-nowrap transition-colors ${selected
-        ? 'bg-[#222a37] text-[#ffc880] font-semibold'
-        : 'text-[#c9b8a5] hover:text-[#dae3f4] hover:bg-[#18202d]'}`}
+        ? 'bg-[var(--raised)] text-[var(--accent-soft)] font-semibold'
+        : 'text-[var(--ink-quiet)] hover:text-[var(--ink)] hover:bg-[var(--sunken)]'}`}
     >
       <span>{children}</span>
-      <span className="text-[12px] font-normal text-[#8b95a7] tabular-nums">{count}</span>
+      <span className="text-[12px] font-normal text-[var(--ink-faint)] tabular-nums">{count}</span>
     </button>
   );
 }
@@ -136,7 +136,7 @@ export default function Tools() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
         {/* Category filter: scrolls sideways when the options don't fit */}
-        <div role="group" aria-label="Filter by category" className="flex gap-1 p-1 rounded-lg bg-[#0f1724] border border-white/[0.06] overflow-x-auto self-start max-w-full select-none">
+        <div role="group" aria-label="Filter by category" className="flex gap-1 p-1 rounded-lg bg-[var(--sunken)] border border-white/[0.06] overflow-x-auto self-start max-w-full select-none">
           <CategoryChip selected={!selectedCat} count={allTools.length} onClick={() => chooseCategory(null)}>All</CategoryChip>
           {categories.map(cat => (
             <CategoryChip key={cat.name} selected={selectedCat === cat.name} count={cat.tools.length} onClick={() => chooseCategory(cat.name)}>
@@ -151,7 +151,7 @@ export default function Tools() {
             <div className={`p-3 border-b ${DIVIDER}`}>
               <label htmlFor="tools-search" className="sr-only">Search tools</label>
               <div className="relative flex items-center">
-                <Icon name="search" className="text-[#8b95a7] absolute left-3 text-[18px] pointer-events-none" />
+                <Icon name="search" className="text-[var(--ink-faint)] absolute left-3 text-[18px] pointer-events-none" />
                 <input
                   ref={searchRef}
                   id="tools-search"
@@ -171,7 +171,7 @@ export default function Tools() {
                     type="button"
                     aria-label="Clear search"
                     onClick={() => { setSearchQuery(''); searchRef.current?.focus(); }}
-                    className="size-9 absolute right-1 flex items-center justify-center text-[#8b95a7] hover:text-[#dae3f4] hover:bg-[#222a37] rounded-md transition-colors"
+                    className="size-9 absolute right-1 flex items-center justify-center text-[var(--ink-faint)] hover:text-[var(--ink)] hover:bg-[var(--raised)] rounded-md transition-colors"
                   >
                     <Icon name="close" className="text-[18px]" />
                   </button>
@@ -190,7 +190,7 @@ export default function Tools() {
                   const holdsSelected = group.tools.some(t => t.name === shownTool);
                   return (
                     <div key={group.name}>
-                      <div id={labelId} className={`px-3 py-1.5 text-[12px] leading-4 ${holdsSelected ? 'text-[#dae3f4]' : 'text-[#c9b8a5]'}`}>
+                      <div id={labelId} className={`px-3 py-1.5 text-[12px] leading-4 ${holdsSelected ? 'text-[var(--ink)]' : 'text-[var(--ink-quiet)]'}`}>
                         {group.name} ({group.tools.length})
                       </div>
                       <ul aria-labelledby={labelId} className="flex flex-col gap-0.5 mt-1">
@@ -204,14 +204,14 @@ export default function Tools() {
                                 onClick={() => setSelectedTool(tool.name)}
                                 aria-current={on ? 'true' : undefined}
                                 className={`min-h-[44px] px-3 rounded-lg font-mono text-[13px] flex items-center justify-between gap-2 text-left transition-colors ${on
-                                  ? 'bg-[#18202d] text-[#ffc880] font-medium'
-                                  : 'text-[#dae3f4] hover:bg-[#18202d]'}`}
+                                  ? 'bg-[var(--sunken)] text-[var(--accent-soft)] font-medium'
+                                  : 'text-[var(--ink)] hover:bg-[var(--sunken)]'}`}
                               >
                                 <span className="truncate">{tool.name}</span>
                                 <span className="sr-only">
                                   , {tool.needsExtension ? 'needs the Chrome extension' : 'works without the Chrome extension'}
                                 </span>
-                                <span className="text-[12px] font-sans font-normal text-[#8b95a7] shrink-0" aria-hidden="true">{where}</span>
+                                <span className="text-[12px] font-sans font-normal text-[var(--ink-faint)] shrink-0" aria-hidden="true">{where}</span>
                               </button>
                             </li>
                           );
@@ -221,7 +221,7 @@ export default function Tools() {
                   );
                 })}
                 {displayed.length === 0 && (
-                  <p className="px-3 py-6 text-[13px] leading-5 text-[#8b95a7]">
+                  <p className="px-3 py-6 text-[13px] leading-5 text-[var(--ink-faint)]">
                     {isLoading ? 'Loading tools…'
                       : isError ? "Couldn't load the tools. Check the AbleSpeak server is running, then reload."
                       : allTools.length === 0 ? 'No tools are registered.'
@@ -238,7 +238,7 @@ export default function Tools() {
               <ToolDetail key={activeTool.name} tool={activeTool} />
             ) : (
               <div className="flex-1 flex items-center justify-center text-center">
-                <p className="text-[13px] leading-5 text-[#8b95a7]">Choose a tool to see what it does.</p>
+                <p className="text-[13px] leading-5 text-[var(--ink-faint)]">Choose a tool to see what it does.</p>
               </div>
             )}
           </section>
@@ -288,7 +288,7 @@ function ToolDetail({ tool }) {
         <div className={`flex items-start justify-between flex-wrap gap-4 pb-4 border-b ${DIVIDER}`}>
           <div className="min-w-0 flex flex-col gap-1">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <h2 className="font-mono text-[15px] leading-6 font-semibold text-[#dae3f4] break-all">{tool.name}</h2>
+              <h2 className="font-mono text-[15px] leading-6 font-semibold text-[var(--ink)] break-all">{tool.name}</h2>
               <span className={MUTED}>{tool.category}</span>
             </div>
             <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-[13px] leading-5">
@@ -298,8 +298,8 @@ function ToolDetail({ tool }) {
               </span>
               {status?.version && (
                 <>
-                  <span className="text-[#4a5466]" aria-hidden="true">·</span>
-                  <span className="text-[#c9b8a5]">v{status.version} Gateway</span>
+                  <span className="text-[var(--idle)]" aria-hidden="true">·</span>
+                  <span className="text-[var(--ink-quiet)]">v{status.version} Gateway</span>
                 </>
               )}
             </div>
@@ -308,11 +308,11 @@ function ToolDetail({ tool }) {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Tools run from what the student says; the Test console is where to try one */}
             <Link to="/test" className={QUIET}>
-              <Icon name="play_arrow" className="text-[18px] text-[#c9b8a5]" />
+              <Icon name="play_arrow" className="text-[18px] text-[var(--ink-quiet)]" />
               <span>Try in Test console</span>
             </Link>
             <button type="button" onClick={copySchema} className={QUIET}>
-              <Icon name={copyState === 'copied' ? 'check' : 'content_copy'} className={`text-[18px] ${copyState === 'copied' ? INK.ok : 'text-[#c9b8a5]'}`} />
+              <Icon name={copyState === 'copied' ? 'check' : 'content_copy'} className={`text-[18px] ${copyState === 'copied' ? INK.ok : 'text-[var(--ink-quiet)]'}`} />
               <span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? "Couldn't copy" : 'Copy schema'}</span>
             </button>
             <span className="sr-only" role="status">
@@ -340,7 +340,7 @@ function ToolDetail({ tool }) {
             </span>
           </div>
           {params.length === 0 ? (
-            <p className={`${WELL} p-4 text-[13px] leading-5 text-[#8b95a7]`}>This tool takes no arguments.</p>
+            <p className={`${WELL} p-4 text-[13px] leading-5 text-[var(--ink-faint)]`}>This tool takes no arguments.</p>
           ) : (
             <ul className={`${WELL} divide-y divide-white/[0.06]`}>
               {params.map(([name, prop]) => {
@@ -350,31 +350,31 @@ function ToolDetail({ tool }) {
                   <li key={name} className="px-4 py-3 flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4">
                     <div className="flex flex-col gap-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-[13px] font-medium text-[#dae3f4] break-all">{name}</span>
-                        <span className="text-[#4a5466]" aria-hidden="true">·</span>
+                        <span className="font-mono text-[13px] font-medium text-[var(--ink)] break-all">{name}</span>
+                        <span className="text-[var(--idle)]" aria-hidden="true">·</span>
                         <span className="font-mono text-[12px] text-[#8fd3c4]">{typeLabel(prop)}</span>
-                        <span className="text-[#4a5466]" aria-hidden="true">·</span>
+                        <span className="text-[var(--idle)]" aria-hidden="true">·</span>
                         {isRequired ? (
-                          <span className="text-[12px] text-[#ffc880]">required</span>
+                          <span className="text-[12px] text-[var(--accent-soft)]">required</span>
                         ) : (
-                          <span className="text-[12px] text-[#c9b8a5]">optional</span>
+                          <span className="text-[12px] text-[var(--ink-quiet)]">optional</span>
                         )}
                       </div>
-                      {prop?.description && <p className="text-[13px] leading-5 text-[#c9b8a5]">{prop.description}</p>}
+                      {prop?.description && <p className="text-[13px] leading-5 text-[var(--ink-quiet)]">{prop.description}</p>}
                       {Array.isArray(prop?.enum) && prop.enum.length > 0 && (
-                        <p className="text-[13px] leading-5 text-[#c9b8a5]">
+                        <p className="text-[13px] leading-5 text-[var(--ink-quiet)]">
                           One of:{' '}
                           {prop.enum.map((v, i) => (
                             <span key={String(v)}>
                               {i > 0 && ', '}
-                              <code className="font-mono text-[12px] text-[#dae3f4]">{String(v)}</code>
+                              <code className="font-mono text-[12px] text-[var(--ink)]">{String(v)}</code>
                             </span>
                           ))}
                         </p>
                       )}
                     </div>
-                    <div className="text-[12px] leading-5 text-[#8b95a7] shrink-0">
-                      Default: <span className="font-mono text-[#c9b8a5]">{hasDefault ? JSON.stringify(prop.default) : 'none'}</span>
+                    <div className="text-[12px] leading-5 text-[var(--ink-faint)] shrink-0">
+                      Default: <span className="font-mono text-[var(--ink-quiet)]">{hasDefault ? JSON.stringify(prop.default) : 'none'}</span>
                     </div>
                   </li>
                 );
@@ -394,19 +394,19 @@ function ToolDetail({ tool }) {
               </span>
             )}
           </div>
-          <div className="bg-[#0f1724] border border-white/[0.06] rounded-lg p-4 overflow-x-auto" tabIndex={0} aria-label={`Function schema for ${tool.name}`}>
-            <pre className="font-mono text-[12px] leading-5 text-[#dae3f4]"><code className="block"><JsonText text={schemaText} /></code></pre>
+          <div className="bg-[var(--sunken)] border border-white/[0.06] rounded-lg p-4 overflow-x-auto" tabIndex={0} aria-label={`Function schema for ${tool.name}`}>
+            <pre className="font-mono text-[12px] leading-5 text-[var(--ink)]"><code className="block"><JsonText text={schemaText} /></code></pre>
           </div>
         </div>
       </div>
 
       {/* Where the tool comes from, and when it asks first */}
-      <div className={`pt-4 border-t ${DIVIDER} flex flex-col gap-2 text-[12px] leading-5 text-[#c9b8a5]`}>
+      <div className={`pt-4 border-t ${DIVIDER} flex flex-col gap-2 text-[12px] leading-5 text-[var(--ink-quiet)]`}>
         <div className="flex items-center justify-between flex-wrap gap-x-4 gap-y-1">
-          <span>Registered in: <code className="font-mono text-[#dae3f4]">server/src/tool-registry.js</code></span>
-          <span>Safety: <strong className="font-normal text-[#dae3f4]">{safety.short}</strong></span>
+          <span>Registered in: <code className="font-mono text-[var(--ink)]">server/src/tool-registry.js</code></span>
+          <span>Safety: <strong className="font-normal text-[var(--ink)]">{safety.short}</strong></span>
         </div>
-        {safety.note && <p className="text-[13px] text-[#c9b8a5]">{safety.note}</p>}
+        {safety.note && <p className="text-[13px] text-[var(--ink-quiet)]">{safety.note}</p>}
       </div>
       <p className="sr-only" aria-live="polite">Showing {tool.name}</p>
     </div>

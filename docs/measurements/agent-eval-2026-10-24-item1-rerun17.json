@@ -1,0 +1,185 @@
+{
+  "date": "2026-10-24 02:09",
+  "label": "item1-rerun17",
+  "model": "gemini-2.5-flash",
+  "tasks": 1,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 2,
+      "median": 2,
+      "max": 2
+    },
+    "medianSeconds": {
+      "min": 34,
+      "median": 34,
+      "max": 34
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T23:09:57.375Z",
+      "tasks": 1,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 1,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 2,
+      "medianSeconds": 34,
+      "results": [
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: I couldn't find the file name box in the Save As dialog: That control does not support focus. I did 3 of 4 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Untitled - Notepad' and a text editor document appeared, indicating Notepad is open and ready for input."
+            },
+            {
+              "do": "Type hello there",
+              "tool": "system_type_text",
+              "ok": true,
+              "why": "The text 'hello there' now appears in the Notepad document, and the window title reflects the change, indicating the text was successfully typed."
+            },
+            {
+              "do": "Save the document as eval-saved.txt in Documents",
+              "tool": "save_document_as",
+              "ok": false,
+              "why": "I couldn't find the file name box in the Save As dialog: That control does not support focus"
+            },
+            {
+              "do": "Open Documents",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'Documents' TreeItem is now selected and the 'Save as' dialog shows the content of the 'Documents' folder, which aligns with the step's purpose."
+            },
+            {
+              "do": "Save the document as eval-saved.txt in Documents",
+              "tool": "save_document_as",
+              "ok": false,
+              "why": "I couldn't find the file name box in the Save As dialog: That control does not support focus"
+            },
+            {
+              "do": "Save the document as eval-saved.txt in Documents",
+              "tool": "save_document_as",
+              "ok": false,
+              "why": "I couldn't find the file name box in the Save As dialog: That control does not support focus"
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 34429,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T23:09:57.375Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 1,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 2,
+  "medianSeconds": 34,
+  "results": [
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: I couldn't find the file name box in the Save As dialog: That control does not support focus. I did 3 of 4 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Untitled - Notepad' and a text editor document appeared, indicating Notepad is open and ready for input."
+        },
+        {
+          "do": "Type hello there",
+          "tool": "system_type_text",
+          "ok": true,
+          "why": "The text 'hello there' now appears in the Notepad document, and the window title reflects the change, indicating the text was successfully typed."
+        },
+        {
+          "do": "Save the document as eval-saved.txt in Documents",
+          "tool": "save_document_as",
+          "ok": false,
+          "why": "I couldn't find the file name box in the Save As dialog: That control does not support focus"
+        },
+        {
+          "do": "Open Documents",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Documents' TreeItem is now selected and the 'Save as' dialog shows the content of the 'Documents' folder, which aligns with the step's purpose."
+        },
+        {
+          "do": "Save the document as eval-saved.txt in Documents",
+          "tool": "save_document_as",
+          "ok": false,
+          "why": "I couldn't find the file name box in the Save As dialog: That control does not support focus"
+        },
+        {
+          "do": "Save the document as eval-saved.txt in Documents",
+          "tool": "save_document_as",
+          "ok": false,
+          "why": "I couldn't find the file name box in the Save As dialog: That control does not support focus"
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 34429,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

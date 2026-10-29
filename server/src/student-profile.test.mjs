@@ -38,7 +38,7 @@ after(() => {
 test('an empty profile gets the standard settings', () => {
   const { profile, errors } = normaliseProfile({});
   assert.deepEqual(errors, []);
-  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 1.5, needsName: false });
+  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 1.5, needsName: false, speechEngine: 'auto', cleanUpDictation: true });
   assert.deepEqual(profile.vocabulary, []);
 });
 
@@ -67,7 +67,7 @@ test('saving merges changes into what is already saved', () => {
   saveProfile(student.id, { listening: { pauseSeconds: 2.5 } });
   const profile = getProfile(student.id);
   assert.deepEqual(profile.vocabulary, ['Joy']);
-  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 2.5, needsName: false });
+  assert.deepEqual(profile.listening, { sensitivity: 'standard', pauseSeconds: 2.5, needsName: false, speechEngine: 'auto', cleanUpDictation: true });
   assert.throws(() => saveProfile(student.id, { listening: { sensitivity: 'shouty' } }), /sensitivity/);
 });
 
@@ -78,6 +78,20 @@ test('a quiet speaker gets lower levels; a slow speaker a longer pause', () => {
   assert.equal(quiet.commandPauseMs, 3000);
   assert.equal(quiet.dictationPauseMs, 3300);
   assert.equal(standard.dictationPauseMs, 1800, 'dictation never waits less than before');
+});
+
+test('a normal speaking voice counts as speech without shouting, and the room never does', () => {
+  // Measured 17 Oct 2026 through the voice bar's mic path: of 30 normal-voice
+  // phrases the quietest peaked at 31 and the next at 34; the room at most at 12
+  const level = sensitivity => listeningSettings(normaliseProfile({ listening: { sensitivity } }).profile);
+  assert.ok(level('quiet').speechThreshold <= 31, 'Quiet voice hears every phrase');
+  assert.ok(level('standard').speechThreshold <= 34, 'Standard hears all but the very quietest');
+  for (const s of ['quiet', 'standard', 'noisy']) {
+    assert.ok(level(s).speechThreshold > 12, `${s} ignores the room`);
+    assert.ok(level(s).quietThreshold > 12, `${s} doesn't say "didn't catch that" to the room`);
+    assert.ok(level(s).silenceThreshold < level(s).speechThreshold);
+  }
+  assert.ok(level('noisy').speechThreshold < 60, 'Noisy room no longer needs shouting');
 });
 
 test('a noisy room drops the "say it louder" prompt, and every profile keeps automatic gain', () => {
@@ -140,7 +154,7 @@ test('a shortcut runs its command, and the vocabulary reaches the recogniser', a
 
   await proxy._onVoiceAudio(ws, { audio: 'x'.repeat(8000), source: 'overlay' });
 
-  assert.deepEqual(options, { vocabulary: ['Kip'] });
+  assert.deepEqual(options.vocabulary, ['Kip', 'AbleSpeak']);
   assert.deepEqual(tools, [{ tool: 'scroll', args: { direction: 'down' } }]);
   const stats = getRecognitionStats(student.id, { since: '2000-01-01 00:00:00' });
   assert.equal(stats.turns, 1);

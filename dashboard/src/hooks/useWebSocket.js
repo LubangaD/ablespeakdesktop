@@ -29,7 +29,9 @@ export function useWebSocket(path = '/ws/dashboard') {
     wsRef.current.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        setLastMessage(data);
+        // The voice bar reports itself a few times a second: only its listeners
+        // update, not every page that holds this hook
+        if (data.type !== 'overlay_state') setLastMessage(data);
         const handlers = listenersRef.current.get(data.type);
         if (handlers) handlers.forEach(fn => fn(data));
       } catch {}

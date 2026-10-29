@@ -62,6 +62,50 @@ function jsClickMatches(tool, args, words) {
   return words.some(w => code.includes(w));
 }
 
+// ── Keys that send or delete only in some apps (test script SF-08, WRK-10) ──
+// Ctrl+Enter / Alt+S send in Outlook and webmail; Delete / Ctrl+D delete in
+// File Explorer and Outlook. Elsewhere they are a page break, a fill, a
+// character, so they are asked about only there. `where` is the app in front
+// (send_system_keys: real key presses) and the browser's active tab
+// (press_key_combination always lands there); not known → ask anyway.
+
+// Parts sorted, so "Enter+Ctrl" and "Ctrl+Enter" are the same key
+const APP_KEYS = { 'ctrl+enter': 'send', 'alt+s': 'send', 'delete': 'delete', 'ctrl+d': 'delete' };
+const KEY_NAMES = { control: 'ctrl', return: 'enter', del: 'delete' };
+const OUTLOOK_APPS = new Set(['outlook', 'olk', 'hxoutlook']); // classic, new Outlook, Windows Mail
+const BROWSER_APPS = new Set(['chrome', 'msedge', 'brave', 'firefox', 'opera']);
+const OUTLOOK_WEB = /^outlook\.(?:live|office|office365)\.com$|^outlook\.cloud\.microsoft$/;
+const WEBMAIL = /^mail\.(?:google|yahoo)\.com$|^mail\.proton\.me$/;
+
+/** 'send' or 'delete' when the tool presses one of APP_KEYS, else null. */
+export function appDependentKey(tool, args) {
+  let parts;
+  if (tool === 'send_system_keys') {
+    parts = String(args?.keys || '').split('+');
+  } else if (tool === 'press_key_combination') {
+    parts = ['ctrl', 'alt', 'shift', 'meta'].filter(m => args?.[m]).concat(String(args?.key || '').split('+'));
+  } else {
+    return null;
+  }
+  const combo = parts.map(p => p.trim().toLowerCase()).filter(Boolean).map(p => KEY_NAMES[p] || p).sort().join('+');
+  return APP_KEYS[combo] || null;
+}
+
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
+}
+
+/** Whether a send/delete key asks here: where it does that, or where that can't be told. */
+function appKeyAsks(kind, tool, where = {}) {
+  const host = hostOf(where.tabUrl);
+  const page = !host || OUTLOOK_WEB.test(host) || (kind === 'send' && WEBMAIL.test(host));
+  if (tool === 'press_key_combination') return page;
+  const app = String(where.frontApp || '').toLowerCase().replace(/\.exe$/, '');
+  if (!app || OUTLOOK_APPS.has(app)) return true;
+  if (BROWSER_APPS.has(app)) return page;
+  return kind === 'delete' && app === 'explorer';
+}
+
 const CONSEQUENTIAL_RULES = [
   {
     id: 'close-app',
@@ -74,11 +118,12 @@ const CONSEQUENTIAL_RULES = [
   },
   {
     id: 'delete',
-    test: (tool, args) => {
+    test: (tool, args, where) => {
       const tk = toolTokens(tool);
       if (DELETE_WORDS.some(w => tk.has(w))) return true;
       const keys = String(args?.keys || args?.key || '').toLowerCase().replace(/\s+/g, '');
       if (tool === 'send_system_keys' && keys.includes('shift+del')) return true;
+      if (appDependentKey(tool, args) === 'delete' && appKeyAsks('delete', tool, where)) return true;
       if (labelMatches(tool, args, DELETE_WORDS)) return true;
       if (jsClickMatches(tool, args, DELETE_WORDS)) return true;
       return false;
@@ -87,8 +132,10 @@ const CONSEQUENTIAL_RULES = [
   },
   {
     id: 'send',
-    test: (tool, args) => {
-      if (tool === 'send_system_keys' || tool === 'send_keys' || tool === 'press_key_combination') return false;
+    test: (tool, args, where) => {
+      if (tool === 'send_system_keys' || tool === 'send_keys' || tool === 'press_key_combination') {
+        return appDependentKey(tool, args) === 'send' && appKeyAsks('send', tool, where);
+      }
       const tk = toolTokens(tool);
       if (SEND_WORDS.some(w => tk.has(w))) return true;
       if (labelMatches(tool, args, SEND_WORDS)) return true;
@@ -98,16 +145,33 @@ const CONSEQUENTIAL_RULES = [
     },
     prompt: 'Send this? It will go out and cannot be unsent. Say "yes" to confirm, or anything else to cancel.',
   },
+  {
+    // Replacing a file: save_document_as with replace, or a key that answers
+    // Windows' "already exists, replace?" box. The agent once answered it
+    // with Tab and Enter and overwrote a file (24 Oct 2026).
+    id: 'replace',
+    test: (tool, args, where) => {
+      if (tool === 'save_document_as') return args?.replace === true;
+      if (tool !== 'send_system_keys') return false;
+      const title = String(where?.frontTitle || '').toLowerCase();
+      if (!/^confirm save as$|replace|already exists/.test(title)) return false;
+      const keys = String(args?.keys || '').toLowerCase().replace(/\s+/g, '');
+      return /^(?:enter|space|y|alt\+y)$/.test(keys);
+    },
+    prompt: 'Replace the existing file? Its old contents will be lost. Say "yes" to confirm, or anything else to cancel.',
+  },
 ];
 
 /**
+ * `where` ({ frontApp, tabUrl }) is where a key press lands, from the gate,
+ * never from the tool's own arguments; without it those keys ask anyway.
  * @returns {{id:string, prompt:string}|null} null when safe to run immediately.
  */
-export function classifyConsequential(tool, args = {}) {
+export function classifyConsequential(tool, args = {}, where = {}) {
   if (!tool) return null;
   for (const rule of CONSEQUENTIAL_RULES) {
     try {
-      if (rule.test(tool, args)) return { id: rule.id, prompt: rule.prompt };
+      if (rule.test(tool, args, where || {})) return { id: rule.id, prompt: rule.prompt };
     } catch {
       // a faulty rule must never crash command processing
     }

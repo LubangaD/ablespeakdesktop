@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleSpeak — Users</title>
+<!--
+  Users — who uses this computer, and how each is progressing.
+  Ports to dashboard/src/pages/Students.jsx.
+
+  Called "Students" in the older screens; Documentation.md (13 Oct 2026) names
+  it "Users", because an adult learner is not a student.
+
+  This is the teacher's page, and its job is evidence: a dated, defensible
+  record for an IEP or progress review, drawn from the person's own saved
+  commands. So the chart carries the aim line (where they should be by now) and
+  the trend (where they are actually heading), and the page says when a decision
+  is due rather than leaving a teacher to eyeball it.
+
+  Order: who is here now → the class as a whole → each person → the chosen
+  person's goals. Nothing here is a placeholder; where the app has no source for
+  a value it shows the nearest real one with a truthful label.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,GRAD@8..144,100..1000,-200..150&family=Roboto+Mono:wght@400;500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ablespeak-refined.css">
+<script src="shell.js" defer></script>
+</head>
+<body data-route="/students">
+
+<a href="#main-content" class="as-skip">Skip to main content</a>
+
+<div class="as-shell">
+  <div data-shell="sidebar"></div>
+
+  <div class="as-main-col">
+    <div data-shell="topbar"></div>
+
+    <main id="main-content" class="as-main" tabindex="-1">
+      <div class="as-page">
+        <div class="as-stack">
+
+          <header class="as-page-head">
+            <h1 class="as-title">Users</h1>
+            <p class="as-muted as-mt-1">
+              Who uses this computer, how well AbleSpeak hears them, and their
+              progress towards each goal.
+            </p>
+          </header>
+
+          <!-- ── 1. Who is using this computer ──
+               Starting a session is what makes everything else attribute to the
+               right person, so it is the first thing on the page. -->
+          <section class="as-card as-p-5" aria-labelledby="who-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="who-heading" class="as-section">Who is using this computer</h2>
+              <span class="as-spacer"></span>
+              <span class="as-status as-ok"><span class="as-dot as-ok"></span>Amina Kamau, for 42 minutes</span>
+            </div>
+
+            <div class="as-well as-p-4 as-mt-3">
+              <div class="as-row as-row--wrap">
+                <div>
+                  <label class="as-field-label" for="session-who">At the computer now</label>
+                  <select class="as-field" id="session-who" style="min-width:240px">
+                    <option selected>Amina Kamau</option>
+                    <option>Brian Otieno</option>
+                    <option>Faith Wanjiru</option>
+                    <option>Joseph Mwangi</option>
+                  </select>
+                </div>
+                <div style="align-self:flex-end" class="as-row">
+                  <button type="button" class="as-btn as-quiet">End this session</button>
+                </div>
+                <span class="as-spacer"></span>
+                <form class="as-row as-row--wrap" style="gap:8px;align-self:flex-end">
+                  <div>
+                    <label class="as-field-label" for="new-user">Add someone</label>
+                    <input class="as-field" id="new-user" placeholder="Their name" style="min-width:200px">
+                  </div>
+                  <button type="submit" class="as-btn as-primary" style="align-self:flex-end">Add</button>
+                </form>
+              </div>
+              <p class="as-muted as-mt-3">
+                AbleSpeak remembers who was here after a restart — unless this is
+                marked a shared computer in Settings.
+              </p>
+            </div>
+          </section>
+
+          <!-- ── 2. The class as a whole ── -->
+          <section aria-labelledby="class-summary-heading">
+            <h2 id="class-summary-heading" class="as-section" style="margin-bottom:16px">Success rate, all users</h2>
+            <dl class="as-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+              <div class="as-stat">
+                <dt>Success rate</dt>
+                <dd><span class="as-number">89%</span><span class="as-stat-note">All users, all time</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Total commands</dt>
+                <dd><span class="as-number">4,182</span><span class="as-stat-note">Since 2 Sep</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Today</dt>
+                <dd><span class="as-number">126</span><span class="as-stat-note">Across 3 users</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Average response</dt>
+                <dd><span class="as-number">1.4 s</span><span class="as-stat-note">Within the 1.5 s goal</span></dd>
+              </div>
+              <div class="as-stat">
+                <dt>Users</dt>
+                <dd><span class="as-number">4</span><span class="as-stat-note">1 at the computer now</span></dd>
+              </div>
+            </dl>
+          </section>
+
+          <!-- ── 3. Each person ──
+               Picking a row changes whose progress is shown below. -->
+          <section class="as-card" aria-labelledby="roster-heading">
+            <h2 id="roster-heading" class="as-section" style="padding:16px 20px 12px">Usage by user</h2>
+            <div style="overflow-x:auto">
+              <table class="as-table">
+                <caption class="as-sr">Every user on this computer. Choosing a row shows that person’s progress below.</caption>
+                <thead>
+                  <tr>
+                    <th>User</th><th>Understood</th><th>Worked first time</th>
+                    <th>Commands</th><th>Last used</th><th><span class="as-sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="is-picked" aria-current="true">
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">AK</span>
+                        <span>
+                          <span class="as-body as-strong" data-private>Amina Kamau</span>
+                          <span class="as-status as-ok" style="display:flex"><span class="as-dot as-ok"></span>At the computer</span>
+                        </span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">94%</td>
+                    <td class="as-tabular">78%</td>
+                    <td class="as-tabular">1,842</td>
+                    <td>Now</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">BO</span>
+                        <span class="as-body as-strong" data-private>Brian Otieno</span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">81%</td>
+                    <td class="as-tabular">62%</td>
+                    <td class="as-tabular">1,109</td>
+                    <td>Today, 11:20</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">FW</span>
+                        <span class="as-body as-strong" data-private>Faith Wanjiru</span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">96%</td>
+                    <td class="as-tabular">84%</td>
+                    <td class="as-tabular">903</td>
+                    <td>Today, 09:05</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="as-row" style="gap:10px">
+                        <span class="as-avatar" aria-hidden="true">JM</span>
+                        <span class="as-body as-strong" data-private>Joseph Mwangi</span>
+                      </span>
+                    </td>
+                    <td class="as-tabular">72%</td>
+                    <td class="as-tabular">48%</td>
+                    <td class="as-tabular">328</td>
+                    <td>9 Oct</td>
+                    <td class="as-right" style="white-space:nowrap">
+                      <a href="03-voice-and-words.html" class="as-row-action">Voice &amp; words</a>
+                      <button type="button" class="as-row-action">Remove</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="as-muted" style="padding:12px 20px 16px">
+              Removing someone deletes all of their data from this computer, including
+              their exam sittings and audit trails.
+            </p>
+          </section>
+
+          <!-- ── 4. Progress for the chosen person ── -->
+          <section class="as-card as-p-5" aria-labelledby="progress-heading">
+            <div class="as-row as-row--wrap">
+              <h2 id="progress-heading" class="as-section">Progress — Amina Kamau</h2>
+              <span class="as-spacer"></span>
+              <span class="as-muted">Independent commands per session · 14 Sep to 13 Oct</span>
+            </div>
+
+            <!-- A decision flag: the KPI engine says whether a review is due, and
+                 why. It is a statement about the data, not advice about the person. -->
+            <p class="as-notice as-ok-edge as-mt-3">
+              <strong>On track to meet the target.</strong>
+              The trend is +1.4 commands per session per week against an aim line of
+              +0.9. Four of the last four points sit above the aim line, so a
+              decision is not due yet.
+            </p>
+
+            <!-- The chart, drawn as an SVG so it carries its own labels. The app
+                 draws the same series from the KPI engine. -->
+            <figure class="as-well as-p-4" style="margin:12px 0 0">
+              <svg viewBox="0 0 720 240" width="100%" height="240" role="img"
+                   aria-labelledby="chart-title chart-desc" style="display:block">
+                <title id="chart-title">Independent commands per session, 14 September to 13 October</title>
+                <desc id="chart-desc">
+                  Starting at 4 commands per session and rising to 19. The aim line runs
+                  from 4 to 17 over the same period. A phase change is marked on
+                  28 September, when the Quiet voice profile was switched on. The
+                  measured points sit above the aim line from 17 September onwards.
+                </desc>
+
+                <!-- grid -->
+                <g stroke="rgba(255,255,255,0.06)" stroke-width="1">
+                  <line x1="48" y1="20" x2="700" y2="20"/>
+                  <line x1="48" y1="70" x2="700" y2="70"/>
+                  <line x1="48" y1="120" x2="700" y2="120"/>
+                  <line x1="48" y1="170" x2="700" y2="170"/>
+                  <line x1="48" y1="200" x2="700" y2="200"/>
+                </g>
+                <!-- y labels -->
+                <g fill="#8b95a7" font-size="11" text-anchor="end" font-family="Roboto Mono, monospace">
+                  <text x="40" y="24">24</text>
+                  <text x="40" y="74">18</text>
+                  <text x="40" y="124">12</text>
+                  <text x="40" y="174">6</text>
+                  <text x="40" y="204">0</text>
+                </g>
+
+                <!-- the phase change: when something was deliberately changed -->
+                <line x1="392" y1="20" x2="392" y2="200" stroke="#ffc880" stroke-width="1.5" stroke-dasharray="4 4"/>
+                <text x="398" y="34" fill="#ffc880" font-size="11">Quiet voice on · 28 Sep</text>
+
+                <!-- the aim line: where they should be by now -->
+                <line x1="60" y1="167" x2="688" y2="59" stroke="#c9b8a5" stroke-width="1.5" stroke-dasharray="6 4"/>
+                <text x="592" y="54" fill="#c9b8a5" font-size="11">Aim line</text>
+
+                <!-- the trend through the measured points (Theil–Sen) -->
+                <line x1="60" y1="170" x2="688" y2="42" stroke="#68d9c3" stroke-width="2"/>
+                <text x="604" y="36" fill="#68d9c3" font-size="11">Trend</text>
+
+                <!-- the measured points -->
+                <g fill="#dae3f4">
+                  <circle cx="60"  cy="170" r="4"/>
+                  <circle cx="143" cy="162" r="4"/>
+                  <circle cx="226" cy="150" r="4"/>
+                  <circle cx="309" cy="155" r="4"/>
+                  <circle cx="392" cy="137" r="4"/>
+                  <circle cx="475" cy="112" r="4"/>
+                  <circle cx="558" cy="95"  r="4"/>
+                  <circle cx="641" cy="62"  r="4"/>
+                  <circle cx="688" cy="45"  r="5" fill="#f5a623"/>
+                </g>
+                <text x="660" y="36" fill="#f5a623" font-size="11" text-anchor="end">Today</text>
+
+                <!-- x labels -->
+                <g fill="#8b95a7" font-size="11" text-anchor="middle">
+                  <text x="60"  y="222">14 Sep</text>
+                  <text x="226" y="222">21 Sep</text>
+                  <text x="392" y="222">28 Sep</text>
+                  <text x="558" y="222">6 Oct</text>
+                  <text x="688" y="222">13 Oct</text>
+                </g>
+              </svg>
+              <figcaption class="as-muted as-mt-3">
+                Each point is one session, from Amina’s own saved commands.
+                The aim line is set by the goal below; the trend is fitted to the points.
+              </figcaption>
+            </figure>
+
+            <!-- The table behind the chart, for a screen reader and for copying
+                 into a review. The chart is never the only way to the numbers. -->
+            <details class="as-mt-3">
+              <summary class="as-small-quiet" style="display:inline-flex">Show the numbers</summary>
+              <div class="as-mt-3" style="overflow-x:auto">
+                <table class="as-table" aria-label="Progress data table">
+                  <thead><tr><th>Session</th><th>Independent commands</th><th>Aim line</th><th>Above the aim line</th></tr></thead>
+                  <tbody>
+                    <tr><td>14 Sep</td><td class="as-tabular">4</td><td class="as-tabular">4.0</td><td>No</td></tr>
+                    <tr><td>17 Sep</td><td class="as-tabular">5</td><td class="as-tabular">4.4</td><td>Yes</td></tr>
+                    <tr><td>21 Sep</td><td class="as-tabular">6</td><td class="as-tabular">5.0</td><td>Yes</td></tr>
+                    <tr><td>24 Sep</td><td class="as-tabular">6</td><td class="as-tabular">5.6</td><td>Yes</td></tr>
+                    <tr><td>28 Sep</td><td class="as-tabular">8</td><td class="as-tabular">6.6</td><td>Yes</td></tr>
+                    <tr><td>1 Oct</td><td class="as-tabular">11</td><td class="as-tabular">8.1</td><td>Yes</td></tr>
+                    <tr><td>6 Oct</td><td class="as-tabular">13</td><td class="as-tabular">10.3</td><td>Yes</td></tr>
+                    <tr><td>10 Oct</td><td class="as-tabular">17</td><td class="as-tabular">13.6</td><td>Yes</td></tr>
+                    <tr><td>13 Oct</td><td class="as-tabular">19</td><td class="as-tabular">17.0</td><td>Yes</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+
+            <div class="as-row as-row--wrap as-mt-5">
+              <button type="button" class="as-btn as-primary">Mark the goal met</button>
+              <button type="button" class="as-btn as-quiet">Discontinue this goal</button>
+              <span class="as-spacer"></span>
+              <button type="button" class="as-small-quiet">
+                <span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">flag</span>
+                Mark a phase change
+              </button>
+            </div>
+          </section>
+
+          <!-- ── 5. Goals, and the new-goal form ── -->
+          <div class="as-grid" style="grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);align-items:start">
+
+            <section class="as-card as-p-5" aria-labelledby="goals-heading">
+              <h3 id="goals-heading" class="as-section">Goals</h3>
+              <ul class="as-list as-mt-3">
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body as-strong">Independent commands per session</span>
+                    <span class="as-muted" style="display:block">
+                      From 4 to 24 by 10 Nov · started 14 Sep
+                    </span>
+                  </span>
+                  <span class="as-status as-ok"><span class="as-dot as-ok"></span>On track</span>
+                  <button type="button" class="as-row-action">Open</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body as-strong">Dictates a sentence without help</span>
+                    <span class="as-muted" style="display:block">
+                      From 0 to 5 by 1 Dec · started 1 Oct
+                    </span>
+                  </span>
+                  <span class="as-status as-warn"><span class="as-dot as-warn"></span>Decision due</span>
+                  <button type="button" class="as-row-action">Open</button>
+                </li>
+                <li>
+                  <span class="as-list-main">
+                    <span class="as-body as-strong">Recovers from a failed command alone</span>
+                    <span class="as-muted" style="display:block">Met on 28 Sep</span>
+                  </span>
+                  <span class="as-status as-idle"><span class="as-dot as-idle"></span>Met</span>
+                  <button type="button" class="as-row-action">Open</button>
+                </li>
+              </ul>
+            </section>
+
+            <section class="as-card as-p-5" aria-labelledby="create-goal-heading">
+              <h3 id="create-goal-heading" class="as-section">Create a goal</h3>
+              <form class="as-stack as-stack--sm as-mt-3">
+                <div>
+                  <label class="as-field-label" for="goal-what">What is being measured</label>
+                  <select class="as-field" id="goal-what">
+                    <option>Independent commands per session</option>
+                    <option>Commands that worked first time</option>
+                    <option>Tasks finished without adult help</option>
+                    <option>Recoveries without adult help</option>
+                  </select>
+                </div>
+                <div class="as-grid as-grid--2">
+                  <div>
+                    <label class="as-field-label" for="goal-from">Starting point</label>
+                    <input class="as-field as-tabular" id="goal-from" inputmode="numeric" value="4">
+                  </div>
+                  <div>
+                    <label class="as-field-label" for="goal-to">Target</label>
+                    <input class="as-field as-tabular" id="goal-to" inputmode="numeric" value="24">
+                  </div>
+                </div>
+                <div>
+                  <label class="as-field-label" for="goal-by">Target date</label>
+                  <input class="as-field" id="goal-by" type="date" value="2026-11-10">
+                </div>
+                <button type="submit" class="as-btn as-primary">Create the goal</button>
+              </form>
+              <p class="as-muted as-mt-3">
+                The starting point is the average of the sessions before today, so the
+                aim line begins where the person actually is.
+              </p>
+            </section>
+
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

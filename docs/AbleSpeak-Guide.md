@@ -141,7 +141,7 @@ AbleSpeak closes those gaps by treating voice as the *only* input and engineerin
 
 Speech can reach the server two ways: as **pre-transcribed text** from the browser's built-in speech recognition (instant), or as **audio** transcribed by Gemini. Either way it flows through the same ordered stages, designed so that control phrases and risky actions are handled before anything executes:
 
-1. **Transcription & noise filtering.** Audio is transcribed, then screened for hallucinations, music, repetition, and echo of AbleSpeak's own voice.
+1. **Transcription & noise filtering.** Audio is transcribed, then screened for hallucinations, music, repetition, and echo of AbleSpeak's own voice. With speech recognition on the computer (below), a clip that is a known command is acted on from the local words alone.
 2. **Voice control.** "Stop," "cancel," "go to sleep," "wake up," and **privacy mode** are caught here and never reach the AI.
 3. **Confirmation reply.** If an irreversible action is waiting for a yes/no, this utterance is treated as the answer.
 4. **Reactive correction.** "Undo that" and "no, I meant…" are handled before normal command matching.
@@ -150,6 +150,84 @@ Speech can reach the server two ways: as **pre-transcribed text** from the brows
 7. **AI path.** Anything more complex goes to the LLM, which can see the page context (and, unless privacy mode is on, a screenshot) and call tools to fulfill the request.
 
 This ordering is intentional: a student can always interrupt, confirm, or correct, no matter what else is happening.
+
+### Real-time speech service (Modal)
+
+The default way AbleSpeak hears speech (`listening.speechEngine` "auto", shown as "Real time").
+
+**The service:**
+- **Where:** `speech-server/stream_service.py`, deployed as `ablespeak-stream` on Modal, workspace `lubangad`.
+- **Hardware and region:** one A10G GPU (L4 if none is free), in `region="eu"` / `routing_region="eu-west"`.
+- **Models:** two CDLI Whisper models, converted to CTranslate2 and kept in the volume `ablespeak-stream-models`:
+  - **small** gives the live words about every 0.5 s (about 60 ms of GPU each);
+  - **large-v3** gives the final words (WER 0.14 on Kenyan English non-standard speech, about 200 ms).
+- **Sleeping:** it sleeps when nobody is connected (`min_containers=0`, `scaledown_window=300`, `max_containers=2`).
+- **Access key:** the Modal secret `ablespeak-stream`, matching `ABLESPEAK_ASR_TOKEN` in the device `.env`. The key is never in the installer.
+
+**The connection** (`server/src/remote-asr.js`):
+- The gateway keeps one WebSocket to `ABLESPEAK_ASR_URL`.
+- **Wake on launch:** it opens when the app starts, which wakes the service. That took 15–20 s in tests and can take up to a minute.
+- **Sleep:** after 10 minutes without speech it closes, so the service can sleep. The next phrase opens it again.
+- **Health:** heartbeats every 15 s, and reconnects after 1, 2, 4, 8, 16 and 30 s. A refused key is retried every 5 minutes.
+
+**The audio path:**
+1. The voice bar streams 16 kHz PCM16 over the gateway WebSocket from the moment speech is detected, including half a second before it (`voice_stream_start`, `voice_chunk`).
+2. The gateway forwards it, and sends the live words back as `voice_partial`. The voice bar shows them without announcing them; the transcript line's `aria-live` is off until the final words.
+3. At the end of the recording the voice bar sends `voice_stream_end` first, so the final words start on the GPU, and then the clip with `streamUtt`.
+4. `_transcribeClip` uses the service's final words. If they don't arrive within 3 s (6 s in dictation), the clip is heard another way (the engine on the computer if installed, otherwise Gemini).
+5. The real-time check at the first short pause (`voice_peek`) asks the service for the words so far (`peek`) without ending the phrase.
+
+**Exams** keep Gemini's word-for-word transcription.
+
+**Measured on 15 Oct 2026, from Nairobi:**
+- **Final words:** 0.5–1.1 s after the end of speech. Most of that is network (round trip 0.25–1.1 s); the GPU itself takes 0.16–0.27 s.
+- **Example:** "scroll down" was carried out 0.7 s after the end of speech.
+
+**Tools:**
+- `speech-server/bench_stream.py` converts and benchmarks the models.
+- `latency_probe.py` and `probe-latency.mjs` measure the network.
+- `stream-test.mjs` streams test clips to the service.
+
+### Speech recognition on the computer (optional offline pack)
+
+The installer no longer includes it (283 MB). In development it is used when `server/vendor/local-asr` is present.
+
+`server/src/local-asr.js` keeps whisper.cpp's `whisper-server.exe` running with CDLI's Whisper small model (`cdli/whisper-small_finetuned_kenyan_english_nonstandard_speech_v1.0`, Kenyan English and non-standard speech). The overlay records each clip twice, as compressed audio for Gemini and as a 16 kHz WAV for the local engine. It only records the WAV while the gateway reports `localSpeech: true` in `listening_settings`.
+
+`WsProxy._transcribeClip` decides which words to use, according to the person's `listening.speechEngine`:
+
+- **auto** (the default):
+  - The local words are checked first. If they are a known command (`_isKnownCommand`: a quick command, shortcut, routine, stop, sleep, wake phrase, or yes/no to a pending question), they run at once and Gemini is not called. This also keeps the Gemini rate limit (12 a minute, 3 s apart) free for what needs it.
+  - Otherwise Gemini decides.
+  - In dictation, if Gemini fails or takes longer than 8 s, the local words are typed instead.
+  - Outside dictation, local words that aren't a known command are never used. Anything else goes to the AI, which needs the internet anyway, and the local transcript of room talk must not run as a command.
+  - In dictation, both run at once.
+- **local:** only the computer; the internet is never used for speech. If the engine isn't ready, the voice bar says so (`voice_error` `local_failed`) instead of going online.
+- **online:** only Gemini, as before.
+
+Exams always use Gemini (`_examVoice`). In **auto**, until the engine has loaded, or if it is missing, everything goes to Gemini as before.
+
+**Real time** (`voice_peek`, `WsProxy._onVoicePeek`):
+- **The early check:** at the first short pause after speech (40% of the person's own pause, at least 0.5 s), the voice bar sends the words so far as a WAV.
+- **When they are a complete command:** the gateway runs them at once and answers `voice_peek_result {taken: true}`, and the voice bar drops the rest of the clip. A complete command is one that can't be the start of a longer one (`EARLY_TOOLS`: scroll, back, forward, tabs, zoom, volume, window and media keys, opening an app, plus stop, sleep, wake, and yes/no to a question).
+- **Otherwise:** the clip carries on and is sent as usual after the full pause. Commands that take free words ("search for…", "switch to…", "type…") and words that can begin something longer ("close", "play", the name alone) always wait for it.
+- **Measured** on 15 Oct 2026: "scroll down" carried out about 0.8 s after the pause began, instead of about 3 s.
+
+**Never deaf:** the voice bar checks every second that it is listening, and restarts within about 2 s if not (it used to check every 15 s, which left it deaf after each scroll). Opening the microphone is given 5 s. When a start is skipped, the reason is written to the app log.
+
+**Keeping the engine up** (`LocalAsr`):
+- **Restarts:** if the engine stops, it restarts after 2, 4 and 6 s, then once a minute. A crash after a minute of good running starts the count again.
+- **Hangs:** two clips in a row with no answer count as a hung engine, which is restarted.
+- **Queue:** clips are sent one at a time, and a clip that waited more than 8 s for its turn is skipped.
+- **Audio window:** each clip is decoded with an audio window of its own length, rounded up to a multiple of 256 (512 at least, 1500 at most). Other sizes made clips of 9–28 s come back wrong.
+- **Status:** `GET /api/health` reports `speechOnComputer` (`ready`, `starting`, `failed`, `missing` or `off`), and the Speech settings show it under "Where speech is recognised".
+
+**Files:**
+- Development: the files live in `server/vendor/local-asr/`, which git ignores.
+- Installed app: they go to `resources/local-asr/` (see `extraResources` in `server/package.json`).
+- Contents: `engine/arm64/Release/` and `engine/x64/Release/` (whisper.cpp release b5454; the Arm build runs natively on Snapdragon laptops), and `cdli-small/ggml-model*.bin`.
+
+**Rebuilding the model file:** `node tools/convert-whisper-to-ggml.mjs <model folder> mel_filters.npz <out.bin>`. This converts the Hugging Face `model.safetensors`, `config.json` and `vocab.json` into the single file whisper.cpp loads, without PyTorch. Then `whisper-quantize.exe <in> <out> q8_0` makes the smaller 8-bit copy.
 
 ## The safety layer
 

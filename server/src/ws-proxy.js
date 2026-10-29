@@ -1,6 +1,8 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { insertCommand, updateCommandOutcome, upsertHealthCheck, logVoiceTurn } from './db.js';
+import { insertCommand, updateCommandOutcome, upsertHealthCheck, logVoiceTurn, getRecentAiCommands } from './db.js';
+import { learnFrom, findLearned, stepsOf } from './learned-commands.js';
+import { autocorrectCommand } from './command-autocorrect.js';
 import { getFullSystemContext } from './system-info.js';
 import { VoiceHandler } from './voice-handler.js';
 import { matchFastCommand, isSilentTool, isBrowserTool } from './fast-commands.js';
@@ -9,11 +11,18 @@ import { normaliseProfile, listeningSettings, expandAlias, findMacro } from './s
 import { toolFailed, aiCommandFailed } from './tool-outcome.js';
 import { TaskAgent, needsPlan } from './agent.js';
 import { spokenWindowName } from './app-names.js';
-import { gateByName, NAME_WORD, NAME_WINDOW_MS } from './wake-name.js';
+import { gateByName, isWakePhrase, stripName, afterName, NAME_WORD, NAME_WINDOW_MS } from './wake-name.js';
+import { cleanLocalText } from './local-asr.js';
+import { uniqueByName } from './screen-model.js';
+import { onSite } from './tool-registry.js';
+import { speedMeter, speedOfTurn } from './speed-meter.js';
+import { sponsorSegments } from './sponsorblock.js';
+import { samplesFromWav } from './voice-profile.js';
 
 // Phrases that resume normal operation from sleep OR bring the overlay back
-// from a voice "dismiss" (HFI-1) — shared so the two recovery paths never drift.
-const WAKE_PHRASES_RE = /^(wake up|wake|i'?m back|ablespeak|hey ablespeak|listen|start listening|resume|come back|show yourself)$/;
+// from a voice "dismiss" (HFI-1) are isWakePhrase (wake-name.js), shared so the
+// two recovery paths never drift. It takes the name on either side and the way
+// speech recognition writes it: "Wake up, able speak." used to be ignored.
 
 // About a minute of continuous dictation. Past this, clips are refused rather
 // than typed long after they were spoken.
@@ -24,6 +33,75 @@ const MAX_QUEUED_DICTATION_CLIPS = 8;
 const DICTATION_COMMAND_RE = /^\s*(?:hey\s+)?able\s*-?\s*speak\b[\s,.:;!-]*((?:open|close|go|switch|click|press|scroll|search|play|pause|show|find|select|save|send|reload|refresh|zoom|mute|unmute|start|stop|take|read|summari[sz]e|tell|set|turn|navigate|focus|minimi[sz]e|maximi[sz]e|copy|paste|print|undo|redo)\b[\s\S]*)$/i;
 
 const STOP_RE = /^(stop|cancel|abort|shut up|be quiet|quiet|nevermind|never mind)[\s.,!]?/i;
+const SLEEP_RE = /^(go to sleep|sleep|stop listening|hush|pause listening)$/;
+// Speech is ignored this long after each evaluation task (tools/agent-eval), so
+// nothing said in the room runs between one task and the next
+const EVALUATION_QUIET_MS = 30_000;
+const DICTATION_END_RE = /^(stop|end|exit)\s+dictat(ing|ion)|^command\s+mode$/;
+
+// Dictation with speech recognised on this computer (local-asr.js): how long
+// Gemini gets before the words heard here are typed instead.
+const DICTATION_ONLINE_WAIT_MS = 8000;
+// How long a browser command waits for the extension to (re)connect
+const EXTENSION_GRACE_MS = 3000;
+// The speech service (remote-asr.js): how long its final words get before the
+// clip is heard another way, and how long the real-time check waits.
+const REMOTE_FINAL_WAIT_MS = 3000;
+const REMOTE_PEEK_WAIT_MS = 2000;
+
+/** "https://www.youtube.com/watch?v=…" → "youtube.com": the site, never the page's own address. */
+function siteOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, '') || null; } catch { return null; }
+}
+
+/** What the speech service heard: '' for silence or noise (Whisper's own no-speech rule). */
+function remoteText({ text, no_speech_prob: noSpeech, avg_logprob: logprob }) {
+  if (noSpeech > 0.6 && (logprob == null || logprob < -1)) return '';
+  return cleanLocalText(text);
+}
+// Real time (_onVoicePeek): commands that are complete as soon as they are
+// said. Anything that takes free words ("search for …", "switch to …",
+// "type …") or can be the start of something longer ("close" is Alt+F4,
+// "play" may be "play Michael Jackson") waits for the person's full pause.
+const EARLY_TOOLS = new Set([
+  'scroll', 'scroll_to_top', 'scroll_to_bottom', 'reload_tab', 'go_back', 'go_forward',
+  'create_tab', 'close_tab', 'mute_tab', 'media_control', 'system_media_control', 'system_volume',
+  'window_control', 'focus_next', 'focus_prev', 'press_key_combination', 'navigate_dashboard',
+  'open_application', 'clear_field', 'youtube_next_video', 'youtube_previous_video', 'youtube_play_result',
+  'youtube_seek', 'youtube_skip_sponsor',
+]);
+// An AI step that only read something: "undo that" passes over it to what was done
+const READ_ONLY_STEPS = new Set([
+  'uia_query', 'list_desktop_elements', 'read_desktop_window', 'list_running_apps', 'get_page_content',
+  'get_page_state', 'find_tab', 'list_tabs', 'take_screenshot', 'answer_question', 'ignore', 'gmail_open_email',
+]);
+// The voice bar records at most 30 s (dictation); this is about 39 s of
+// 16 kHz audio, base64. Anything bigger isn't one of its clips.
+const MAX_WAV_BASE64 = 1.6 * 1024 * 1024;
+
+// While music or a video plays, the mic hears the song as well as the person,
+// and lyrics became commands ("It singsed me a melody in"). Then only phrases
+// with the name are acted on — and these, so the music can always be stopped,
+// skipped or turned down without it. ("Pose the song" is how "pause" came out.)
+const MEDIA_COMMAND_RE = /^(?:please\s+)?(?:pause|pose|pos|stop|mute|unmute|quiet|silence|hush|shut up|skip|next|previous|volume|louder|quieter|softer|(?:turn|put) (?:it|this|that|the (?:music|song|sound|volume|video)) (?:up|down|off)|(?:lower|raise) the (?:volume|music|sound))\b/;
+export function isMediaCommand(text) {
+  const t = stripName(text).rest.toLowerCase().replace(/[.,!?;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return !!t && t.split(' ').length <= 6 && MEDIA_COMMAND_RE.test(t);
+}
+// The voice bar re-opens the mic 0.5 s after AbleSpeak stops speaking; the
+// last of the sound can still be in the room a little after that
+const ECHO_RECENT_MS = 1500;
+// How long a phrase waits for Windows to say whether something is playing.
+// The check runs while the phrase is transcribed, so it is normally ready.
+const MEDIA_CHECK_WAIT_MS = 1500;
+// The last answer is used for live words and real-time commands this long
+const MEDIA_KNOWN_MS = 15000;
+// Browsers: a click by name there goes through the Chrome extension
+const BROWSER_APPS = new Set(['chrome', 'msedge', 'brave', 'firefox', 'opera']);
+// A screen read started when speech began serves the AI command from that phrase
+// (speaking, the pause and the words take a few seconds; a recording is at most 8 s)
+const SCREEN_PREFETCH_MS = 12000;
+const LOCAL_UNAVAILABLE = 'Speech recognition on this computer isn’t ready. Wait a moment and try again, or ask your helper to choose another setting.';
 
 // How long a bare "type this" waits for the words.
 const AWAIT_TYPE_TEXT_MS = 2 * 60 * 1000;
@@ -57,10 +135,6 @@ const RETRY_WINDOW_MS = 60000;
 // "Undo that" / "no, I meant …" only reach back this far, and never into
 // another student's session.
 const CORRECTION_WINDOW_MS = 5 * 60000;
-
-// Tabs Chrome won't screenshot for an extension (a new blank tab, browser and
-// extension pages, the Web Store); asking only waits out the timeout.
-const UNCAPTURABLE_TAB = /^(?:about:|chrome:|chrome-extension:|chrome-search:|chrome-untrusted:|devtools:|edge:|view-source:)|^https:\/\/(?:chromewebstore\.google\.com|chrome\.google\.com\/webstore)/i;
 
 export { toolFailed, aiCommandFailed };
 
@@ -105,9 +179,19 @@ export function isLikelyRetry(previousText, text) {
  */
 
 export class WsProxy {
-  constructor({ server, aiEngine, dashboardPath = '/ws/dashboard', extensionPath = '/ws/extension', wsToken, attribution, activeStudent, profile, readScreen, readScreenModel, onCorrection }) {
+  constructor({ server, aiEngine, dashboardPath = '/ws/dashboard', extensionPath = '/ws/extension', wsToken, attribution, activeStudent, profile, readScreen, readScreenModel, onCorrection, localAsr, remoteAsr, mediaState, frontWindow, windowControls, speed, analytics, voiceProfile }) {
     this.aiEngine = aiEngine;
+    // Voiceprints ("only my voice", voice-profile.js): each command's score, measuring only; null = none
+    this.voiceProfile = voiceProfile || null;
     this.voiceHandler = new VoiceHandler();
+    // Each voice turn's stage timings and cost (speed-meter.js, the Speed tab)
+    this.speed = speed || speedMeter;
+    // Usage counted in Google Analytics, with consent (analytics.js); null = none
+    this.analytics = analytics || null;
+    // Speech recognition on this computer (local-asr.js); null = Gemini only
+    this.localAsr = localAsr || null;
+    // Real-time speech recognition on AbleSpeak's speech service (remote-asr.js); null = none
+    this.remoteAsr = remoteAsr || null;
     this.extensionClients = new Set();
     this.dashboardClients = new Set();
     this.pendingToolCalls = new Map(); // id → { resolve, reject, timeout }
@@ -130,6 +214,15 @@ export class WsProxy {
     this._readScreenModel = readScreenModel || (async () => null);
     // "No, I meant X" after "Y": may teach a shortcut (Stage 4). Returns { learned }.
     this._onCorrection = onCorrection || (() => null);
+    // What is playing in any app (system-tools.js mediaPlaying): { playing, apps } or null.
+    // None in tests: phrases are never held back for music there.
+    this._mediaSource = mediaState || null;
+    this._media = null;       // the last answer, with when it came: { playing, apps, at }
+    this._mediaCheck = null;  // the check in progress
+    // "Click X" by name (_clickByName): the window in front { hwnd, process, title },
+    // and its controls (a screen model). None in tests: clicks go to the AI there.
+    this._frontWindow = frontWindow || null;
+    this._windowControls = windowControls || null;
     this._agentRunning = false;    // a multi-step task is in progress
     this._agentCancelled = false;  // the student said "stop" during it
     this._lastTTSText = '';    // Last text spoken by TTS — for echo detection
@@ -252,6 +345,13 @@ export class WsProxy {
 
   _handleExtensionConnect(ws) {
     console.log('[WsHub] Extension client connected');
+    // One browser connection: the newest is the extension that just woke or
+    // reconnected. An older one left open got the commands while the new one
+    // got nothing, and its replies could be lost.
+    for (const old of this.extensionClients) {
+      if (old !== ws) { try { old.close(4000, 'replaced by a newer connection'); } catch {} }
+    }
+    this.extensionClients.clear();
     this.extensionClients.add(ws);
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
@@ -259,6 +359,7 @@ export class WsProxy {
     this._broadcastDashboard({ type: 'extension_status', connected: true, count: this.extensionClients.size });
 
     ws.on('message', (data) => {
+      if (!this.extensionClients.has(ws)) return; // a replaced connection: ignore it
       const raw = data.toString();
       let parsed;
       try {
@@ -283,11 +384,10 @@ export class WsProxy {
       // Track context updates from extension
       if (parsed.type === 'context_update') {
         this.lastContextUpdate = parsed;
-        // Update browser context
-        if (parsed.result) {
-          this.browserContext = parsed.result;
-        } else if (parsed.context === 'integration' && parsed.result) {
-          this.browserContext = parsed.result;
+        // The extension's own tabs and page ('integration'). A library page
+        // reader's result ('library') is something else and used to replace it.
+        if (parsed.context === 'integration' && parsed.result) {
+          this.browserContext = { ...parsed.result, receivedAt: Date.now() };
         }
         this._broadcastDashboard({ type: 'context_update', data: parsed, timestamp: new Date().toISOString() });
       }
@@ -307,6 +407,14 @@ export class WsProxy {
     ws.on('close', () => {
       this.extensionClients.delete(ws);
       console.log('[WsHub] Extension client disconnected');
+      // Commands sent on this connection will never be answered: say so now,
+      // not after the 10-second timeout
+      for (const [id, pending] of this.pendingToolCalls) {
+        if (pending.socket !== ws) continue;
+        clearTimeout(pending.timeout);
+        this.pendingToolCalls.delete(id);
+        pending.resolve({ status: 'error', error: 'The browser disconnected before it answered. The action may not have happened.' });
+      }
       if (this.extensionClients.size === 0) {
         upsertHealthCheck({ component: 'chrome_ext', status: 'warn', message: 'No extension clients connected' });
       }
@@ -335,7 +443,7 @@ export class WsProxy {
       aiEngine: this.aiEngine?.getStatus() || {},
       sessionId: this._attribution().session_id,
       activeStudent: this._activeStudent(),
-      listening: listeningSettings(this._profile()),
+      listening: this._listeningForOverlay(),
       timestamp: new Date().toISOString()
     }));
 
@@ -351,6 +459,14 @@ export class WsProxy {
           return;
         }
 
+        // ── The voice bar as the student sees it, for the dashboard's picture of the screen ──
+        // Its mode and words, where it sits, the screen size and the mic level (overlay.html sendMirror)
+        if (msg.type === 'overlay_state') {
+          this._overlayState = { ...msg, at: Date.now() };
+          this._broadcastDashboard({ ...msg, timestamp: new Date().toISOString() });
+          return;
+        }
+
         // ── Chat Command: handled exactly like speech ──
         if (msg.type === 'chat_command' && msg.text) {
           await this._onChatCommand(ws, msg);
@@ -358,6 +474,16 @@ export class WsProxy {
 
         // ── Pre-transcribed Voice Text (from Web Speech API — instant, no Gemini roundtrip) ──
         if (msg.type === 'voice_text' && msg.text) {
+          // During an exam, words from this path go to the exam too, and nowhere else
+          if (this.examSession?.active) {
+            await this._handleUtterance(ws, msg.text);
+            return;
+          }
+          if (this._quietForEvaluation()) {
+            console.log('[Voice] Ignored: the agent evaluation is running');
+            this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+            return;
+          }
           if (this._voiceProcessing && Date.now() - (this._voiceProcessingSince || 0) > 60000) {
             this._endVoiceTurn(this._voiceTurn);
           }
@@ -402,7 +528,7 @@ export class WsProxy {
             const fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
             if (fastMatch && fastMatch.tool !== 'dictation_mode') {
               console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
-              const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
+              const toolResult = await this._searchFallback(fastMatch, await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this));
               const latency = Date.now() - startTime;
 
               // Consequential action → ask before doing anything else.
@@ -442,14 +568,15 @@ export class WsProxy {
             if (this.extensionClients.size > 0) {
               try {
                 // Race: give the extension 2s to respond, then use stale context
+                // get_page_state answers with the tabs, active tab and page right
+                // now. (This used to send context_updater with no code, which made
+                // the extension add a broken updater that stalled its updates.)
                 const freshCtx = await Promise.race([
-                  this.sendToolToExtension('context_updater', {}),
+                  this.sendToolToExtension('get_page_state', {}),
                   new Promise(r => setTimeout(() => r(null), 2000)),
                 ]);
-                if (freshCtx && freshCtx.result) {
-                  this.browserContext = freshCtx.result;
-                } else if (freshCtx && freshCtx.pageContext) {
-                  this.browserContext.pageContext = freshCtx.pageContext;
+                if (freshCtx && Array.isArray(freshCtx.tabs)) {
+                  this.browserContext = { ...freshCtx, receivedAt: Date.now() };
                 }
               } catch (err) {
                 console.warn('[WsHub] Failed to get fresh context:', err.message);
@@ -516,6 +643,19 @@ export class WsProxy {
         // ── Voice Audio → Transcribe → Fast Route OR AI Pipeline ──
         if (msg.type === 'voice_audio' && msg.audio) {
           await this._onVoiceAudio(ws, msg);
+        }
+
+        // ── Real time: the audio, streamed to the speech service while it is said ──
+        if (msg.type === 'voice_stream_start') this._onStreamStart(msg);
+        if (msg.type === 'voice_chunk' && typeof msg.pcm === 'string') {
+          this.remoteAsr?.sendAudio(msg.utt, Buffer.from(msg.pcm, 'base64'));
+        }
+        if (msg.type === 'voice_stream_end') this.remoteAsr?.end(msg.utt);
+        if (msg.type === 'voice_stream_cancel') this.remoteAsr?.cancel(msg.utt);
+
+        // ── Real time: is what was said so far already a command? ──
+        if (msg.type === 'voice_peek') {
+          await this._onVoicePeek(ws, msg);
         }
 
         // ── Switch LLM Provider ──
@@ -661,6 +801,23 @@ export class WsProxy {
     return true;
   }
 
+  /**
+   * An exam is starting: nothing left over from before may carry on beside
+   * it — a running task, a question waiting for yes or no, dictation, sleep.
+   */
+  enterExam() {
+    if (this._agentRunning) this._stopTask();
+    try { this.aiEngine?.abortActive?.(); } catch {}
+    this._pendingConfirmation = null;
+    this._awaitingTypeText = null;
+    this._sleeping = false;
+    if (this._dictationMode) {
+      this._dictationMode = false;
+      import('./system-tools.js').then(({ clearDictationTarget }) => clearDictationTarget()).catch(() => {});
+      this._broadcastDashboard({ type: 'dictation_mode', enabled: false, timestamp: new Date().toISOString() });
+    }
+  }
+
   /** Stop the running task (voice "stop", or "stop" typed on the Chat page). */
   _stopTask() {
     console.log('[Voice] ⚡ Stopping the running task');
@@ -678,6 +835,12 @@ export class WsProxy {
    * the order they were spoken.
    */
   async _onVoiceAudio(ws, msg) {
+    if (this._quietForEvaluation()) {
+      console.log('[Voice] Ignored: the agent evaluation is running');
+      this._broadcastDashboard({ type: 'voice_no_speech', timestamp: new Date().toISOString() });
+      return;
+    }
+    this._wakeSpeechService();
     // Self-heal: if the mutex has been held > 60s something hung — force release
     if (this._voiceProcessing && Date.now() - (this._voiceProcessingSince || 0) > 60000) {
       console.warn('[WsHub] Voice mutex stuck >60s — force releasing');
@@ -709,6 +872,8 @@ export class WsProxy {
     turn.log = {
       outcome: 'command', transcript: null, commandId: null,
       started: Date.now(), audioKb: Math.round((msg.audio.length * 3) / 4 / 1024),
+      // When the voice bar last heard speech: the wait for the pause before this clip was sent
+      speechEndedAt: Number.isFinite(msg.speechEndedAt) ? msg.speechEndedAt : null,
     };
     this._turnLog = turn.log;
     try {
@@ -733,25 +898,59 @@ export class WsProxy {
 
   _logTurn(turn) {
     if (!turn) return;
+    // Timed only when something was heard: the Speed tab is about what was said
+    const speed = turn.transcript ? speedOfTurn(turn) : null;
+    let id = null;
     try {
-      logVoiceTurn({
+      id = logVoiceTurn({
         ...this._voiceAttribution(),
         outcome: turn.outcome,
         transcript: turn.transcript,
         command_id: turn.commandId,
         audio_kb: turn.audioKb,
         ms: Date.now() - turn.started,
+        speed,
       });
     } catch {
       // No database (tests); the command itself is unaffected.
     }
+    const entry = speed ? this.speed.addTurn({ id, commandId: turn.commandId, said: turn.transcript, ...speed }) : null;
+    // Counted as a use (kind, worked, time, feature; never the words), if the account agreed
+    if (speed) this.analytics?.turn(turn, speed);
+    // A quick command can be done before its voice check: the score is saved when it comes
+    if (entry && turn.speakerCheck && !turn.speaker) {
+      turn.speakerCheck.then(found => this.speed.addSpeaker?.(entry, found));
+    }
+  }
+
+  /**
+   * How much this clip sounds like each person set up (voice-profile.js),
+   * worked out on this computer while the words are being heard. Only the
+   * student's own voice bar; the clip's 16 kHz WAV is used, never kept.
+   */
+  _checkSpeaker(msg) {
+    const log = this._turnLog;
+    if (!log || msg.source !== 'overlay' || !this.voiceProfile?.measuring()) return;
+    if (typeof msg.wav !== 'string' || msg.wav.length > MAX_WAV_BASE64) return;
+    let samples;
+    try { samples = samplesFromWav(msg.wav); } catch { return; }
+    log.speakerCheck = this.voiceProfile.check(samples).then(found => {
+      if (found && !found.skipped) {
+        log.speaker = found;
+        console.log(`[Voice lock] Sounds ${found.match ? 'like' : 'unlike'} who is set up: ${found.score} (${found.ms} ms, measuring only)`);
+      }
+      return found;
+    }, err => {
+      console.warn('[Voice lock] Voice check failed:', err.message);
+      return null;
+    });
   }
 
   // ── Multi-step tasks (Stage 3) ──
 
   /** While a task runs, a clip can only stop it. */
   async _interruptTask(ws, msg) {
-    const { text } = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm');
+    const { text } = await this._transcribeClip(msg);
     if (text && STOP_RE.test(text.trim())) {
       this._stopTask();
       this._broadcastDashboard({ type: 'voice_transcription', text, latency: 0, timestamp: new Date().toISOString() });
@@ -781,11 +980,28 @@ export class WsProxy {
   /** A tool call made by the agent: through the safety gate, like any other. */
   async _runAgentTool(name, args, opts = {}) {
     const result = await this.aiEngine.toolRegistry.executeTool(name, args, this, opts);
-    if (result?.status !== 'needs_confirmation' && !this._evaluating) {
-      this._recordAction({ tool: name, args, result });
-      if (isBrowserTool(name)) this._autoFocusBrowser();
+    if (result?.status !== 'needs_confirmation') {
+      // An evaluation isn't the student's data, but the browser still comes
+      // forward as it does for them: without it, the agent opened Wikipedia
+      // in the extension's tab and then read another Chrome window (23 Oct 2026).
+      // Waited for, so the next read of the screen sees the browser.
+      if (!this._evaluating) this._recordAction({ tool: name, args, result });
+      if (isBrowserTool(name)) await this._autoFocusBrowser();
     }
     return result;
+  }
+
+  /**
+   * The front window's controls, for the AI to see whether its actions
+   * changed anything; null in privacy mode. `fresh: false` may reuse the
+   * read made for this command (screen-model.js keeps it for 4 s).
+   */
+  async readScreenForAgent({ fresh = true } = {}) {
+    if (this._privacyMode) return null;
+    const screen = await this._readScreenModel({ fresh }).catch(() => null);
+    // Which window each read saw, for working out why a step was judged as it was
+    console.log(`[Agent] Screen: ${screen ? `"${String(screen.window).slice(0, 60)}" (${screen.app}, ${screen.elements?.length ?? 0} controls)` : 'not read'}`);
+    return screen;
   }
 
   _taskAgent() {
@@ -795,7 +1011,20 @@ export class WsProxy {
       systemPrompt: context => engine._buildSystemPrompt(context),
       toolsFor: context => engine.toolRegistry.getToolsForContext(context),
       execute: (name, args) => this._runAgentTool(name, args),
-      readScreen: async () => (this._privacyMode ? null : this._readScreenModel().catch(() => null)),
+      readScreen: () => this.readScreenForAgent(),
+      // What the document in front says, to check typing; nothing in privacy mode
+      readDocument: async () => {
+        if (this._privacyMode) return null;
+        const { actOnElement } = await import('./screen-model.js');
+        const read = await actOnElement({ action: 'read_text', value: 'all', log: false });
+        return read?.status === 'success' && typeof read.text === 'string' ? read.text : null;
+      },
+      // The extension's browser as a process name; null when it isn't connected
+      extensionBrowser: () => {
+        if (!this.extensionClients.size) return null;
+        const name = String(this.extensionBrowserName || 'chrome').toLowerCase();
+        return name.includes('edge') ? 'msedge' : name.includes('brave') ? 'brave' : name.includes('opera') ? 'opera' : 'chrome';
+      },
       fastMatch: matchFastCommand,
       report: ({ type, ...event }) => this._broadcastDashboard({ ...event, type: 'agent_progress', phase: type, timestamp: new Date().toISOString() }),
       isCancelled: () => this._agentCancelled,
@@ -815,7 +1044,15 @@ export class WsProxy {
    * "yes" itself when `autoConfirm`, and never saved as a student's data.
    */
   async runTaskForEvaluation(text, { autoConfirm = false } = {}) {
-    if (this._voiceProcessing) return { status: 'busy', text: 'AbleSpeak is busy with a voice command.' };
+    // Speech in the room is ignored from now until 30 s after the task (the
+    // gap to the next one): on 23 Oct 2026 the always-on microphone heard the
+    // room and a task came back "busy". A command already being heard is
+    // let finish, for up to 15 s, rather than failing the task.
+    this._evaluationQuietUntil = Date.now() + EVALUATION_QUIET_MS;
+    for (let waited = 0; this._voiceBusy() && waited < 15000; waited += 100) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (this._voiceBusy()) return { status: 'busy', text: 'AbleSpeak is busy with a voice command.' };
     const turn = this._beginVoiceTurn();
     this._agentRunning = true;
     this._agentCancelled = false;
@@ -845,8 +1082,14 @@ export class WsProxy {
       this._pendingConfirmation = null;
       this._agentRunning = false;
       this._evaluating = false;
+      this._evaluationQuietUntil = Date.now() + EVALUATION_QUIET_MS;
       this._endVoiceTurn(turn);
     }
+  }
+
+  /** While the agent evaluation runs, speech must not run commands or hold up a task. */
+  _quietForEvaluation() {
+    return !this.examSession?.active && (this._evaluating || Date.now() < (this._evaluationQuietUntil || 0));
   }
 
   /** A routine from the student's profile ("start my homework"). */
@@ -935,11 +1178,38 @@ export class WsProxy {
   /** The window's controls for the AI, unless privacy mode is on. */
   async _screenForAgent() {
     if (this._privacyMode) return null;
+    // Read while the person was speaking: the AI doesn't wait for it after the words
+    const pre = this._screenPrefetch;
+    this._screenPrefetch = null;
+    if (pre && Date.now() - pre.at < SCREEN_PREFETCH_MS) {
+      const waited = Date.now();
+      const model = await pre.read;
+      console.log(`[Voice] Screen read while speaking: waited ${Date.now() - waited} ms more for it`);
+      return model;
+    }
+    return this._readScreenNow();
+  }
+
+  async _readScreenNow() {
     try {
       return await this._readScreen({ extensionConnected: this.extensionClients.size > 0 });
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Speech started: read the screen now (in its own PowerShell worker, so no
+   * action waits behind it). An AI command then finds it ready instead of
+   * reading it after the words, which took up to 1.5 s. A quick command
+   * doesn't use it.
+   */
+  _prefetchScreen(utt = null) {
+    if (this._privacyMode || this._dictationMode || this.examSession?.active) return;
+    const pre = this._screenPrefetch;
+    // Once per phrase (speech start and the early check both ask)
+    if (pre && (utt != null ? pre.utt === utt : Date.now() - pre.at < 3000)) return;
+    this._screenPrefetch = { at: Date.now(), utt, read: this._readScreenNow() };
   }
 
   /** The student's own phrase for a command ("my music" → "open spotify"). */
@@ -954,9 +1224,407 @@ export class WsProxy {
   broadcastListeningSettings() {
     this._broadcastDashboard({
       type: 'listening_settings',
-      ...listeningSettings(this._profile()),
+      ...this._listeningForOverlay(),
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Real time: at the first short pause the voice bar sends the words so far.
+   * When they are already a known command, it runs now (and the voice bar
+   * drops the rest of the clip) instead of after the person's full pause.
+   * Anything else: "not taken", and the clip carries on as usual.
+   */
+  async _onVoicePeek(ws, msg) {
+    this._wakeSpeechService();
+    this._checkMedia();
+    this._prefetchScreen(msg.streamUtt ?? null); // without streaming, this is the first the server hears of the phrase
+    const answer = taken => {
+      try { ws.send(JSON.stringify({ type: 'voice_peek_result', id: msg.id, taken })); } catch {}
+    };
+    if (this._quietForEvaluation()) return answer(false);
+    // The speech service's words so far, or the engine on this computer's
+    const viaStream = msg.streamUtt != null && this._streamOn();
+    const viaLocal = !viaStream && this._localSpeechOn() && typeof msg.wav === 'string' && msg.wav.length <= MAX_WAV_BASE64;
+    const usable = (viaStream || viaLocal) && !this._dictationMode && !this._agentRunning && !this.examSession?.active;
+    if (!usable || this._voiceBusy()) {
+      const why = this._voiceBusy() ? 'busy with the last command' : !(viaStream || viaLocal) ? 'no fast speech engine' : 'dictation, a task or an exam';
+      console.log(`[Voice] Early check skipped (${why})`);
+      return answer(false);
+    }
+    const vocabulary = [...this._profile().vocabulary, NAME_WORD];
+    let heard;
+    try {
+      heard = viaStream
+        ? await this.remoteAsr.peek(msg.streamUtt, REMOTE_PEEK_WAIT_MS)
+        : await this.localAsr.transcribe(msg.wav, { prompt: vocabulary.join(', ') });
+    } catch { heard = {}; }
+    if (viaStream && !heard.error) heard = { ...heard, text: remoteText(heard), engine: 'remote' };
+    // Kept for this phrase: if nothing more is said, these are its final words (_transcribeClip)
+    if (viaStream && !heard.error && heard.text) this._peekWords = { utt: msg.streamUtt, heard, at: Date.now() };
+    // With "Say AbleSpeak first", a phrase without the name is left to the full clip
+    const needsName = !!this._profile().listening?.needsName;
+    const named = !!heard.text && (stripName(heard.text).named || Date.now() < (this._nameHeardUntil || 0));
+    const nameMissing = needsName && !named && !this._pendingConfirmation && !this._sleeping && !this._dismissed;
+    // With music playing, a phrase without the name is left to the full clip too
+    const heldForMedia = !needsName && !!heard.text && this._heldForMedia(heard.text);
+    // Why a phrase waits for the full pause, so the early check can be tuned from the log
+    const waits = !heard.text ? 'no words yet'
+      : nameMissing ? 'needs the name'
+        : heldForMedia ? 'music playing and no name'
+          : !this._isCompleteCommand(heard.text) ? 'not a complete command yet'
+            : this._voiceBusy() ? 'busy with the last command' : null;
+    if (waits) {
+      console.log(`[Voice] Early check: "${String(heard.text || '').slice(0, 40)}" waits for the full pause (${waits})`);
+      return answer(false);
+    }
+    answer(true);
+    console.log(`[Voice] ⚡ Real time: "${heard.text}" is a command — running it at the first pause`);
+    if (viaStream) this.remoteAsr.cancel(msg.streamUtt); // the rest of the clip isn't needed
+    await this._onVoiceAudio(ws, {
+      type: 'voice_audio', source: msg.source, audio: msg.wav || '', mimeType: 'audio/wav', wav: msg.wav, heard,
+      afterVoiceMs: msg.afterVoiceMs,
+    });
+  }
+
+  /** A known command that can't be the start of a longer one (real time). */
+  _isCompleteCommand(text) {
+    if (!this._isKnownCommand(text)) return false;
+    const { named, rest } = stripName(text);
+    // "AbleSpeak" alone is often followed by the command after a breath
+    if (named && !rest) return false;
+    if (isWakePhrase(text)) return true;
+    const t = rest.toLowerCase().replace(/[.!?,]+$/, '').trim();
+    if (this._pendingConfirmation && (isAffirmative(t) || isNegative(t))) return true;
+    if (this._dictationMode || this._sleeping || this._dismissed) return false;
+    if (/^(stop|cancel|never ?mind)$/.test(t) || SLEEP_RE.test(t)) return true;
+    if (t === 'play') return false;
+    const fast = matchFastCommand(t, { activeUrl: this.browserContext.activeTab?.url });
+    return !!fast && EARLY_TOOLS.has(fast.tool);
+  }
+
+  /**
+   * Someone is speaking and the speech service is asleep (no speech for 10
+   * minutes): wake it. This phrase is heard another way meanwhile; the next
+   * ones stream once it is ready (about 20 s). The voice bar only streams
+   * while the service is ready, so streaming itself can't be the wake-up.
+   */
+  _wakeSpeechService() {
+    const service = this.remoteAsr;
+    if (!service?.configured || !['asleep', 'off'].includes(service.state)) return;
+    if ((this._profile().listening?.speechEngine || 'auto') !== 'auto') return;
+    console.log('[RemoteASR] Speech heard: waking the speech service');
+    service.start();
+  }
+
+  /**
+   * Whether music or a video is playing now, from Windows' media sessions.
+   * Asked when speech starts and again for each phrase, while it is
+   * transcribed. Windows busy (a screen read ahead of it): the last answer.
+   * → { playing, apps } or null when unknown
+   */
+  _checkMedia() {
+    if (!this._mediaSource) return Promise.resolve(null);
+    if (!this._mediaCheck) {
+      this._mediaCheck = Promise.resolve()
+        .then(() => this._mediaSource())
+        .then(state => {
+          if (state) this._media = { ...state, at: Date.now() };
+          return state;
+        })
+        .catch(() => null)
+        .finally(() => { this._mediaCheck = null; });
+    }
+    const check = this._mediaCheck;
+    return Promise.race([check, new Promise(resolve => {
+      setTimeout(() => resolve(this._media), MEDIA_CHECK_WAIT_MS).unref?.();
+    })]);
+  }
+
+  /** Something was playing at the last check (for live words and real time, which can't wait). */
+  _mediaWasPlaying() {
+    return !!this._media?.playing && Date.now() - this._media.at < MEDIA_KNOWN_MS;
+  }
+
+  /** While something plays, a phrase without the name is the song, not the person (MEDIA_COMMAND_RE). */
+  _heldForMedia(text) {
+    return this._mediaWasPlaying() && afterName(text) == null && !this._isCommandLike(text)
+      && Date.now() >= (this._nameHeardUntil || 0);
+  }
+
+  /**
+   * With music or a video playing, a phrase without the name still runs when it
+   * is clearly a command: pausing, skipping, the volume, any quick command
+   * ("search for Michael Jackson", "scroll down", "skip the ad"), one that
+   * sounds like one, or a click. Only free talk (lyrics, a video's narration,
+   * questions for the AI) needs the name. Requiring it for everything locked a
+   * person out of the YouTube video they were watching (17 Oct 2026).
+   */
+  _isCommandLike(text) {
+    if (isMediaCommand(text)) return true;
+    const t = stripName(text).rest.toLowerCase().replace(/[.!?,]+$/, '').trim();
+    if (!t || t.split(/\s+/).length > 8) return false;
+    return this._isKnownCommand(t) || !!autocorrectCommand(t, { activeUrl: this.browserContext.activeTab?.url }) || /^(?:click|press|tap)\s+\S/.test(t);
+  }
+
+  /**
+   * On YouTube, what the page says of itself: the video playing, how far in,
+   * and the videos on screen with their IDs (Voqal library's youtube profile,
+   * Apache-2.0). The AI opens a video by its ID instead of clicking. Never
+   * holds a command up for long: no answer in 1.2 s, no YouTube section.
+   */
+  async _youtubeContext(activeTab) {
+    if (!activeTab?.url || !onSite(activeTab.url, 'youtube.com') || !this.extensionClients.size) return null;
+    const late = new Promise(resolve => { setTimeout(() => resolve(null), 1200).unref?.(); });
+    let state;
+    try {
+      state = await Promise.race([this.sendToolToExtension('youtube', { action: 'state' }), late]);
+    } catch {
+      return null;
+    }
+    // A video playing: its sponsor parts (SponsorBlock), kept 10 minutes, so
+    // only the first command for a video waits for them, and briefly
+    if (state?.status === 'success' && state.page === 'watch' && state.videoId) {
+      state.sponsors = await sponsorSegments(state.videoId, { timeoutMs: 600 }).catch(() => []);
+    }
+    return state;
+  }
+
+  /** Gmail's inbox or open email, when the student is in Gmail (never in privacy mode). */
+  async _gmailContext(activeTab) {
+    if (this._privacyMode || !activeTab?.url || !onSite(activeTab.url, 'mail.google.com') || !this.extensionClients.size) return null;
+    const late = new Promise(resolve => { setTimeout(() => resolve(null), 1200).unref?.(); });
+    try {
+      return await Promise.race([this.sendToolToExtension('gmail', { action: 'state' }), late]);
+    } catch {
+      return null;
+    }
+  }
+
+  /** The learned command for these words here, from the student's saved AI commands. */
+  _learnedFor(text, where) {
+    try {
+      if (!this._learned || this._learnedStale) {
+        this._learned = learnFrom(getRecentAiCommands(this._attribution().student_id));
+        this._learnedStale = false;
+      }
+      return findLearned(this._learned, text, where);
+    } catch {
+      return null; // no database (tests) or unreadable rows: nothing learned
+    }
+  }
+
+  /**
+   * Shadow mode: say in the log whether the learned steps are what the AI did.
+   * Learned commands act on their own only once these agree.
+   */
+  _compareLearned(text, learned, result) {
+    const same = JSON.stringify(stepsOf(result?.toolCalls)) === JSON.stringify(learned.steps);
+    this._shadow ||= { same: 0, different: 0 };
+    this._shadow[same ? 'same' : 'different']++;
+    console.log(`[Learn] Shadow: "${text}" would have run ${learned.steps.map(s => s.tool).join(' → ')} without the AI (learned from ${learned.successes} runs) · the AI did ${same ? 'the same ✓' : 'something else ✗'} · so far ${this._shadow.same} same, ${this._shadow.different} different`);
+  }
+
+  /**
+   * "Click Play", "press Save", "tap on Sign up": when exactly one thing in
+   * the window in front is called that, click it now instead of asking the AI
+   * (1–3.5 s). The window in front decides where: a fast browser click once
+   * landed while Spotify was in front, which is why clicks went to the AI.
+   * Anything less certain still goes to the AI. → a quick command, or null
+   */
+  async _clickByName(text) {
+    if (this._privacyMode || this._dictationMode || this.examSession?.active) return null;
+    const m = String(text || '').toLowerCase().replace(/[.!?,]+$/, '').trim()
+      .match(/^(?:click|press|tap)(?:\s+on)?(?:\s+the)?\s+(.+?)(?:\s+(?:button|link|icon))?$/);
+    if (!m) return null;
+    if (!this._frontWindow) return null;
+    const front = await Promise.resolve().then(() => this._frontWindow()).catch(() => null);
+    if (!front) return null;
+    if (BROWSER_APPS.has(String(front.process).toLowerCase())) {
+      if (!this.extensionClients.size) return null;
+      const el = uniqueByName(this.browserContext.pageContext?.viewportElements, m[1], e => e.label);
+      return el ? { tool: 'click_element', args: { xpath: el.xpath, label: el.label }, silent: true, byName: true } : null;
+    }
+    const model = await Promise.resolve().then(() => this._windowControls(front)).catch(() => null);
+    if (model?.status !== 'success') return null;
+    const usable = model.elements.filter(e => e.actions?.length && e.enabled !== false);
+    const el = uniqueByName(usable, m[1]);
+    return el ? { tool: 'uia_act', args: { ref: el.ref, app_name: front.process }, silent: true, byName: true } : null;
+  }
+
+  /**
+   * "Search for X" searches inside the page when the page has its own search
+   * box. Chrome's own pages (chrome://, the new tab page) can't be touched by
+   * the extension, so there it becomes a Google search instead.
+   */
+  async _searchFallback(fastMatch, result) {
+    if (fastMatch.tool !== 'search_in_page' || result?.status !== 'error') return result;
+    if (!/chrome:\/\/|edge:\/\/|cannot access|cannot be scripted/i.test(result.message || '')) return result;
+    console.log(`[Voice] This page can't be searched: searching Google for "${fastMatch.args.query}" instead`);
+    return this.aiEngine.toolRegistry.executeTool('search_web', { query: fastMatch.args.query }, this);
+  }
+
+  /** The name alone was said: answer "Yes?". */
+  _answerName(text, startTime) {
+    this._markTurn('control');
+    this._broadcastDashboard({ type: 'voice_transcription', text, latency: Date.now() - startTime, timestamp: new Date().toISOString() });
+    this._broadcastDashboard({
+      type: 'chat_assistant_message', id: uuidv4(), text: 'Yes?', error: false,
+      provider: 'fast', model: 'name', source: 'voice', timestamp: new Date().toISOString(),
+    });
+    this._lastTTSText = 'Yes?';
+    this._lastTTSTime = Date.now();
+  }
+
+  /** Speech recognition on this computer is in use for the person using it. */
+  _localSpeechOn() {
+    return !!this.localAsr?.ready && (this._profile().listening?.speechEngine || 'auto') !== 'online';
+  }
+
+  /** Listening settings, whether the overlay also sends 16 kHz audio for
+   *  local-asr.js (or for the voice check), and whether it streams it to the speech service. */
+  _listeningForOverlay() {
+    return {
+      ...listeningSettings(this._profile()),
+      localSpeech: this._localSpeechOn(),
+      speechStream: this._streamOn(),
+      voiceCheck: !!this.voiceProfile?.measuring(),
+    };
+  }
+
+  /** Speech is streamed to the speech service for the person using the computer. Exams keep Gemini. */
+  _streamOn() {
+    return !!this.remoteAsr?.ready && (this._profile().listening?.speechEngine || 'auto') === 'auto'
+      && !this.examSession?.active;
+  }
+
+  /** The voice bar heard speech start: stream it, with this person's own words as hints. */
+  _onStreamStart(msg) {
+    this._checkMedia(); // ready by the time the phrase ends
+    this._prefetchScreen(msg.utt ?? null);
+    if (!this._streamOn() || msg.utt == null) return;
+    this.remoteAsr.beginUtterance(msg.utt, [...this._profile().vocabulary, NAME_WORD].join(', '));
+  }
+
+  /** Live words in the voice bar while the person speaks (never read out). */
+  _showPartial(utt, text) {
+    if (!text || this._sleeping || this._dismissed || this.examSession?.active) return;
+    const needsName = !!this._profile().listening?.needsName;
+    const waitingForName = needsName && !this._dictationMode && !this._pendingConfirmation
+      && Date.now() >= (this._nameHeardUntil || 0);
+    if (waitingForName && !stripName(text).named) return; // other people's talk isn't shown
+    if (!needsName && !this._dictationMode && !this._pendingConfirmation && this._heldForMedia(text)) return; // nor the song's words
+    this._broadcastDashboard({ type: 'voice_partial', utt, text, timestamp: new Date().toISOString() });
+  }
+
+  /**
+   * A phrase AbleSpeak can act on from the local words alone: a quick command,
+   * a shortcut, stop, sleep, a wake phrase, or the answer to a yes/no question.
+   * Anything else (questions, typing, Swahili) is checked with Gemini.
+   */
+  _isKnownCommand(text) {
+    if (isWakePhrase(text)) return true;
+    const t = stripName(text).rest.toLowerCase().replace(/[.!?,]+$/, '').trim();
+    if (!t) return false;
+    if (this._pendingConfirmation && (isAffirmative(t) || isNegative(t))) return true;
+    if (this._dictationMode) return DICTATION_END_RE.test(t) || !!matchDictationPrefixCommand(text);
+    if (this._sleeping || this._dismissed) return false;
+    // "Stop", "cancel that": short. "Cancel my meeting with…" is checked with Gemini.
+    if ((STOP_RE.test(t) && t.split(/\s+/).length <= 3) || SLEEP_RE.test(t)) return true;
+    const profile = this._profile();
+    if (expandAlias(profile, t) || findMacro(profile, t)) return true;
+    return !!matchFastCommand(t, { activeUrl: this.browserContext.activeTab?.url });
+  }
+
+  /**
+   * The words in one clip. With speech recognition on this computer
+   * (listening.speechEngine 'auto'), a known command runs on the local words
+   * at once: no wait on the internet and no Gemini request. Anything else goes
+   * to Gemini. Dictation asks both at once, and types the local words when
+   * Gemini is slow or offline.
+   * 'local' never uses the internet; 'online' is Gemini alone, as before.
+   */
+  async _transcribeClip(msg, vocabulary = []) {
+    // Gemini is told to stop once the words heard here are used instead
+    const gemini = new AbortController();
+    // With its tokens, for the Speed tab's cost
+    const online = () => this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm', { vocabulary, signal: gemini.signal })
+      .then(result => (result && this.voiceHandler.lastUsage ? { ...result, usage: this.voiceHandler.lastUsage } : result));
+    const fromLocal = heard => {
+      gemini.abort();
+      const remote = heard.engine === 'remote';
+      console.log(`[Voice] ${remote ? '☁️ Heard by the speech service' : '🖥️ Heard on this computer'} in ${heard.ms} ms: "${heard.text}"`);
+      return { text: heard.text, engine: remote ? 'remote' : 'local' };
+    };
+    // Already heard: a real-time check that was a command
+    if (msg.heard?.text) return fromLocal(msg.heard);
+    const mode = this._profile().listening?.speechEngine || 'auto';
+
+    // Real time: the words were streamed to the speech service as they were said
+    if (msg.streamUtt != null && this.remoteAsr && mode === 'auto') {
+      // Nothing was said after the early check (no voice-level sound at all):
+      // its words are the whole phrase, and the same audio isn't heard again
+      // (that took ~0.55 s, up to 2.7 s)
+      const early = this._peekWords;
+      this._peekWords = null;
+      if (msg.wordsAtPeek === true && early?.utt === msg.streamUtt && early.heard?.text) {
+        this.remoteAsr.cancel(msg.streamUtt);
+        gemini.abort();
+        console.log(`[Voice] ☁️ Heard at the early check, nothing said after it: "${early.heard.text}"`);
+        return { text: early.heard.text, engine: 'remote' };
+      }
+      const heard = await this.remoteAsr.finish(msg.streamUtt, REMOTE_FINAL_WAIT_MS * (this._dictationMode ? 2 : 1));
+      if (!heard.error) {
+        gemini.abort();
+        const text = remoteText(heard);
+        console.log(`[Voice] ☁️ Heard by the speech service, ${heard.waitedMs} ms after the end of speech (GPU ${heard.ms} ms): "${text}"`);
+        return text ? { text, engine: 'remote' } : { text: '', error: 'no_speech' };
+      }
+      console.warn(`[Voice] The speech service didn't answer (${heard.error}): hearing the clip another way`);
+    }
+    const wav = typeof msg.wav === 'string' && msg.wav.length <= MAX_WAV_BASE64 ? msg.wav : null;
+    const localReady = !!this.localAsr?.ready && !!wav;
+    // "This computer only" is a promise that speech never leaves the computer:
+    // when the engine can't hear it, say so instead of asking Gemini.
+    if (mode === 'local' && !localReady) {
+      console.warn(`[Voice] Speech on this computer only, but it isn't ready (${this.localAsr?.state || 'no engine'}${wav ? '' : ', no WAV in the clip'})`);
+      return { text: '', error: 'local_failed', message: LOCAL_UNAVAILABLE };
+    }
+    if (mode === 'online' || !localReady) return online();
+
+    const onlineJob = this._dictationMode && mode === 'auto' ? online() : null;
+    onlineJob?.catch(() => {}); // it may not be needed; an unwanted failure isn't an error
+    let heard;
+    try {
+      heard = await this.localAsr.transcribe(wav, { prompt: vocabulary.join(', ') });
+    } catch (err) {
+      heard = { error: err.message };
+    }
+    if (heard.error) console.warn(`[Voice] Speech recognition on this computer failed: ${heard.error}`);
+
+    if (mode === 'local') {
+      if (heard.error) return { text: '', error: 'local_failed', message: LOCAL_UNAVAILABLE };
+      return heard.text ? fromLocal(heard) : { text: '', error: 'no_speech' };
+    }
+    if (heard.text && this._isKnownCommand(heard.text)) return fromLocal(heard);
+    // Asleep or hidden, only a wake phrase matters, and that is a known
+    // command: room talk is not sent to Gemini, and "wake up" isn't kept waiting.
+    if ((this._sleeping || this._dismissed) && !heard.error) {
+      return heard.text ? fromLocal(heard) : { text: '', error: 'no_speech' };
+    }
+    const job = onlineJob || online();
+    // Only dictation falls back to the words heard here. Anything else that
+    // isn't a known command goes to the AI, which needs the internet anyway,
+    // and the local words for room talk ("but it a quite a") must never
+    // reach it as a command (seen live, 15 Oct 2026, with Gemini slow).
+    if (!heard.text || !this._dictationMode) return job;
+    let timer;
+    const waited = new Promise(resolve => { timer = setTimeout(resolve, DICTATION_ONLINE_WAIT_MS, null); });
+    const result = await Promise.race([job, waited]);
+    clearTimeout(timer);
+    if (result && (!result.error || result.error === 'no_speech')) return result;
+    console.warn(`[Voice] Gemini ${result ? `failed (${result.error})` : 'was too slow'}: using the words heard on this computer`);
+    return fromLocal(heard);
   }
 
   /** Someone holds the voice turn, or it is being handed to a queued clip. */
@@ -987,19 +1655,80 @@ export class WsProxy {
     }
   }
 
+  /**
+   * A clip said during an exam: transcribed word for word (exam: true) and
+   * handed to the exam. A clip that cannot be understood is said to be so,
+   * so the student knows to say it again; nothing is ever dropped quietly.
+   */
+  async _examVoice(ws, msg, startTime) {
+    const transcript = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm', {
+      vocabulary: this._profile().vocabulary,
+      exam: true,
+    });
+    const runner = this.examSession.current?.runner;
+    const done = (action, text = null) => this._broadcastDashboard({ type: 'exam_heard', text, action, timestamp: new Date().toISOString() });
+
+    if (transcript.error === 'no_speech' && !transcript.filtered) {
+      this._markTurn('no_speech');
+      ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+      return;
+    }
+    if (transcript.error) {
+      this._markTurn(transcript.error === 'offline' ? 'offline' : 'error');
+      const said = transcript.error === 'offline'
+        ? 'I cannot hear answers right now, because the internet connection is down. Your answers so far are saved. Please tell your invigilator.'
+        : 'I did not catch that clearly. Please say it again.';
+      runner?.say(said, transcript.error === 'offline' ? 'offline' : 'not_heard');
+      done(transcript.error === 'offline' ? 'offline' : 'not_heard');
+      return;
+    }
+    if (this._turnLog) this._turnLog.transcript = transcript.text;
+    this._broadcastDashboard({ type: 'voice_transcription', text: transcript.text, latency: Date.now() - startTime, timestamp: new Date().toISOString() });
+    this._markTurn('exam');
+    const result = this.examSession.heard(transcript.text);
+    done(result?.action || null, transcript.text);
+  }
+
   /** Transcribe one clip, then type it (dictation) or run it as a command. */
   async _processVoiceAudio(ws, msg) {
     const startTime = Date.now();
     console.log(`[Voice] Received audio (${Math.round(msg.audio.length / 1024)}KB)`);
+    // A screen read from another phrase isn't this one's
+    const pre = this._screenPrefetch;
+    if (pre && msg.streamUtt != null && pre.utt != null && pre.utt !== msg.streamUtt) this._screenPrefetch = null;
 
-    // Transcribe with Gemini, expecting this student's own words
-    // (and AbleSpeak's own name, when phrases must start with it)
+    // An exam is running: what the student says goes to the exam and nowhere
+    // else — no AI, no quick commands, no filters that could drop an answer.
+    if (this.examSession?.active) {
+      await this._examVoice(ws, msg, startTime);
+      return;
+    }
+
+    // Someone is setting up their voice on the Voice & words page: the phrases
+    // they read ("Close this window") are not commands. Not even sent to be heard.
+    if (this.voiceProfile?.holding()) {
+      console.log('[Voice] A voice is being set up on the dashboard: not acting on this');
+      this._markTurn('filtered');
+      ws.send(JSON.stringify({ type: 'voice_no_speech', reason: 'enrolling', timestamp: new Date().toISOString() }));
+      return;
+    }
+    // Who it sounds like, while it is being heard. Measuring only: nothing is ignored because of it.
+    this._checkSpeaker(msg);
+
+    // Transcribe (on this computer and/or with Gemini), expecting this
+    // student's own words and AbleSpeak's own name, always, so it is written
+    // right ("I will speak" was heard for it)
     const needsName = !!this._profile().listening?.needsName;
-    const transcript = await this.voiceHandler.transcribe(msg.audio, msg.mimeType || 'audio/webm', {
-      vocabulary: needsName ? [...this._profile().vocabulary, NAME_WORD] : this._profile().vocabulary,
-    });
+    // Whether music is playing is asked while the clip is transcribed
+    const mediaCheck = !needsName && !this._dictationMode ? this._checkMedia() : Promise.resolve(null);
+    const transcript = await this._transcribeClip(msg, [...this._profile().vocabulary, NAME_WORD]);
     const { error } = transcript;
     let text = transcript.text;
+    if (this._turnLog) {
+      this._turnLog.heardAt = Date.now();
+      this._turnLog.hearEngine = transcript.engine || 'gemini';
+      if (transcript.usage) this._turnLog.hearUsage = transcript.usage;
+    }
 
     if (error === 'no_speech') {
       this._markTurn('no_speech');
@@ -1021,7 +1750,20 @@ export class WsProxy {
     // Only phrases that start with the name are acted on; other people, TV
     // and music are dropped quietly, before anything is shown. Dictated text
     // and the answer to a yes/no question need no name.
-    if (needsName && !this._dictationMode && !this._pendingConfirmation) {
+    // Asleep or hidden, a wake phrase always gets through ("Wake up, AbleSpeak"
+    // has the name at the end). Awake, just the name still answers "Yes?".
+    const waking = (this._sleeping || this._dismissed) && isWakePhrase(text);
+    const answersName = !this._dictationMode && !this._pendingConfirmation && !waking;
+    if (!needsName && answersName && !this._sleeping && !this._dismissed) {
+      // Just the name, with "Say AbleSpeak first" off: still "Yes?", not a question for the AI
+      const { named, rest } = stripName(text);
+      if (named && !rest) {
+        this._nameHeardUntil = Date.now() + NAME_WINDOW_MS; // with music playing, the next phrase needs no name
+        this._answerName(text, startTime);
+        return;
+      }
+    }
+    if (needsName && answersName) {
       const gate = gateByName(text, { inWindow: Date.now() < (this._nameHeardUntil || 0) });
       if (gate.action === 'ignore') {
         console.log(`[Voice] 🔇 Not for AbleSpeak (no name): "${text.slice(0, 50)}"`);
@@ -1033,17 +1775,36 @@ export class WsProxy {
       if (gate.action === 'listen') {
         // Just the name: "Yes?" — the next phrase needs no name
         this._nameHeardUntil = Date.now() + NAME_WINDOW_MS;
-        this._markTurn('control');
-        this._broadcastDashboard({ type: 'voice_transcription', text, latency: Date.now() - startTime, timestamp: new Date().toISOString() });
-        this._broadcastDashboard({
-          type: 'chat_assistant_message', id: uuidv4(), text: 'Yes?', error: false,
-          provider: 'fast', model: 'name', source: 'voice', timestamp: new Date().toISOString(),
-        });
-        this._lastTTSText = 'Yes?';
-        this._lastTTSTime = Date.now();
+        this._answerName(text, startTime);
         return;
       }
       text = gate.text;
+    }
+
+    // ── Music or a video playing (_isCommandLike) ──
+    // Free talk without the name is the song or the video, dropped quietly.
+    // Commands still work without it ("pause", "skip the ad", "search for…").
+    // The name counts anywhere in the phrase, since the recording may start on the song.
+    if (!needsName && answersName && !this._sleeping && !this._dismissed) {
+      const media = await mediaCheck;
+      if (media?.playing) {
+        const said = afterName(text);
+        if (said === '') {
+          // The name last, after the song's words: "Yes?", and the next phrase needs no name
+          this._nameHeardUntil = Date.now() + NAME_WINDOW_MS;
+          this._answerName(text, startTime);
+          return;
+        }
+        if (said || Date.now() < (this._nameHeardUntil || 0)) {
+          this._nameHeardUntil = 0;
+          text = said || text;
+        } else if (!this._isCommandLike(text)) {
+          console.log(`[Voice] 🔇 ${media.apps.join(' and ')} playing — not for AbleSpeak (no name): "${text.slice(0, 50)}"`);
+          this._markTurn('filtered');
+          ws.send(JSON.stringify({ type: 'voice_no_speech', reason: 'media', timestamp: new Date().toISOString() }));
+          return;
+        }
+      }
     }
 
     // Send transcription to dashboard
@@ -1061,11 +1822,14 @@ export class WsProxy {
     // Windows' media controls, which only ever pause, never start. A browser
     // tab Windows doesn't list falls back to the extension. The person is told
     // what was paused, and it counts as a command on their progress.
+    // Not while a yes/no question waits: "no, stop" is its answer, a no.
     // ────────────────────────────────────────────
-    if (!this._dictationMode) {
+    if (!this._dictationMode && !this._pendingConfirmation) {
       const lowerForEscape = text.toLowerCase().trim();
       const wordCount = lowerForEscape.split(/\s+/).length;
-      const escapeMatch = lowerForEscape.match(/\b(pause|stop|mute|shut up|quiet|silence|hush)\b/);
+      // "Pos", "Pose", "pose the song" are how "pause" has come out
+      const escapeMatch = lowerForEscape.match(/\b(pause|pose(?= (?:the )?(?:song|music|track|video)\b)|stop|mute|shut up|quiet|silence|hush)\b/)
+        || lowerForEscape.match(/^(pose?)[\s.!?,]*$/);
 
       if (escapeMatch && wordCount <= 6) {
         console.log(`[Voice] 🚨 Escape command: "${escapeMatch[1]}" in "${text.slice(0, 60)}"`);
@@ -1160,8 +1924,22 @@ export class WsProxy {
     // If the transcription closely matches the last spoken TTS text,
     // it's the mic hearing our own voice — discard it.
     // SKIPPED in dictation mode — no TTS is spoken during dictation.
+    // The voice bar says how long after AbleSpeak's voice the clip began: one
+    // that began later can't hold it, so the person repeating AbleSpeak's own
+    // words ("play the current song", three times) is heard.
     // ────────────────────────────────────────────
-    if (!this._dictationMode && this._lastTTSText && (Date.now() - this._lastTTSTime) < 30000) {
+    // Whatever the timing says, a long stretch of AbleSpeak's last answer, word
+    // for word and in order, is its own voice: a person repeating a command is
+    // brief (an answer cut off mid-way was taken as a command, 17 Oct 2026)
+    const recentVoice = this._lastTTSText && (Date.now() - this._lastTTSTime) < 30000;
+    if (!this._dictationMode && recentVoice && text.split(/\s+/).length >= 8 && isEchoOf(text, this._lastTTSText)) {
+      console.log(`[Voice] 🔇 Echo detected (AbleSpeak's last answer, word for word) — "${text.slice(0, 60)}"`);
+      this._markTurn('filtered');
+      ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+      return;
+    }
+    const mayHoldVoice = typeof msg.afterVoiceMs !== 'number' || msg.afterVoiceMs < ECHO_RECENT_MS;
+    if (!this._dictationMode && mayHoldVoice && recentVoice) {
       const lowerText = text.toLowerCase().trim();
       const ttsWords = this._lastTTSText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
       const heardWords = lowerText.split(/\s+/).filter(w => w.length > 2);
@@ -1186,6 +1964,31 @@ export class WsProxy {
    * correction, "type this", routines, quick commands, tasks, then the AI.
    */
   async _handleUtterance(ws, text, { startTime = Date.now(), screenshot = null, typed = false } = {}) {
+    // During an exam only the student's voice answers it; nothing typed elsewhere reaches it.
+    if (this.examSession?.active) {
+      if (typed) {
+        this._broadcastDashboard({
+          type: 'chat_assistant_message', id: uuidv4(), error: true, toolCalls: [],
+          text: 'An exam is running on this computer, so AbleSpeak only takes the student\'s spoken answers until it ends.',
+          provider: 'exam', model: 'exam', source: 'chat', timestamp: new Date().toISOString(),
+        });
+      } else {
+        this._markTurn('exam');
+        const result = this.examSession.heard(text);
+        this._broadcastDashboard({ type: 'exam_heard', text, action: result?.action || null, timestamp: new Date().toISOString() });
+      }
+      return;
+    }
+
+    // "AbleSpeak, scroll down" is "scroll down": the name in front used to send
+    // it past the quick commands to the AI, seconds slower. Not while dictating,
+    // where "AbleSpeak, …" is how a command is given (matchDictationPrefixCommand).
+    // Just the name is left as it is, for waking and "Yes?".
+    if (!this._dictationMode) {
+      const { named, rest } = stripName(text);
+      if (named && rest) text = rest;
+    }
+
     // VOICE CONTROL: interrupt (stop/cancel) + sleep/wake — never hits the LLM
     if (this._handleVoiceControl(text, { typed })) {
       this._markTurn('control');
@@ -1218,7 +2021,7 @@ export class WsProxy {
       }
 
       // Check for exit phrases first
-      if (/^(stop|end|exit)\s+dictat(ing|ion)|^command\s+mode$/.test(tLower)) {
+      if (DICTATION_END_RE.test(tLower)) {
         this._dictationMode = false;
         try { const { clearDictationTarget } = await import('./system-tools.js'); clearDictationTarget(); } catch {}
         console.log('[Voice] ✏️ Dictation mode OFF');
@@ -1251,9 +2054,10 @@ export class WsProxy {
       // for whatever is said next.
       const command = matchDictationPrefixCommand(text);
       if (!command) {
-        // Convert punctuation words to actual punctuation (typed text is kept as it is)
-        const typedText = typed ? text : this._processDictationText(text);
+        // Autocorrected (Gemini), then punctuation words to punctuation (typed text is kept as it is)
+        const typedText = typed ? text : this._processDictationText(await this._cleanDictation(text));
         if (!typedText.trim()) return;
+        this._dictationTyped = `${this._dictationTyped || ''}${typedText}`.slice(-600);
 
         console.log(`[Voice] ✏️ Dictating: "${typedText}"`);
         const dictateError = await this._dictateAndReport(typedText);
@@ -1292,14 +2096,31 @@ export class WsProxy {
     // ────────────────────────────────────────────
     // FAST PATH: Match common commands instantly
     // ────────────────────────────────────────────
-    const fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
+    let fastMatch = matchFastCommand(text, { activeUrl: this.browserContext.activeTab?.url });
+    // Sounds like a known command ("pose the song", "close this tub"): run that,
+    // and show it on the voice bar as what was understood
+    if (!fastMatch && !typed) {
+      const activeUrl = this.browserContext.activeTab?.url;
+      const guess = autocorrectCommand(text, { activeUrl });
+      // Only a correction that runs here is taken: otherwise the AI hears what was said, not the guess
+      const corrected = guess && matchFastCommand(guess.phrase, { activeUrl });
+      if (corrected) {
+        console.log(`[Voice] ✨ Understood "${text}" as "${guess.phrase}"`);
+        this._broadcastDashboard({ type: 'voice_transcription', text: guess.phrase, heard: text, corrected: true, timestamp: new Date().toISOString() });
+        text = guess.phrase;
+        fastMatch = corrected;
+      }
+    }
+    fastMatch ||= await this._clickByName(text);
 
-    if (fastMatch) {
-      console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})`);
+    // `quick:` lets a click by name that didn't work leave for the AI path below
+    quick: if (fastMatch) {
+      console.log(`[Voice] ⚡ Fast match: ${fastMatch.tool}(${JSON.stringify(fastMatch.args)})${fastMatch.byName ? ' (click by name)' : ''}`);
 
       // Special handling: dictation mode toggle (not a real tool)
       if (fastMatch.tool === 'dictation_mode') {
         this._dictationMode = fastMatch.args.enabled;
+        this._dictationTyped = ''; // a new dictation: earlier text isn't its context
         console.log(`[Voice] ✏️ Dictation mode ${this._dictationMode ? 'ON' : 'OFF'}`);
 
         // Capture/clear the target window HWND
@@ -1341,8 +2162,14 @@ export class WsProxy {
         return;
       }
 
-      const toolResult = await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this);
+      const toolResult = await this._searchFallback(fastMatch, await this.aiEngine.toolRegistry.executeTool(fastMatch.tool, fastMatch.args, this));
       const latency = Date.now() - startTime;
+
+      // Clicked by name and it didn't work: the AI looks closer, as it always did
+      if (fastMatch.byName && toolFailed(toolResult)) {
+        console.log(`[Voice] ⚡ Click by name didn't work (${toolResult?.message || toolResult?.error || 'no reason'}): asking the AI`);
+        break quick;
+      }
 
       // Consequential action → pause and ask before doing anything else.
       if (toolResult?.status === 'needs_confirmation') {
@@ -1355,6 +2182,8 @@ export class WsProxy {
         this._autoFocusBrowser();
       }
       this._recordAction({ tool: fastMatch.tool, args: fastMatch.args, result: toolResult });
+      // A web answer joins the conversation, so a follow-up question knows who "he" is
+      if (fastMatch.tool === 'web_answer' && !toolFailed(toolResult)) this.aiEngine.rememberExchange?.(text, toolResult.text);
 
       // Persist to DB
       this._recordVoiceCommand({
@@ -1388,6 +2217,7 @@ export class WsProxy {
       });
 
       console.log(`[Voice] ⚡ Fast executed in ${latency}ms (silent: ${failed ? false : fastMatch.silent}${failed ? ', FAILED' : ''})`);
+      this._screenPrefetch = null; // the screen may have changed: the next phrase reads it afresh
       return;
     }
 
@@ -1396,25 +2226,21 @@ export class WsProxy {
     // ────────────────────────────────────────────
     const systemContext = getFullSystemContext();
 
-    // Desktop screenshot from overlay, or fallback to extension tab screenshot.
-    // Privacy mode disables ALL screen capture — voice control still works.
-    // The tab screenshot is optional: Chrome can't capture a new blank tab or
-    // chrome:// pages, and a slow browser mustn't hold every command for the
-    // extension's full 10-second timeout.
+    // A desktop screenshot only if the voice bar sent one. Privacy mode disables
+    // ALL screen capture — voice control still works. The browser tab is not
+    // captured here: that request held every AI command for up to 3 seconds,
+    // and its answer (an object, not the string this expected) was never used —
+    // the AI reads the page's elements and the window's controls instead.
     if (this._privacyMode) screenshot = null;
-    const tabUrl = this.browserContext.activeTab?.url || '';
-    if (!this._privacyMode && !screenshot && this.extensionClients.size > 0 && !UNCAPTURABLE_TAB.test(tabUrl)) {
-      try {
-        const ssResult = await Promise.race([
-          this.sendToolToExtension('take_screenshot', {}),
-          new Promise(r => setTimeout(() => r(null), 3000)),
-        ]);
-        if (ssResult && typeof ssResult === 'string' && ssResult.startsWith('data:')) {
-          screenshot = ssResult.replace(/^data:image\/\w+;base64,/, '');
-        }
-      } catch {}
-    }
 
+    // The window's controls and, on YouTube or Gmail, the page's own account of itself, together
+    const lookStarted = Date.now();
+    const [screenModel, youtube, gmail] = await Promise.all([
+      this._screenForAgent(),
+      this._youtubeContext(this.browserContext.activeTab),
+      this._gmailContext(this.browserContext.activeTab),
+    ]);
+    if (this._turnLog) this._turnLog.lookMs = Date.now() - lookStarted;
     const context = {
       tabs: this.browserContext.tabs || [],
       activeTab: this.browserContext.activeTab || null,
@@ -1424,14 +2250,43 @@ export class WsProxy {
       computerInfo: systemContext.computerInfo,
       visibleApplications: systemContext.visibleApplications,
       screenshot,
-      screenModel: await this._screenForAgent(),
+      screenModel,
+      youtube,
+      gmail,
     };
 
     if (needsPlan(text)) {
       await this._runTask(text, context, { commandId, startTime });
       return;
     }
+    // Where it was said: the app in front, or the site when the browser is in front
+    const front = context.screenModel?.app
+      ? { app: context.screenModel.app, window: context.screenModel.window || null }
+      : null;
+    const site = !front && context.activeTab?.url ? siteOf(context.activeTab.url) : null;
+    // Learned commands, in shadow mode: what would have run without the AI
+    const learned = this._learnedFor(text, { front, site });
+
     const result = await this.aiEngine.processChat(text, context);
+    // Paid for even when the AI decides it wasn't for AbleSpeak
+    if (this._turnLog && result.usage?.calls) this._turnLog.think = result.usage;
+    // What the AI did, so "undo that" takes back its last action, not an older one
+    for (const call of result.toolCalls || []) {
+      const tool = call.tool || call.name;
+      const readOnly = READ_ONLY_STEPS.has(tool) || (tool === 'uia_act' && call.args?.action === 'read_text');
+      if (!readOnly && !toolFailed(call.result)) this._recordAction({ tool, args: call.args || {}, result: call.result });
+    }
+    if (learned) this._compareLearned(text, learned, result);
+
+    // The AI judged it wasn't said to AbleSpeak (lyrics, a video, other people):
+    // quiet, as with music or room talk, not "could you rephrase it?"
+    const ignored = !typed && result.toolCalls?.find(c => (c.tool || c.name) === 'ignore');
+    if (ignored) {
+      console.log(`[Voice] 🔇 Not for AbleSpeak (the AI's call): "${text.slice(0, 60)}"${ignored.result?.reason ? ` — ${ignored.result.reason}` : ''}`);
+      this._markTurn('filtered');
+      ws.send(JSON.stringify({ type: 'voice_no_speech', timestamp: new Date().toISOString() }));
+      return;
+    }
 
     // The AI tried a consequential action → it was gated. Ask first.
     if (this._pendingConfirmation) {
@@ -1454,11 +2309,17 @@ export class WsProxy {
       if (allSilent) silent = true;
     }
 
+    // Where it was said, with each action's arguments (ai-engine.js): enough
+    // to learn this command (learned-commands.js) and replay it later
     this._recordVoiceCommand({
       id: commandId,
       type: 'voice',
       text,
-      payload: { text, source: typed ? 'chat' : 'microphone' },
+      payload: {
+        text, source: typed ? 'chat' : 'microphone',
+        ...(front ? { front } : {}),
+        ...(site ? { site } : {}),
+      },
       result,
       latency_ms: result.latency || 0,
       failed: aiCommandFailed(result),
@@ -1504,7 +2365,24 @@ export class WsProxy {
 
   // ── Tool Execution → Extension ──
 
-  sendToolToExtension(type, payload) {
+  /** Wait up to `ms` for the browser extension to connect (it reconnects within ~2 s). */
+  _waitForExtension(ms) {
+    if (this.extensionClients.size > 0) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const started = Date.now();
+      const check = setInterval(() => {
+        if (this.extensionClients.size > 0 || Date.now() - started >= ms) {
+          clearInterval(check);
+          resolve(this.extensionClients.size > 0);
+        }
+      }, 100);
+    });
+  }
+
+  async sendToolToExtension(type, payload) {
+    // Just after AbleSpeak or the browser restarts, the extension is a second
+    // or two from reconnecting: wait for it rather than fail at once.
+    if (this.extensionClients.size === 0) await this._waitForExtension(EXTENSION_GRACE_MS);
     return new Promise((resolve, reject) => {
       if (this.extensionClients.size === 0) {
         // No extension connected — every browser tool must fail loudly here.
@@ -1538,6 +2416,8 @@ export class WsProxy {
         });
       }, 10000);
 
+      // The (only) connected extension; the command is tied to that connection
+      const ext = [...this.extensionClients].at(-1);
       this.pendingToolCalls.set(callId, {
         resolve: (result) => {
           console.log(`[WsHub] ← Extension response for ${type}: ${JSON.stringify(result).substring(0, 200)}`);
@@ -1545,10 +2425,9 @@ export class WsProxy {
         },
         reject,
         timeout,
+        socket: ext,
       });
 
-      // Send to first connected extension
-      const ext = [...this.extensionClients][0];
       if (ext && ext.readyState === WebSocket.OPEN) {
         ext.send(message);
       } else {
@@ -1562,6 +2441,14 @@ export class WsProxy {
   // ── Broadcasting ──
 
   _broadcastDashboard(message) {
+    if (message?.type === 'chat_assistant_message' && message.text && !message.silent) {
+      // A reply the voice bar will say: the Speed tab waits for its first sound
+      if (this._turnLog) this._turnLog.replied = true;
+      // ...and the echo guard knows it, whichever path said it (a quick
+      // command's answer can be long: a web answer is 2–4 sentences)
+      this._lastTTSText = message.text;
+      this._lastTTSTime = Date.now();
+    }
     const raw = JSON.stringify(message);
     this.dashboardClients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -1591,7 +2478,7 @@ export class WsProxy {
     // keyboard shortcut, tray icon, or an app relaunch (HFI-1). Checked before sleep
     // so a dismissed-and-somehow-also-asleep overlay still responds to the same phrase.
     if (this._dismissed) {
-      if (WAKE_PHRASES_RE.test(t)) {
+      if (isWakePhrase(rawText)) {
         this._dismissed = false;
         this._sleeping = false;
         console.log('[Voice] 👋 Restored overlay from dismiss');
@@ -1610,7 +2497,7 @@ export class WsProxy {
 
     // ── While asleep: only a wake phrase resumes; everything else is ignored. ──
     if (this._sleeping) {
-      if (WAKE_PHRASES_RE.test(t)) {
+      if (isWakePhrase(rawText)) {
         this._sleeping = false;
         console.log('[Voice] 👋 Woke up');
         this._broadcastDashboard({
@@ -1626,6 +2513,12 @@ export class WsProxy {
       return true;
     }
 
+    // ── A question is waiting for yes or no ("Close this window?"): what was
+    // said answers it (_resolvePendingConfirmation), so "stop", "cancel" and
+    // "go to sleep" are a no. Taken as controls here, they left the question
+    // waiting and the next "okay…" ran it (test script SF-05). ──
+    if (this._pendingConfirmation) return false;
+
     // ── Interrupt: cancel the current operation / stop talking. ──
     // Skipped while dictating: "stop" there means "stop dictation mode" (the
     // dictation block below owns that), and a bare "stop" must stay typeable
@@ -1640,7 +2533,7 @@ export class WsProxy {
     }
 
     // ── Sleep: stop acting on commands until woken. ──
-    if (/^(go to sleep|sleep|stop listening|hush|pause listening)$/.test(t)) {
+    if (SLEEP_RE.test(t)) {
       this._sleeping = true;
       console.log('[Voice] 💤 Going to sleep — say "wake up" to resume');
       this._broadcastDashboard({
@@ -1817,7 +2710,17 @@ export class WsProxy {
       console.error('[WsHub] DB insert error:', err.message);
     }
     this._lastVoiceCommand = { id, text, failed, at: Date.now(), promptCount, session_id: ids.session_id };
-    if (this._turnLog) this._turnLog.commandId = id;
+    if (this._turnLog) {
+      // Done now: the Speed tab's "whole command", by the AI or without it
+      const log = this._turnLog;
+      log.commandId = id;
+      log.doneAt = Date.now();
+      log.failed = !!failed;
+      if (result?.usage?.calls && !log.think) log.think = result.usage;
+      log.path = log.think ? 'ai' : 'quick';
+      log.tool = payload?.fastTool || result?.toolCalls?.map(c => c.tool || c.name).filter(Boolean).join(', ') || null;
+    }
+    this._learnedStale = true; // a new AI command, a retry or a failure can change what is learned
   }
 
   /** "Undo that": the last command did the wrong thing, so it failed. */
@@ -1829,6 +2732,7 @@ export class WsProxy {
       return null;
     }
     try { updateCommandOutcome(last.id, 'error'); } catch {}
+    this._learnedStale = true; // an undone command is no longer one to learn from
     this._lastVoiceCommand = { ...last, failed: true, at: Date.now() };
     return this._lastVoiceCommand;
   }
@@ -1892,10 +2796,18 @@ export class WsProxy {
     return false;
   }
 
-  /** Undo the most recent action: go_back for navigation, Ctrl+Z otherwise. */
+  /**
+   * Undo the most recent action: its own way back when it gave one (Notepad's
+   * old text), go_back for navigation, Ctrl+Z otherwise.
+   */
   async _undoLast() {
     const last = this._actionHistory[this._actionHistory.length - 1];
     try {
+      if (last?.result?.undo?.tool) {
+        this._actionHistory.pop(); // taken back: a second "undo" goes further back
+        const undone = await this.aiEngine.toolRegistry.executeTool(last.result.undo.tool, last.result.undo.args || {}, this, { confirmed: true });
+        return !toolFailed(undone);
+      }
       if (last && /(^|_)(tab|navigate|link|open_url|create_tab|go_forward)(_|$)/.test(last.tool)) {
         await this.aiEngine.toolRegistry.executeTool('go_back', {}, this, { confirmed: true });
         this._autoFocusBrowser();
@@ -1998,6 +2910,22 @@ export class WsProxy {
    * "My name is Derek period I live in Nairobi comma Kenya period"
    * → "My name is Derek. I live in Nairobi, Kenya."
    */
+  /**
+   * Dictation autocorrect (listening.cleanUpDictation, on unless switched off):
+   * the words corrected by Gemini before they are typed, with what was typed
+   * just before as context. Very short phrases, exams and failures: as heard.
+   */
+  async _cleanDictation(heard) {
+    const listening = this._profile().listening || {};
+    if (listening.cleanUpDictation === false || this.examSession?.active || !this.aiEngine?.cleanDictation) return heard;
+    if (String(heard).trim().split(/\s+/).length < 3) return heard;
+    const result = await this.aiEngine.cleanDictation(heard, { before: this._dictationTyped || '', vocabulary: this._profile().vocabulary || [] });
+    if (this._turnLog && result.usage) this._turnLog.clean = result.usage;
+    if (result.changed) console.log(`[Voice] ✏️ Autocorrected in ${result.ms} ms: "${heard}" → "${result.text}"`);
+    else if (result.ms > 0) console.log(`[Voice] ✏️ Dictation checked in ${result.ms} ms: no change`);
+    return result.text;
+  }
+
   _processDictationText(rawText) {
     let text = rawText.trim();
     // Remove leading punctuation artifacts from Gemini transcription

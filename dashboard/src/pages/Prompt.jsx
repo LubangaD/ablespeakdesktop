@@ -197,7 +197,7 @@ export default function Prompt() {
           What AbleSpeak is told in each app. Choose a mode to see what changes.
         </p>
         <div className="p-3">
-          <div id="prompt-modes-label" className="px-3 py-1.5 text-[12px] leading-4 text-[#c9b8a5]">
+          <div id="prompt-modes-label" className="px-3 py-1.5 text-[12px] leading-4 text-[var(--ink-quiet)]">
             Prompt modes ({PROMPT_MODES.length})
           </div>
           <ul aria-labelledby="prompt-modes-label" className="flex flex-col gap-0.5 mt-1">
@@ -211,11 +211,11 @@ export default function Prompt() {
                     onClick={() => setActiveMode(mode.id)}
                     aria-current={on ? 'true' : undefined}
                     className={`min-h-[44px] px-3 rounded-lg text-[14px] flex items-center justify-between gap-2 text-left transition-colors ${on
-                      ? 'bg-[#18202d] text-[#ffc880] font-medium'
-                      : 'text-[#dae3f4] hover:bg-[#18202d]'}`}
+                      ? 'bg-[var(--sunken)] text-[var(--accent-soft)] font-medium'
+                      : 'text-[var(--ink)] hover:bg-[var(--sunken)]'}`}
                   >
                     <span className="truncate">{mode.label}</span>
-                    <span className="text-[12px] text-[#8b95a7] font-normal shrink-0 tabular-nums">{tools} {tools === 1 ? 'tool' : 'tools'}</span>
+                    <span className="text-[12px] text-[var(--ink-faint)] font-normal shrink-0 tabular-nums">{tools} {tools === 1 ? 'tool' : 'tools'}</span>
                   </button>
                 </li>
               );
@@ -230,7 +230,7 @@ export default function Prompt() {
           <div className={`flex items-start justify-between flex-wrap gap-4 pb-4 border-b ${DIVIDER}`}>
             <div className="min-w-0 flex flex-col gap-1">
               <div className="flex items-baseline gap-2 flex-wrap">
-                <h2 className="font-mono text-[15px] leading-6 font-semibold text-[#dae3f4] break-all">{activeMode}</h2>
+                <h2 className="font-mono text-[15px] leading-6 font-semibold text-[var(--ink)] break-all">{activeMode}</h2>
                 <span className={MUTED}>{modeLabel} mode</span>
               </div>
               <p className="flex items-center gap-1.5 text-[13px] leading-5">
@@ -241,7 +241,7 @@ export default function Prompt() {
 
             <div className="flex items-center gap-2">
               <button type="button" onClick={handleCopy} className={QUIET}>
-                <Icon name={copyState === 'copied' ? 'check' : 'content_copy'} className={`text-[18px] ${copyState === 'copied' ? INK.ok : 'text-[#c9b8a5]'}`} />
+                <Icon name={copyState === 'copied' ? 'check' : 'content_copy'} className={`text-[18px] ${copyState === 'copied' ? INK.ok : 'text-[var(--ink-quiet)]'}`} />
                 <span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? "Couldn't copy" : `Copy ${docLabel.toLowerCase()}`}</span>
               </button>
               <span className="sr-only" role="status">
@@ -256,7 +256,7 @@ export default function Prompt() {
               These outlines are written into the dashboard, and some name tools AbleSpeak doesn&rsquo;t have. The server
               writes the real prompt fresh for every request and doesn&rsquo;t share it with the dashboard yet. For the
               tools the AI really has, see the{' '}
-              <Link to="/developer/tools" className="text-[#ffc880] underline underline-offset-2 hover:text-[#dae3f4]">Tools tab</Link>.
+              <Link to="/developer/tools" className="text-[var(--accent-soft)] underline underline-offset-2 hover:text-[var(--ink)]">Tools tab</Link>.
             </p>
           </div>
 
@@ -276,8 +276,8 @@ export default function Prompt() {
                       tabIndex={selected ? 0 : -1}
                       onClick={() => setActiveTab(id)}
                       className={`min-h-[44px] px-3 -mb-px border-b-2 text-[14px] transition-colors ${selected
-                        ? 'border-[#f5a623] text-[#ffc880] font-medium'
-                        : 'border-transparent text-[#c9b8a5] hover:text-[#dae3f4]'}`}
+                        ? 'border-[var(--accent)] text-[var(--accent-soft)] font-medium'
+                        : 'border-transparent text-[var(--ink-quiet)] hover:text-[var(--ink)]'}`}
                     >
                       {label}
                     </button>
@@ -291,16 +291,16 @@ export default function Prompt() {
               role="tabpanel"
               aria-labelledby={`prompt-tab-${activeTab}`}
               tabIndex={0}
-              className="bg-[#0f1724] border border-white/[0.06] rounded-lg p-4 overflow-x-auto font-mono text-[13px] leading-6 text-[#dae3f4]"
+              className="bg-[var(--sunken)] border border-white/[0.06] rounded-lg p-4 overflow-x-auto font-mono text-[13px] leading-6 text-[var(--ink)]"
             >
               {renderMarkdown(docText)}
             </div>
           </div>
         </div>
 
-        <div className={`pt-4 border-t ${DIVIDER} flex items-center justify-between flex-wrap gap-x-4 gap-y-1 text-[12px] leading-5 text-[#c9b8a5]`}>
-          <span>Written in: <code className="font-mono text-[#dae3f4]">dashboard/src/pages/Prompt.jsx</code></span>
-          <span>Live prompt: <strong className="font-normal text-[#dae3f4]">built by ai-engine.js</strong></span>
+        <div className={`pt-4 border-t ${DIVIDER} flex items-center justify-between flex-wrap gap-x-4 gap-y-1 text-[12px] leading-5 text-[var(--ink-quiet)]`}>
+          <span>Written in: <code className="font-mono text-[var(--ink)]">dashboard/src/pages/Prompt.jsx</code></span>
+          <span>Live prompt: <strong className="font-normal text-[var(--ink)]">built by ai-engine.js</strong></span>
         </div>
       </section>
     </div>
@@ -310,27 +310,27 @@ export default function Prompt() {
 // Lightweight markdown renderer for the prompt document, in calm colours
 function renderMarkdown(text) {
   return text.split('\n').map((line, i) => {
-    if (line.startsWith('## ')) return <div key={i} className="mt-3 font-medium text-[#c9b8a5]">{line.slice(3)}</div>;
-    if (line.startsWith('# ')) return <div key={i} className="font-semibold text-[#dae3f4]">{line.slice(2)}</div>;
+    if (line.startsWith('## ')) return <div key={i} className="mt-3 font-medium text-[var(--ink-quiet)]">{line.slice(3)}</div>;
+    if (line.startsWith('# ')) return <div key={i} className="font-semibold text-[var(--ink)]">{line.slice(2)}</div>;
     if (line.startsWith('- ')) {
       const rest = line.slice(2);
       const idx = rest.indexOf(':');
       return (
         <div key={i} className="flex gap-2 pl-2">
-          <span className="text-[#4a5466]" aria-hidden="true">–</span>
+          <span className="text-[var(--idle)]" aria-hidden="true">–</span>
           {idx > -1 ? (
             <span className="min-w-0 [overflow-wrap:anywhere]">
-              <span className="text-[#ffc880]">{rest.slice(0, idx)}</span>
-              <span className="text-[#c9b8a5]">{rest.slice(idx)}</span>
+              <span className="text-[var(--accent-soft)]">{rest.slice(0, idx)}</span>
+              <span className="text-[var(--ink-quiet)]">{rest.slice(idx)}</span>
             </span>
           ) : (
-            <span className="min-w-0 [overflow-wrap:anywhere] text-[#ffc880]">{rest}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere] text-[var(--accent-soft)]">{rest}</span>
           )}
         </div>
       );
     }
-    if (/^\d+\.\s/.test(line)) return <div key={i} className="pl-2 text-[#c9b8a5]">{line}</div>;
+    if (/^\d+\.\s/.test(line)) return <div key={i} className="pl-2 text-[var(--ink-quiet)]">{line}</div>;
     if (line.trim() === '') return <div key={i} className="h-3" aria-hidden="true" />;
-    return <div key={i} className="text-[#c9b8a5] [overflow-wrap:anywhere]">{line}</div>;
+    return <div key={i} className="text-[var(--ink-quiet)] [overflow-wrap:anywhere]">{line}</div>;
   });
 }

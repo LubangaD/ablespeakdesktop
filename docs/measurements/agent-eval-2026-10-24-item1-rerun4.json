@@ -1,0 +1,411 @@
+{
+  "date": "2026-10-24 01:08",
+  "label": "item1-rerun4",
+  "model": "gemini-2.5-flash",
+  "tasks": 3,
+  "runs": 1,
+  "across": {
+    "completed": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "completedAndSaid": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "falseDone": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "replans": {
+      "min": 6,
+      "median": 6,
+      "max": 6
+    },
+    "medianSeconds": {
+      "min": 39,
+      "median": 39,
+      "max": 39
+    }
+  },
+  "byRun": [
+    {
+      "run": 1,
+      "startedAt": "2026-10-23T22:08:05.596Z",
+      "tasks": 3,
+      "completed": 0,
+      "completionRate": 0,
+      "completedAndSaid": 0,
+      "completedAndSaidRate": 0,
+      "falseDone": 0,
+      "replanned": 3,
+      "recovered": 0,
+      "recoveryRate": 0,
+      "replans": 6,
+      "medianSeconds": 39,
+      "results": [
+        {
+          "id": "explorer-open-file",
+          "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+          "status": "failed",
+          "said": "I couldn't finish: No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable.. I did 4 of 5 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Home - File Explorer' and many File Explorer specific controls appeared, indicating that File Explorer was successfully opened."
+            },
+            {
+              "do": "Open Documents",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed to 'Documents - File Explorer' and the screen now shows the contents of the Documents folder, which matches the expected outcome."
+            },
+            {
+              "do": "Open ablespeak-eval.txt",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The scroll bar value changed from 0 to 99, and different list items are now visible, indicating a successful scroll down."
+            },
+            {
+              "do": "Open \"ablespeak-eval.txt\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The scrollbar value changed from 99 to 99, indicating it was already at the bottom, and the tool reported success."
+            },
+            {
+              "do": "Open \"ablespeak-eval.txt\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 46610,
+          "checks": [
+            {
+              "kind": "window",
+              "app": "notepad",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "I couldn't find an open window for \"notepad\"."
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "explorer-open-pdf",
+          "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+          "status": "failed",
+          "said": "I couldn't finish: The screen did not change after the scroll down action, indicating the scroll did not work as intended.. I did 2 of 4 steps.",
+          "steps": [
+            {
+              "do": "Open File Explorer",
+              "tool": "open_application",
+              "ok": true,
+              "why": "File Explorer was opened, and the window title changed to 'Home - File Explorer', indicating it is now open."
+            },
+            {
+              "do": "Open \"ablespeak-eval.pdf\"",
+              "tool": "uia_act",
+              "ok": false,
+              "why": "The step was to open 'ablespeak-eval.pdf', but the screen shows 'Documents - File Explorer' and the PDF is not open."
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The 'Items View' list scrolled down, as evidenced by new list items appearing and old ones disappearing, and the scrollbar value changing from 0 to 99."
+            },
+            {
+              "do": "Open \"ablespeak-eval.pdf\"",
+              "tool": "click_desktop_element",
+              "ok": false,
+              "why": "No element named \"ablespeak-eval.pdf\" found. Use list_desktop_elements to see what is clickable."
+            },
+            {
+              "do": "Scroll \"Items View\" \"down\"",
+              "tool": "uia_act",
+              "ok": false,
+              "why": "The screen did not change after the scroll down action, indicating the scroll did not work as intended."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 31869,
+          "checks": [
+            {
+              "kind": "window",
+              "titleIncludes": "ablespeak-eval",
+              "ok": false,
+              "detail": "window \"Documents - File Explorer\""
+            }
+          ],
+          "passed": false
+        },
+        {
+          "id": "notepad-save-as",
+          "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+          "status": "failed",
+          "said": "I couldn't finish: The tool could not find the 'File name:' text box, and nothing changed on the screen, indicating the text was not typed.. I did 3 of 5 steps. I took back the typing I did.",
+          "steps": [
+            {
+              "do": "Open Notepad",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The step's purpose was to open Notepad, and the screen now shows a Notepad window."
+            },
+            {
+              "do": "Type \"hello there\"",
+              "tool": "uia_act",
+              "ok": true,
+              "why": "The text editor now contains 'hello there', which was the purpose of the step."
+            },
+            {
+              "do": "Press Ctrl+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'Save As' window did not appear, and nothing visible changed on the screen after pressing Ctrl+S."
+            },
+            {
+              "do": "Press Ctrl+Shift+S",
+              "tool": "send_system_keys",
+              "ok": false,
+              "why": "The 'Save As' window did not appear after pressing Ctrl+Shift+S, and nothing visible changed on the screen."
+            },
+            {
+              "do": "Open \"Documents\"",
+              "tool": "open_application",
+              "ok": true,
+              "why": "The window title changed from 'Save as' to 'Documents - File Explorer', and the screen now shows the contents of the 'Documents' folder, which aligns with the step's purpose."
+            },
+            {
+              "do": "Type \"eval-saved.txt\" into the \"File name:\" text box",
+              "tool": "uia_query",
+              "ok": false,
+              "why": "The tool could not find the 'File name:' text box, and nothing changed on the screen, indicating the text was not typed."
+            }
+          ],
+          "replans": 2,
+          "confirmations": 0,
+          "ms": 39301,
+          "checks": [
+            {
+              "kind": "file",
+              "name": "eval-saved.txt",
+              "includes": [
+                "hello there"
+              ],
+              "ok": false,
+              "detail": "eval-saved.txt not in Documents"
+            }
+          ],
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "run": 1,
+  "startedAt": "2026-10-23T22:08:05.596Z",
+  "completed": 0,
+  "completionRate": 0,
+  "completedAndSaid": 0,
+  "completedAndSaidRate": 0,
+  "falseDone": 0,
+  "replanned": 3,
+  "recovered": 0,
+  "recoveryRate": 0,
+  "replans": 6,
+  "medianSeconds": 39,
+  "results": [
+    {
+      "id": "explorer-open-file",
+      "instruction": "Open File Explorer, go to Documents and open the file ablespeak-eval.txt",
+      "status": "failed",
+      "said": "I couldn't finish: No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable.. I did 4 of 5 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Home - File Explorer' and many File Explorer specific controls appeared, indicating that File Explorer was successfully opened."
+        },
+        {
+          "do": "Open Documents",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed to 'Documents - File Explorer' and the screen now shows the contents of the Documents folder, which matches the expected outcome."
+        },
+        {
+          "do": "Open ablespeak-eval.txt",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The scroll bar value changed from 0 to 99, and different list items are now visible, indicating a successful scroll down."
+        },
+        {
+          "do": "Open \"ablespeak-eval.txt\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The scrollbar value changed from 99 to 99, indicating it was already at the bottom, and the tool reported success."
+        },
+        {
+          "do": "Open \"ablespeak-eval.txt\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "No element named \"ablespeak-eval.txt\" found. Use list_desktop_elements to see what is clickable."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 46610,
+      "checks": [
+        {
+          "kind": "window",
+          "app": "notepad",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "I couldn't find an open window for \"notepad\"."
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "explorer-open-pdf",
+      "instruction": "Open File Explorer, go to Documents and open ablespeak-eval.pdf",
+      "status": "failed",
+      "said": "I couldn't finish: The screen did not change after the scroll down action, indicating the scroll did not work as intended.. I did 2 of 4 steps.",
+      "steps": [
+        {
+          "do": "Open File Explorer",
+          "tool": "open_application",
+          "ok": true,
+          "why": "File Explorer was opened, and the window title changed to 'Home - File Explorer', indicating it is now open."
+        },
+        {
+          "do": "Open \"ablespeak-eval.pdf\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The step was to open 'ablespeak-eval.pdf', but the screen shows 'Documents - File Explorer' and the PDF is not open."
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The 'Items View' list scrolled down, as evidenced by new list items appearing and old ones disappearing, and the scrollbar value changing from 0 to 99."
+        },
+        {
+          "do": "Open \"ablespeak-eval.pdf\"",
+          "tool": "click_desktop_element",
+          "ok": false,
+          "why": "No element named \"ablespeak-eval.pdf\" found. Use list_desktop_elements to see what is clickable."
+        },
+        {
+          "do": "Scroll \"Items View\" \"down\"",
+          "tool": "uia_act",
+          "ok": false,
+          "why": "The screen did not change after the scroll down action, indicating the scroll did not work as intended."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 31869,
+      "checks": [
+        {
+          "kind": "window",
+          "titleIncludes": "ablespeak-eval",
+          "ok": false,
+          "detail": "window \"Documents - File Explorer\""
+        }
+      ],
+      "passed": false
+    },
+    {
+      "id": "notepad-save-as",
+      "instruction": "Open Notepad, type hello there, then save the file as eval-saved.txt in Documents",
+      "status": "failed",
+      "said": "I couldn't finish: The tool could not find the 'File name:' text box, and nothing changed on the screen, indicating the text was not typed.. I did 3 of 5 steps. I took back the typing I did.",
+      "steps": [
+        {
+          "do": "Open Notepad",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The step's purpose was to open Notepad, and the screen now shows a Notepad window."
+        },
+        {
+          "do": "Type \"hello there\"",
+          "tool": "uia_act",
+          "ok": true,
+          "why": "The text editor now contains 'hello there', which was the purpose of the step."
+        },
+        {
+          "do": "Press Ctrl+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'Save As' window did not appear, and nothing visible changed on the screen after pressing Ctrl+S."
+        },
+        {
+          "do": "Press Ctrl+Shift+S",
+          "tool": "send_system_keys",
+          "ok": false,
+          "why": "The 'Save As' window did not appear after pressing Ctrl+Shift+S, and nothing visible changed on the screen."
+        },
+        {
+          "do": "Open \"Documents\"",
+          "tool": "open_application",
+          "ok": true,
+          "why": "The window title changed from 'Save as' to 'Documents - File Explorer', and the screen now shows the contents of the 'Documents' folder, which aligns with the step's purpose."
+        },
+        {
+          "do": "Type \"eval-saved.txt\" into the \"File name:\" text box",
+          "tool": "uia_query",
+          "ok": false,
+          "why": "The tool could not find the 'File name:' text box, and nothing changed on the screen, indicating the text was not typed."
+        }
+      ],
+      "replans": 2,
+      "confirmations": 0,
+      "ms": 39301,
+      "checks": [
+        {
+          "kind": "file",
+          "name": "eval-saved.txt",
+          "includes": [
+            "hello there"
+          ],
+          "ok": false,
+          "detail": "eval-saved.txt not in Documents"
+        }
+      ],
+      "passed": false
+    }
+  ]
+}
